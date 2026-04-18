@@ -4,6 +4,30 @@ import { getAuth } from 'firebase/auth';
 import type { Firestore } from 'firebase/firestore';
 import type { Auth } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
+import { collection, getDocs, query, limit } from 'firebase/firestore'; // <- 補這行
+
+export async function debugFirestoreBinding() {
+  const app = getTaiduApp();
+  const db = getDB();
+
+  console.group('🔥 Firebase Binding');
+  console.log('projectId:', app.options.projectId);
+  console.log('authDomain:', app.options.authDomain);
+  console.log('databaseId(from config):', (firebaseConfig as any).firestoreDatabaseId ?? '(default)');
+  console.log('db app projectId:', db.app.options.projectId);
+  console.groupEnd();
+}
+
+export async function testShopsRead() {
+  try {
+    const db = getDB();
+    const snap = await getDocs(query(collection(db, 'shops'), limit(5)));
+    console.log(`✅ shops readable, count=${snap.size}`);
+    snap.forEach((d) => console.log('shop:', d.id, d.data()));
+  } catch (error: any) {
+    handleFirestoreError(error, 'list', 'shops');
+  }
+}
 
 export interface FirestoreErrorInfo {
   error: string;
@@ -91,3 +115,5 @@ export const db = getDB();
 export const auth = getTaiduAuth();
 
 testConnection();
+debugFirestoreBinding();
+testShopsRead();
