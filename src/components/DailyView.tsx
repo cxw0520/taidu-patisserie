@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
+import { runTransaction } from 'firebase/firestore';
 
 export default function DailyView({ 
   currentDate, 
@@ -46,25 +47,56 @@ export default function DailyView({
   const [dailyData, setDailyData] = useState<DailyReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const normalizeDateKey = (v: string) => {
+    const [y, m = '1', d = '1'] = v.split('-');
+    return `${y}-${String(Number(m)).padStart(2, '0')}-${String(Number(d)).padStart(2, '0')}`;
+  };
+  useEffect(() => {
+    (async () => {
+      const q = query(collection(db, 'shops', shopId, 'daily'), limit(20), orderBy('date', 'desc'));
+      const s = await getDocs(q);
+      console.log('[DailyView] available daily docs:', s.docs.map((d) => ({ id: d.id, ...d.data() })));
+    })();
+  }, [shopId]);
 
   useEffect(() => {
-    const docRef = doc(db, 'shops', shopId, 'daily', currentDate);
-    const unsub = onSnapshot(docRef, (snap) => {
-      if (snap.exists()) {
-        setDailyData(snap.data() as DailyReport);
-      } else {
-        setDailyData({
-          date: currentDate,
-          orders: [],
-          ar: { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 },
-          inventory: {},
-          losses: [],
-          packagingUsage: {}
-        });
-      }
-      setLoading(false);
-    });
-    return unsub;
+    let unsub: (() => void) | undefined;
+
+    const start = async () => {
+      const padKey = currentDate; // e.g. 2026-04-17
+      const legacyKey = currentDate.replace(
+        /^(\d{4})-0?(\d{1,2})-0?(\d{1,2})$/,
+        (_, y, m, d) => `${y}-${Number(m)}-${Number(d)}`
+      ); // e.g. 2026-4-17
+
+      const padRef = doc(db, 'shops', shopId, 'daily', padKey);
+      const legacyRef = doc(db, 'shops', shopId, 'daily', legacyKey);
+
+      const padSnap = await getDoc(padRef);
+      const targetRef = !padSnap.exists() && legacyKey !== padKey ? legacyRef : padRef;
+
+      unsub = onSnapshot(targetRef, (snap) => {
+        if (snap.exists()) {
+          setDailyData(snap.data() as DailyReport);
+        } else {
+          setDailyData({
+            date: currentDate,
+            orders: [],
+            ar: { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 },
+            inventory: {},
+            losses: [],
+            packagingUsage: {},
+          });
+        }
+        setLoading(false);
+      });
+    };
+
+    start();
+
+    return () => {
+      if (unsub) unsub();
+    };
   }, [currentDate, shopId]);
 
   // Debounced Save
@@ -146,31 +178,54 @@ export default function DailyView({
     try {
       // Basic consumption auto-deduction based on daily sales
       const consumption: Record<string, number> = {};
-      dailyData.orders.forEach(o => {
-        [...settings.giftItems, ...settings.singleItems].forEach(item => {
+      dailyData.orders.forEach((o) => {
+        [...settings.giftItems, ...settings.singleItems].forEach((item) => {
           const qty = o.items[item.id] || 0;
           if (qty > 0 && item.materialRecipe) {
             Object.entries(item.materialRecipe).forEach(([matId, usage]) => {
-              consumption[matId] = (consumption[matId] || 0) + (qty * usage);
+              consumption[matId] = (consumption[matId] || 0) + qty * usage;
             });
           }
         });
       });
 
-      // Execute deduction
+      // Execute deduction (transaction-safe)
       for (const [matId, qty] of Object.entries(consumption)) {
-        const ref = doc(db, 'shops', shopId, 'materials', matId);
-        const md = await getDoc(ref);
-        if (md.exists()) {
-          const mat = md.data();
-          await setDoc(ref, { ...mat, stock: mat.stock - qty });
-        }
+        await runTransaction(db, async (tx) => {
+          const ref = doc(db, 'shops', shopId, 'materials', matId);
+          const snap = await tx.get(ref);
+
+          if (!snap.exists()) {
+            throw new Error(`MATERIAL_NOT_FOUND:${matId}`);
+          }
+
+          const mat = snap.data() as any;
+          const currentStock = Number(mat.stock || 0);
+          const nextStock = currentStock - Number(qty || 0);
+
+          if (Number.isNaN(nextStock)) {
+            throw new Error(`INVALID_STOCK_CALC:${matId}`);
+          }
+
+          tx.set(
+            ref,
+            {
+              ...mat,
+              stock: nextStock,
+              updatedAt: new Date().toISOString(),
+            },
+            { merge: true }
+          );
+        });
       }
+
       alert('庫存扣減完成！');
-    } catch(e) {
-      alert('扣減庫存發生錯誤');
+    } catch (e: any) {
+      alert(`扣減庫存發生錯誤: ${e?.message || e}`);
+      console.error(e);
+    } finally {
+      setSyncingInv(false);
     }
-    setSyncingInv(false);
   };
 
   if (loading || !dailyData) return null;

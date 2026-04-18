@@ -22,7 +22,7 @@ import { onAuthStateChanged, signInWithPopup, GoogleAuthProvider, signOut, User 
 import { doc, getDoc, setDoc, onSnapshot, collection, query, where, getDocs } from 'firebase/firestore';
 import { todayISO, monthISO, cn, uid } from './lib/utils';
 import { Settings, DailyReport, JournalEntry, COAItem } from './types';
-
+import { handleFirestoreError } from './lib/firebase';
 // Components (Inline for now to ensure visibility)
 // We'll move these to separate chunks if it gets too large
 import JournalView from './components/JournalView';
@@ -30,6 +30,8 @@ import DailyView from './components/DailyView';
 import MonthlyView from './components/MonthlyView';
 import CostView from './components/CostView';
 import InventoryView from './components/InventoryView';
+import type { ShopSettings } from './types';
+
 
 const DEFAULT_SETTINGS: Settings = {
   giftItems: [
@@ -73,21 +75,51 @@ export default function App() {
   useEffect(() => {
     if (!user) return;
 
+    (async () => {
+      try {
+        // 1) 強制建立 shop root doc（這步做完 console 就會看到 tai_du_2025）
+        await setDoc(
+          doc(db, 'shops', shopId),
+          {
+            id: shopId,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+            ownerUid: auth.currentUser?.uid ?? null,
+          },
+          { merge: true }
+        );
+
+        // 2) bootstrap doc（你原本那段）
+        await setDoc(
+          doc(db, 'shops', shopId, 'meta', 'bootstrap'),
+          {
+            at: new Date().toISOString(),
+            from: 'app-bootstrap',
+            uid: auth.currentUser?.uid ?? null,
+          },
+          { merge: true }
+        );
+
+        // 3) settings init
+        const settingsRef = doc(db, 'shops', shopId, 'meta', 'settings');
+        const snap = await getDoc(settingsRef);
+        if (!snap.exists()) {
+          await setDoc(settingsRef, DEFAULT_SETTINGS);
+        }
+
+        console.log('[bootstrap] root/meta/settings ready');
+      } catch (e: any) {
+        console.error('[bootstrap] failed:', e?.code, e?.message, e);
+      }
+    })();
+
     const settingsRef = doc(db, 'shops', shopId, 'meta', 'settings');
     const unsub = onSnapshot(settingsRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data() as Settings;
-        setSettings(data);
-      } else {
-        // Init default settings if not exists
-        setDoc(settingsRef, DEFAULT_SETTINGS).catch(e => console.error("Failed to init settings:", e));
-      }
-    }, (error) => {
-      console.error("Firestore settings permission error:", error);
+      if (snap.exists()) setSettings(snap.data() as Settings);
     });
 
     return unsub;
-  }, [user]);
+  }, [user, shopId]);
 
   const handleLogin = async () => {
     setLoginError(null);
@@ -103,7 +135,7 @@ export default function App() {
       }
     }
   };
-
+  
   const tabs = [
     { id: 'journal', label: '日記簿', icon: ClipboardList },
     { id: 'daily', label: '日報表', icon: Calendar },
