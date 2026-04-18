@@ -87,10 +87,8 @@ export function getTaiduAuth(): Auth {
 export function getDB(): Firestore {
   if (!dbInstance) {
     const app = getTaiduApp();
-
-    const dbIdRaw = (firebaseConfig as any).firestoreDatabaseId;
-    const dbId = !dbIdRaw || dbIdRaw === '(default)' ? '(default)' : dbIdRaw;
-
+    const dbId = (firebaseConfig as any).firestoreDatabaseId || '(default)';
+    // Do not coerce 'default' to '(default)' because 'default' can be a valid named database.
     dbInstance = dbId === '(default)' ? getFirestore(app) : getFirestore(app, dbId);
   }
   return dbInstance;
