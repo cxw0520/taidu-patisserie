@@ -1,0 +1,163 @@
+{
+  "entities": {
+    "Settings": {
+      "title": "Shop Settings",
+      "description": "Global settings for items and packaging",
+      "type": "object",
+      "properties": {
+        "giftItems": { "type": "array" },
+        "singleItems": { "type": "array" },
+        "packagingItems": { "type": "array" }
+      }
+    },
+    "JournalEntry": {
+      "title": "Journal Entry",
+      "description": "Accounting journal voucher following double-entry principles",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "year": { "type": "number" },
+        "voucherNo": { "type": "string", "description": "Unique voucher number (e.g., JV-20240401-01)" },
+        "description": { "type": "string", "description": "General explanation of the entry" },
+        "lines": { 
+          "type": "array",
+          "description": "List of debit/credit lines"
+        },
+        "debitTotal": { "type": "number" },
+        "creditTotal": { "type": "number" }
+      },
+      "required": ["id", "date", "voucherNo", "lines", "debitTotal", "creditTotal"]
+    },
+    "DailyReport": {
+      "title": "Daily Report",
+      "description": "Daily sales, inventory, and operational data for Taidu 22",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date", "description": "ISO Date YYYY-MM-DD" },
+        "orders": { 
+          "type": "array",
+          "description": "List of customer orders for the day"
+        },
+        "ar": { 
+          "type": "object",
+          "description": "Accounts Receivable and Logistics tracking",
+          "properties": {
+            "accum": { "type": "number", "description": "Accumulated AR from previous days" },
+            "collect": { "type": "number", "description": "AR collected today" },
+            "logSpent": { "type": "number", "description": "Actual logistics shipping cost spent" },
+            "actualTotal": { "type": "number", "description": "Today's net cash flow total" }
+          }
+        },
+        "inventory": { 
+          "type": "object", 
+          "description": "Stock tracking by flavor ID"
+        },
+        "losses": { 
+          "type": "array",
+          "description": "Details of production loss or damaged items"
+        },
+        "packagingUsage": { 
+          "type": "object",
+          "description": "Count of boxes/bags used"
+        }
+      },
+      "required": ["date"]
+    },
+    "MonthlyCost": {
+      "title": "Monthly Fixed Costs",
+      "description": "Fixed costs for a specific month",
+      "type": "object",
+      "properties": {
+        "ym": { "type": "string" },
+        "fixed": { "type": "object" }
+      }
+    },
+    "FixedAsset": {
+      "title": "Fixed Asset",
+      "description": "Equipment or property being depreciated",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "status": { "type": "string", "enum": ["使用中", "已售出", "閒置"] },
+        "category": { "type": "string" },
+        "name": { "type": "string" },
+        "purchaseDate": { "type": "string", "format": "date" },
+        "totalCost": { "type": "number" },
+        "quantity": { "type": "number" },
+        "usefulLife": { "type": "number" },
+        "residualValue": { "type": "number" }
+      }
+    },
+    "COAList": {
+      "title": "Chart of Accounts List",
+      "description": "List of account definitions",
+      "type": "object",
+      "properties": {
+        "list": { "type": "array" }
+      }
+    },
+    "DepLog": {
+      "title": "Depreciation Log",
+      "description": "Record of which months have already had depreciation recorded",
+      "type": "object"
+    },
+    "Purchase": {
+      "title": "Purchase Record",
+      "description": "Records of materials purchased",
+      "type": "object"
+    },
+    "Material": {
+      "title": "Material Inventory",
+      "description": "Inventory definition and current stock",
+      "type": "object"
+    },
+    "InventoryAdj": {
+      "title": "Inventory Adjustment",
+      "description": "Record of stock take and discrepancies",
+      "type": "object"
+    }
+  },
+  "firestore": {
+    "/shops/{shopId}/meta/settings": {
+      "schema": "Settings",
+      "description": "Global shop settings"
+    },
+    "/shops/{shopId}/purchases/{purchaseId}": {
+      "schema": "Purchase",
+      "description": "Records of materials bought"
+    },
+    "/shops/{shopId}/materials/{materialId}": {
+      "schema": "Material",
+      "description": "List of materials tracking inventory stock and average cost"
+    },
+    "/shops/{shopId}/inventoryAdj/{adjId}": {
+      "schema": "InventoryAdj",
+      "description": "Direct adjustments to inventory balances"
+    },
+    "/shops/{shopId}/meta/coa": {
+      "schema": "COAList",
+      "description": "Chart of accounts configuration"
+    },
+    "/shops/{shopId}/meta/depLog": {
+      "schema": "DepLog",
+      "description": "Monthly depreciation提列 status"
+    },
+    "/shops/{shopId}/entries/{entryId}": {
+      "schema": "JournalEntry",
+      "description": "Journal vouchers"
+    },
+    "/shops/{shopId}/daily/{date}": {
+      "schema": "DailyReport",
+      "description": "Daily operational data"
+    },
+    "/shops/{shopId}/monthly/{ym}": {
+      "schema": "MonthlyCost",
+      "description": "Monthly fixed expenses"
+    },
+    "/shops/{shopId}/assets/{assetId}": {
+      "schema": "FixedAsset",
+      "description": "Fixed asset inventory"
+    }
+  }
+}

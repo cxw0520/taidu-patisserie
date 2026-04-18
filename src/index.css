@@ -1,0 +1,83 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Noto Sans TC", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif-brand: "Georgia", serif;
+  
+  --color-coffee-50: #FDFBF7;
+  --color-coffee-100: #D7CCC8;
+  --color-coffee-200: #BCAAA4;
+  --color-coffee-300: #A1887F;
+  --color-coffee-400: #8D6E63;
+  --color-coffee-500: #6D4C41;
+  --color-coffee-600: #5D2E17;
+  --color-coffee-700: #4E342E;
+  --color-coffee-800: #3E2723;
+  --color-coffee-900: #2D1B18;
+  
+  --color-cream: #FFFDF5;
+  --color-rose-brand: #ff8fa3;
+  --color-mint-brand: #83c5be;
+  
+  /* Primary alias to bridge existing classes */
+  --color-primary-brand: #ff8fa3;
+  --color-primary-brand-light: #ffb3c1;
+  --color-secondary-brand: #ffcbf2;
+  --color-accent-brand: #83c5be;
+  --color-success-brand: #2b9348;
+  --color-danger-brand: #ef233c;
+}
+
+@layer base {
+  body {
+    @apply bg-cream text-coffee-800;
+    background-image: linear-gradient(135deg, #fdfbf7 0%, #fff0f3 100%);
+    background-attachment: fixed;
+  }
+  
+  h1 { @apply font-serif-brand; }
+}
+
+@layer components {
+  .glass-panel {
+    @apply bg-white/75 backdrop-blur-lg border border-white/40 rounded-[32px] shadow-[0_10px_30px_rgba(0,0,0,0.05)];
+  }
+
+  .nav-tab {
+    @apply px-6 py-2 text-[15px] font-medium tracking-wider text-coffee-400 rounded-full transition-all duration-300;
+  }
+
+  .nav-tab-active {
+    @apply bg-rose-brand text-white shadow-[0_4px_15px_rgba(255,143,163,0.3)];
+  }
+
+  .section-title {
+    @apply text-lg font-semibold text-coffee-600 relative inline-block mb-5;
+  }
+
+  .section-title::after {
+    content: '';
+    @apply absolute -bottom-1 left-0 w-10 h-[2px] bg-rose-brand;
+  }
+
+  .kpi-card {
+    @apply bg-white p-4 rounded-[20px] flex flex-col gap-1;
+  }
+
+  .kpi-label {
+    @apply text-[12px] text-coffee-400 uppercase font-bold;
+  }
+
+  .kpi-value {
+    @apply text-2xl font-serif-brand font-bold text-coffee-600 truncate;
+  }
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
