@@ -76,22 +76,24 @@ export function getTaiduApp() {
   return getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 }
 
-export function getDB(): Firestore {
-  if (!dbInstance) {
-    const app = getTaiduApp();
-    const dbId = firebaseConfig.firestoreDatabaseId || '(default)';
-    // Simplified initialization - if it's '(default)', some older SDKs prefer no second arg
-    dbInstance = dbId === '(default)' ? getFirestore(app) : getFirestore(app, dbId);
-  }
-  return dbInstance;
-}
-
 export function getTaiduAuth(): Auth {
   if (!authInstance) {
     const app = getTaiduApp();
     authInstance = getAuth(app);
   }
   return authInstance;
+}
+
+export function getDB(): Firestore {
+  if (!dbInstance) {
+    const app = getTaiduApp();
+
+    const dbIdRaw = (firebaseConfig as any).firestoreDatabaseId;
+    const dbId = !dbIdRaw || dbIdRaw === '(default)' ? '(default)' : dbIdRaw;
+
+    dbInstance = dbId === '(default)' ? getFirestore(app) : getFirestore(app, dbId);
+  }
+  return dbInstance;
 }
 
 // Diagnostic helper
