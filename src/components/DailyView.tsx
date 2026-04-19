@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { doc, onSnapshot, setDoc, getDoc, query, collection, where, getDocs, limit, orderBy, runTransaction } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, query, collection, where, getDocs, limit, orderBy, runTransaction, writeBatch } from 'firebase/firestore';
 import { fmt, uid, parseNum, todayISO, normalizeFlavorName } from '../lib/utils';
 import { DailyReport, Settings, Order, LossEntry } from '../types';
 import { 
@@ -1245,16 +1245,29 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
       const p2 = fmtYMD(sunday);
       setWeekRange(`${p1} 至 ${p2}`);
 
-      const q = query(
-        collection(db, 'shops', shopId, 'daily'),
-        where('date', '>=', p1),
-        where('date', '<=', p2)
-      );
-      const snap = await getDocs(q);
-      setWeeklyData(snap.docs.map(doc => doc.data() as DailyReport));
+      // Read by document id (YYYY-MM-DD) to avoid relying on mutable `date` field.
+      const days: DailyReport[] = [];
+      for (let i = 0; i < 7; i++) {
+        const d = new Date(monday);
+        d.setDate(monday.getDate() + i);
+        const key = fmtYMD(d);
+        const ref = doc(db, 'shops', shopId, 'daily', key);
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          days.push({ ...(snap.data() as DailyReport), date: key });
+        }
+      }
+      setWeeklyData(days);
     };
     fetchWeekly();
   }, [currentDate, shopId, dailyData, refreshKey]); // adding dailyData and refreshKey dependency so it refreshes
+
+  const parseDateFromCell = (raw: string) => {
+    const s = (raw || '').trim().replace(/\//g, '-');
+    const m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (!m) return '';
+    return `${m[1]}-${String(Number(m[2])).padStart(2, '0')}-${String(Number(m[3])).padStart(2, '0')}`;
+  };
 
   const processImport = () => {
     const raw = importText.trim();
@@ -1343,7 +1356,8 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
         targetDate = (idxStoreDate !== -1 && row[idxStoreDate] ? String(row[idxStoreDate]) : '') || (idxShipDate !== -1 && row[idxShipDate] ? String(row[idxShipDate]) : '');
       }
 
-      const d = targetDate.trim() ? targetDate.trim().replace(/\//g, '-') : currentDate;
+      const parsedDate = parseDateFromCell(targetDate);
+      const d = parsedDate || normalizeDateKey(currentDate);
       
       const buyer = idxBuyer !== -1 && row[idxBuyer] ? String(row[idxBuyer]) : '未知';
       const phone = idxPhone !== -1 && row[idxPhone] ? String(row[idxPhone]) : '';
@@ -1411,7 +1425,12 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
     });
 
     try {
+      const currentKey = normalizeDateKey(currentDate);
+      const batch = writeBatch(db);
+      const currentDateOrdersToAppend: Order[] = [];
+
       for (const [date, orders] of Object.entries(byDate)) {
+        const dateKey = normalizeDateKey(date);
         const appended = orders.map(po => ({
           id: uid(),
           buyer: po.buyer,
@@ -1428,25 +1447,30 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
           recipientPhone: po.recipientPhone
         }));
 
-        if (date === normalizeDateKey(currentDate)) {
-          updateDaily({ orders: [...dailyData.orders, ...appended] });
-        } else {
-          const dateKey = normalizeDateKey(date);
-          const ref = doc(db, 'shops', shopId, 'daily', dateKey);
-          const snap = await getDoc(ref);
-          let existingOrders: Order[] = [];
-          let existingData = {};
-          if (snap.exists()) {
-            existingData = snap.data();
-            existingOrders = snap.data().orders || [];
-          }
-          
-          await setDoc(ref, { 
-            ...existingData, 
-            date: dateKey,
-            orders: [...existingOrders, ...appended] 
-          }, { merge: true });
+        const ref = doc(db, 'shops', shopId, 'daily', dateKey);
+        const snap = await getDoc(ref);
+        let existingOrders: Order[] = [];
+        let existingData: any = {};
+        if (snap.exists()) {
+          existingData = snap.data();
+          existingOrders = snap.data().orders || [];
         }
+
+        batch.set(ref, {
+          ...existingData,
+          date: dateKey,
+          orders: [...existingOrders, ...appended]
+        }, { merge: true });
+
+        if (dateKey === currentKey) {
+          currentDateOrdersToAppend.push(...appended);
+        }
+      }
+
+      await batch.commit();
+
+      if (currentDateOrdersToAppend.length > 0) {
+        updateDaily({ orders: [...dailyData.orders, ...currentDateOrdersToAppend] });
       }
 
       setRefreshKey(prev => prev + 1);
