@@ -38,6 +38,21 @@ const normalizeDateKey = (v: string) => {
   const [y, m = '1', d = '1'] = v.split('-');
   return `${y}-${String(Number(m)).padStart(2, '0')}-${String(Number(d)).padStart(2, '0')}`;
 };
+const toLegacyDateKey = (v: string) =>
+  v.replace(/^(\d{4})-0?(\d{1,2})-0?(\d{1,2})$/, (_, y, m, d) => `${y}-${Number(m)}-${Number(d)}`);
+const getDailyDocRef = async (shopId: string, dateKey: string) => {
+  const padKey = normalizeDateKey(dateKey);
+  const legacyKey = toLegacyDateKey(dateKey);
+  const padRef = doc(db, 'shops', shopId, 'daily', padKey);
+  const padSnap = await getDoc(padRef);
+  if (padSnap.exists()) return { ref: padRef, snap: padSnap, dateKey: padKey };
+  if (legacyKey !== padKey) {
+    const legacyRef = doc(db, 'shops', shopId, 'daily', legacyKey);
+    const legacySnap = await getDoc(legacyRef);
+    if (legacySnap.exists()) return { ref: legacyRef, snap: legacySnap, dateKey: padKey };
+  }
+  return { ref: padRef, snap: padSnap, dateKey: padKey };
+};
 const defaultAr = () => ({
   accum: 0,
   collect: 0,
@@ -105,25 +120,22 @@ export default function DailyView({
 
   useEffect(() => {
     let unsub: (() => void) | undefined;
+    let cancelled = false;
+    setLoading(true);
+    setDailyData(null);
 
     const start = async () => {
-      const padKey = normalizeDateKey(currentDate); // e.g. 2026-04-17
-      const legacyKey = currentDate.replace(
-        /^(\d{4})-0?(\d{1,2})-0?(\d{1,2})$/,
-        (_, y, m, d) => `${y}-${Number(m)}-${Number(d)}`
-      ); // e.g. 2026-4-17
-
-      const padRef = doc(db, 'shops', shopId, 'daily', padKey);
-      const legacyRef = doc(db, 'shops', shopId, 'daily', legacyKey);
-
-      const padSnap = await getDoc(padRef);
-      const targetRef = !padSnap.exists() && legacyKey !== padKey ? legacyRef : padRef;
+      const resolved = await getDailyDocRef(shopId, currentDate);
+      if (cancelled) return;
+      const targetRef = resolved.ref;
+      const targetDateKey = resolved.dateKey;
 
       unsub = onSnapshot(targetRef, (snap) => {
         (async () => {
+          if (cancelled) return;
           if (snap.exists()) {
             const data = snap.data() as DailyReport;
-            setDailyData({ ...data, ar: { ...defaultAr(), ...(data.ar || {}) } });
+            setDailyData({ ...data, date: targetDateKey, ar: { ...defaultAr(), ...(data.ar || {}) } });
           } else {
             const [y, m, d] = normalizeDateKey(currentDate).split('-').map(Number);
             const prevDate = new Date(y, m - 1, d);
@@ -131,13 +143,16 @@ export default function DailyView({
             const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(prevDate.getDate()).padStart(2, '0')}`;
             let accumFromPrev = 0;
             try {
-              const prevSnap = await getDoc(doc(db, 'shops', shopId, 'daily', prevKey));
-              if (prevSnap.exists()) {
-                const prev = prevSnap.data() as DailyReport;
+              const prevResolved = await getDailyDocRef(shopId, prevKey);
+              if (prevResolved.snap.exists()) {
+                const prev = prevResolved.snap.data() as DailyReport;
                 const prevAr = { ...defaultAr(), ...(prev.ar || {}) };
                 accumFromPrev = Math.max(0, prevAr.accum + calcDayUnpaid(prev.orders || []) - prevAr.collect);
               }
-            } catch (_) {}
+            } catch (err) {
+              console.error('載入前一天日報失敗:', err);
+            }
+            if (cancelled) return;
             setDailyData({
               date: currentDate,
               orders: [],
@@ -148,7 +163,7 @@ export default function DailyView({
               packagingUsage: {},
             });
           }
-          setLoading(false);
+          if (!cancelled) setLoading(false);
         })();
       });
     };
@@ -156,6 +171,7 @@ export default function DailyView({
     start();
 
     return () => {
+      cancelled = true;
       if (unsub) unsub();
     };
   }, [currentDate, shopId]);
@@ -163,9 +179,11 @@ export default function DailyView({
   // Debounced Save
   useEffect(() => {
     if (!dailyData || loading) return;
+    const dateKey = normalizeDateKey(currentDate);
+    const dataDateKey = normalizeDateKey(dailyData.date || currentDate);
+    if (dataDateKey !== dateKey) return;
     const t = setTimeout(async () => {
       setSaveStatus('saving');
-      const dateKey = normalizeDateKey(currentDate);
       await setDoc(
         doc(db, 'shops', shopId, 'daily', dateKey),
         { ...dailyData, date: dateKey },
