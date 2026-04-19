@@ -26,3 +26,8 @@ export function todayISO() {
 export function monthISO(date = new Date()) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
+
+export function normalizeFlavorName(name: string): string {
+  if (!name) return '';
+  return name.trim();
+}

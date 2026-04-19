@@ -254,11 +254,11 @@ export default function ReportsView({ entries, coa, selectedYear }: { entries: J
               <div className="grid grid-cols-2 gap-4 mt-8 pt-8 border-t border-coffee-100">
                 <div className="bg-blue-50/50 p-6 rounded-[24px] border border-blue-100">
                   <div className="text-[10px] font-bold text-blue-400 uppercase mb-2">資產總計</div>
-                  <div className="text-3xl font-serif-brand font-bold text-blue-600">${fmt((Object.values(bsLedger) as AccountBalance[]).filter(a => a.type === '資產').reduce((s, a) => s + a.balance, 0))}</div>
+                  <div className="text-3xl font-mono font-bold text-blue-600">${fmt((Object.values(bsLedger) as AccountBalance[]).filter(a => a.type === '資產').reduce((s, a) => s + a.balance, 0))}</div>
                 </div>
                 <div className="bg-rose-50/50 p-6 rounded-[24px] border border-rose-100">
                   <div className="text-[10px] font-bold text-rose-400 uppercase mb-2">負債與權益總計</div>
-                  <div className="text-3xl font-serif-brand font-bold text-rose-600">
+                  <div className="text-3xl font-mono font-bold text-rose-600">
                     ${fmt((Object.values(bsLedger) as AccountBalance[]).reduce((s, a) => {
                       if (['負債', '權益'].includes(a.type)) return s + a.balance;
                       if (['收入', '成本', '費用', '營業外收入', '營業外費損'].includes(a.type)) return s + (a.side === 'credit' ? a.balance : -a.balance);
@@ -281,18 +281,18 @@ export default function ReportsView({ entries, coa, selectedYear }: { entries: J
             <div className="space-y-8">
               <div className="flex justify-between items-center p-6 bg-coffee-50/50 rounded-3xl border border-coffee-100">
                 <span className="font-bold text-coffee-800">期初現金餘額</span>
-                <span className="text-2xl font-serif-brand font-bold text-coffee-800">${fmt(cfData.begCash)}</span>
+                <span className="text-2xl font-mono font-bold text-coffee-800">${fmt(cfData.begCash)}</span>
               </div>
 
               <div className="space-y-4">
                 <div className="text-xs font-bold text-coffee-300 uppercase tracking-widest ml-4">本期活動摘要</div>
                 <div className="flex justify-between items-center text-sm py-2 px-6">
                   <span className="text-coffee-600 font-medium">本期淨利流入</span>
-                  <span className="font-serif-brand font-bold text-mint-brand">+${fmt(cfData.netIncome)}</span>
+                  <span className="font-mono font-bold text-mint-brand">+${fmt(cfData.netIncome)}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm py-2 px-6 border-b border-coffee-50">
                   <span className="text-coffee-600 font-medium">本期現金增減額</span>
-                  <span className={cn("font-serif-brand font-bold", cfData.netCashChange >= 0 ? "text-mint-brand" : "text-rose-brand")}>
+                  <span className={cn("font-mono font-bold", cfData.netCashChange >= 0 ? "text-mint-brand" : "text-rose-brand")}>
                     {cfData.netCashChange >= 0 ? '+' : '-'}${fmt(Math.abs(cfData.netCashChange))}
                   </span>
                 </div>
@@ -300,7 +300,7 @@ export default function ReportsView({ entries, coa, selectedYear }: { entries: J
 
               <div className="flex justify-between items-center p-8 bg-mint-brand/10 rounded-[32px] border-2 border-mint-brand/20 shadow-inner">
                 <span className="text-lg font-bold text-coffee-800">期末現金及約當現金</span>
-                <span className="text-4xl font-serif-brand font-bold text-mint-brand">${fmt(cfData.endCash)}</span>
+                <span className="text-4xl font-mono font-bold text-mint-brand">${fmt(cfData.endCash)}</span>
               </div>
             </div>
           </div>
@@ -321,7 +321,7 @@ function ReportSection({ label, items, hideZero }: { label: string, items: any[]
         {filteredItems.map(a => (
           <div key={a.id} className="flex justify-between items-center py-2 px-4 hover:bg-coffee-50/50 rounded-xl transition-colors group">
             <span className="text-sm font-bold text-coffee-700 group-hover:text-coffee-950">{a.name}</span>
-            <span className="font-serif-brand font-bold text-lg text-coffee-600/80">${fmt(a.balance)}</span>
+            <span className="font-mono font-bold text-lg text-coffee-600/80">${fmt(a.balance)}</span>
           </div>
         ))}
       </div>

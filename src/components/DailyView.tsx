@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import { doc, onSnapshot, setDoc, getDoc, query, collection, where, getDocs, limit, orderBy, runTransaction } from 'firebase/firestore';
-import { fmt, uid, parseNum, todayISO } from '../lib/utils';
+import { fmt, uid, parseNum, todayISO, normalizeFlavorName } from '../lib/utils';
 import { DailyReport, Settings, Order, LossEntry } from '../types';
 import { 
   Plus, 
@@ -29,6 +29,7 @@ import {
   Package
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+import Papa from 'papaparse';
 import { cn } from '../lib/utils';
 
 const normalizeDateKey = (v: string) => {
@@ -124,13 +125,29 @@ export default function DailyView({
     if (!dailyData) return null;
     let m = {
         rev: 0, ship: 0, prShip: 0, disc: 0, prVal: 0, recv: 0, act: 0, remit: 0, cash: 0, unpaid: 0,
-        qty: { gb: {} as Record<string,number>, sg: {} as Record<string,number>, prGB: {} as Record<string,number>, prSG: {} as Record<string,number> },
+        qty: { 
+            gb: {} as Record<string,number>, 
+            sg: {} as Record<string,number>, 
+            prGB: {} as Record<string,number>, 
+            prSG: {} as Record<string,number>,
+            flavorSales: {} as Record<string, number>,
+            flavorPR: {} as Record<string, number>
+        },
         inventoryOut: {} as Record<string, number>
     };
 
-    settings.giftItems.forEach(i => { m.qty.gb[i.name] = 0; m.qty.prGB[i.name] = 0; });
-    settings.singleItems.forEach(i => { m.qty.sg[i.name] = 0; m.qty.prSG[i.name] = 0; });
+    (settings.giftItems || []).forEach(i => { m.qty.gb[i.name] = 0; m.qty.prGB[i.name] = 0; });
+    (settings.singleItems || []).forEach(i => { m.qty.sg[i.name] = 0; m.qty.prSG[i.name] = 0; });
+    
+    // Initialize flavor stats with single items
+    (settings.singleItems || []).forEach(i => { 
+        const norm = normalizeFlavorName(i.name);
+        m.qty.flavorSales[norm] = 0; 
+        m.qty.flavorPR[norm] = 0; 
+    });
 
+    const allGiftItems = [...(settings.giftItems || []), ...(settings.customCategories || []).flatMap(c => (c.items || []).filter((_, idx) => c.name.includes('禮盒') || c.id === 'gift'))]; // simplified logic to identify gifts in custom categories if needed
+    
     dailyData.orders.forEach(o => {
         const isPR = o.status === '公關品';
         m.rev += o.prodAmt; 
@@ -147,28 +164,60 @@ export default function DailyView({
             if(o.status === '未結帳款') { m.unpaid += o.actualAmt; }
         }
 
-        settings.giftItems.forEach(i => {
-            const count = (o.items[i.id] || 0);
-            if(isPR) m.qty.prGB[i.name] += count;
-            else m.qty.gb[i.name] += count;
+        // Standard categories
+        (settings.giftItems || []).forEach(i => {
+            const count = (o.items?.[i.id] || 0);
+            if(isPR) m.qty.prGB[i.name] = (m.qty.prGB[i.name] || 0) + count;
+            else m.qty.gb[i.name] = (m.qty.gb[i.name] || 0) + count;
         });
-        settings.singleItems.forEach(i => {
-            const count = (o.items[i.id] || 0);
-            if(isPR) m.qty.prSG[i.name] += count;
-            else m.qty.sg[i.name] += count;
+        (settings.singleItems || []).forEach(i => {
+            const count = (o.items?.[i.id] || 0);
+            if(isPR) m.qty.prSG[i.name] = (m.qty.prSG[i.name] || 0) + count;
+            else m.qty.sg[i.name] = (m.qty.sg[i.name] || 0) + count;
         });
 
-        // Inventory out
-        const allItems = [...settings.giftItems, ...settings.singleItems];
+        // Custom categories (Crucial for "War Room" or other custom groups)
+        (settings.customCategories || []).forEach(cat => {
+            (cat.items || []).forEach(i => {
+                const count = (o.items?.[i.id] || 0);
+                // We map them to SG/GB based on category name or just treat as SG if unsure
+                const isGb = cat.name.includes('禮盒');
+                if (isGb) {
+                    if(isPR) m.qty.prGB[i.name] = (m.qty.prGB[i.name] || 0) + count;
+                    else m.qty.gb[i.name] = (m.qty.gb[i.name] || 0) + count;
+                } else {
+                    if(isPR) m.qty.prSG[i.name] = (m.qty.prSG[i.name] || 0) + count;
+                    else m.qty.sg[i.name] = (m.qty.sg[i.name] || 0) + count;
+                }
+            });
+        });
+
+        // Inventory out & Flavor Breakdown
+        const allItems = [...(settings.giftItems || []), ...(settings.singleItems || []), ...(settings.customCategories || []).flatMap(c => c.items || [])];
         allItems.forEach(item => {
-            const qty = o.items[item.id] || 0;
+            const qty = o.items?.[item.id] || 0;
             if (qty <= 0) return;
-            if (item.category === 'gift' && item.recipe) {
-                Object.entries(item.recipe).forEach(([flavor, count]) => {
-                    m.inventoryOut[flavor] = (m.inventoryOut[flavor] || 0) + (qty * count);
+
+            if (item.recipe) { // Both giftItems and custom categorized gifts might have recipe
+                Object.entries(item.recipe || {}).forEach(([flavor, count]) => {
+                    const normFlavor = normalizeFlavorName(flavor);
+                    const volume = qty * (Number(count) || 0);
+                    m.inventoryOut[normFlavor] = (m.inventoryOut[normFlavor] || 0) + volume;
+                    if (isPR) {
+                        m.qty.flavorPR[normFlavor] = (m.qty.flavorPR[normFlavor] || 0) + volume;
+                    } else {
+                        m.qty.flavorSales[normFlavor] = (m.qty.flavorSales[normFlavor] || 0) + volume;
+                    }
                 });
-            } else if (item.category === 'single') {
-                m.inventoryOut[item.name] = (m.inventoryOut[item.name] || 0) + qty;
+            } else {
+                // If no recipe, it's a single item (or its own material)
+                const normName = normalizeFlavorName(item.name);
+                m.inventoryOut[normName] = (m.inventoryOut[normName] || 0) + qty;
+                if (isPR) {
+                    m.qty.flavorPR[normName] = (m.qty.flavorPR[normName] || 0) + qty;
+                } else {
+                    m.qty.flavorSales[normName] = (m.qty.flavorSales[normName] || 0) + qty;
+                }
             }
         });
     });
@@ -183,11 +232,11 @@ export default function DailyView({
     try {
       // Basic consumption auto-deduction based on daily sales
       const consumption: Record<string, number> = {};
-      dailyData.orders.forEach((o) => {
-        [...settings.giftItems, ...settings.singleItems].forEach((item) => {
-          const qty = o.items[item.id] || 0;
+            dailyData.orders.forEach((o) => {
+        [...(settings.giftItems || []), ...(settings.singleItems || []), ...(settings.customCategories?.flatMap(c => c.items || []) || [])].forEach((item) => {
+          const qty = o.items?.[item.id] || 0;
           if (qty > 0 && item.materialRecipe) {
-            Object.entries(item.materialRecipe).forEach(([matId, usage]) => {
+            Object.entries(item.materialRecipe || {}).forEach(([matId, usage]) => {
               consumption[matId] = (consumption[matId] || 0) + qty * usage;
             });
           }
@@ -322,8 +371,8 @@ export default function DailyView({
                   </tr>
                   <tr className="text-coffee-400 font-bold uppercase tracking-wider text-[10px]">
                     <th className="px-3 py-3 border-b border-[#f0ede8] sticky left-0 z-20 bg-[#faf7f2]/90 backdrop-blur-md">姓名</th>
-                    {settings.giftItems.filter(i => i.active).map(i => <th key={i.id} className="px-2 py-3 border-b border-[#ffb3c1]/30 bg-[#ffcbf2]/20">{i.name}</th>)}
-                    {settings.singleItems.filter(i => i.active).map(i => <th key={i.id} className="px-2 py-3 border-b border-[#83c5be]/30 bg-[#a2d2ff]/20">{i.name}</th>)}
+                    {(settings.giftItems || []).filter(i => i.active).map(i => <th key={i.id} className="px-2 py-3 border-b border-[#ffb3c1]/30 bg-[#ffcbf2]/20">{normalizeFlavorName(i.name)}</th>)}
+                    {(settings.singleItems || []).filter(i => i.active).map(i => <th key={i.id} className="px-2 py-3 border-b border-[#83c5be]/30 bg-[#a2d2ff]/20">{normalizeFlavorName(i.name)}</th>)}
                     <th className="px-2 py-3 border-b border-[#f0ede8] bg-[#e2ece9]/20">商品金額</th>
                     <th className="px-2 py-3 border-b border-[#f0ede8] bg-[#e2ece9]/20">運費</th>
                     <th className="px-2 py-3 border-b border-[#f0ede8] bg-[#e2ece9]/20">折讓</th>
@@ -348,55 +397,57 @@ export default function DailyView({
                           }}
                         />
                       </td>
-                      {settings.giftItems.filter(i => i.active).map(i => (
+                      {(settings.giftItems || []).filter(i => i.active).map(i => (
                         <td key={i.id} className="px-2 py-3 bg-[#ffcbf2]/5">
                           <input 
                             type="number"
                             className="w-12 bg-transparent text-center font-bold text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
-                            value={order.items[i.id] || ''}
+                            value={order.items?.[i.id] || ''}
                             placeholder="0"
                             onChange={(e) => {
                               const orders = [...dailyData.orders];
+                              if (!orders[idx].items) orders[idx].items = {};
                               orders[idx].items[i.id] = parseNum(e.target.value);
                               let pAmt = 0;
-                              [...settings.giftItems, ...settings.singleItems].forEach(item => {
-                                pAmt += (orders[idx].items[item.id] || 0) * item.price;
+                              [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => {
+                                pAmt += (orders[idx].items?.[item.id] || 0) * item.price;
                               });
                               orders[idx].prodAmt = pAmt;
-                              orders[idx].actualAmt = pAmt + orders[idx].shipAmt - orders[idx].discAmt;
+                              orders[idx].actualAmt = pAmt + (orders[idx].shipAmt || 0) - (orders[idx].discAmt || 0);
                               updateDaily({ orders });
                             }}
                           />
                         </td>
                       ))}
-                      {settings.singleItems.filter(i => i.active).map(i => (
+                      {(settings.singleItems || []).filter(i => i.active).map(i => (
                         <td key={i.id} className="px-2 py-3 bg-[#a2d2ff]/5">
                           <input 
                             type="number"
                             className="w-12 bg-transparent text-center font-bold text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
-                            value={order.items[i.id] || ''}
+                            value={order.items?.[i.id] || ''}
                             placeholder="0"
                             onChange={(e) => {
                               const orders = [...dailyData.orders];
+                              if (!orders[idx].items) orders[idx].items = {};
                               orders[idx].items[i.id] = parseNum(e.target.value);
                               let pAmt = 0;
-                              [...settings.giftItems, ...settings.singleItems].forEach(item => {
-                                pAmt += (orders[idx].items[item.id] || 0) * item.price;
+                              [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => {
+                                pAmt += (orders[idx].items?.[item.id] || 0) * item.price;
                               });
                               orders[idx].prodAmt = pAmt;
-                              orders[idx].actualAmt = pAmt + orders[idx].shipAmt - orders[idx].discAmt;
+                              orders[idx].actualAmt = pAmt + (orders[idx].shipAmt || 0) - (orders[idx].discAmt || 0);
                               updateDaily({ orders });
                             }}
                           />
                         </td>
                       ))}
-                      <td className="px-2 py-3 font-serif-brand font-bold text-gray-500 bg-[#e2ece9]/5">
+                      <td className="px-2 py-3 font-mono font-bold text-gray-500 bg-[#e2ece9]/5">
                         ${fmt(order.prodAmt)}
                       </td>
                       <td className="px-2 py-3 bg-[#e2ece9]/5">
                         <input 
                           type="number"
-                          className="w-16 bg-transparent text-center font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
+                          className="w-16 bg-transparent text-center font-mono font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
                           value={order.shipAmt || ''}
                           placeholder="0"
                           onChange={(e) => {
@@ -410,7 +461,7 @@ export default function DailyView({
                       <td className="px-2 py-3 bg-[#e2ece9]/5">
                         <input 
                           type="number"
-                          className="w-16 bg-transparent text-center font-bold text-rose-brand outline-none border-b border-transparent focus:border-rose-brand"
+                          className="w-16 bg-transparent text-center font-mono font-bold text-rose-brand outline-none border-b border-transparent focus:border-rose-brand"
                           value={order.discAmt || ''}
                           placeholder="0"
                           onChange={(e) => {
@@ -421,7 +472,7 @@ export default function DailyView({
                           }}
                         />
                       </td>
-                      <td className="px-2 py-3 font-serif-brand font-bold text-mint-brand bg-[#e2ece9]/10">
+                      <td className="px-2 py-3 font-mono font-bold text-mint-brand bg-[#e2ece9]/10">
                         ${fmt(order.actualAmt)}
                       </td>
                       <td className="px-3 py-3">
@@ -495,15 +546,15 @@ export default function DailyView({
                   <span className="font-bold text-coffee-800">實收總額</span>
                   <input 
                     type="number"
-                    value={dailyData.ar.actualTotal || ''}
-                    onChange={e => updateDaily({ ar: { ...dailyData.ar, actualTotal: parseNum(e.target.value) } })}
-                    className="w-24 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-serif-brand text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
+                    value={dailyData?.ar?.actualTotal || ''}
+                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 }), actualTotal: parseNum(e.target.value) } })}
+                    className="w-24 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
                   />
                 </div>
                 <div className="h-px bg-coffee-100 my-2" />
-                <div className="flex justify-between items-center"><span className="text-coffee-600">已收-匯款</span><span className="font-bold font-serif-brand">${fmt(metrics?.remit || 0)}</span></div>
-                <div className="flex justify-between items-center"><span className="text-coffee-600">已收-現金</span><span className="font-bold font-serif-brand">${fmt(metrics?.cash || 0)}</span></div>
-                <div className="flex justify-between items-center"><span className="text-coffee-600">今日未結帳款</span><span className="font-bold font-serif-brand text-danger-brand">${fmt(metrics?.unpaid || 0)}</span></div>
+                <div className="flex justify-between items-center"><span className="text-coffee-600">已收-匯款</span><span className="font-bold font-mono">${fmt(metrics?.remit || 0)}</span></div>
+                <div className="flex justify-between items-center"><span className="text-coffee-600">已收-現金</span><span className="font-bold font-mono">${fmt(metrics?.cash || 0)}</span></div>
+                <div className="flex justify-between items-center"><span className="text-coffee-600">今日未結帳款</span><span className="font-bold font-mono text-danger-brand">${fmt(metrics?.unpaid || 0)}</span></div>
               </div>
             </div>
 
@@ -517,9 +568,9 @@ export default function DailyView({
                   <span className="text-coffee-600">累積前期未結</span>
                   <input 
                     type="number"
-                    value={dailyData.ar.accum || ''}
-                    onChange={e => updateDaily({ ar: { ...dailyData.ar, accum: parseNum(e.target.value) } })}
-                    className="w-24 text-right bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 font-bold font-serif-brand text-coffee-700 outline-none focus:border-coffee-400"
+                    value={dailyData?.ar?.accum || ''}
+                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 }), accum: parseNum(e.target.value) } })}
+                    className="w-24 text-right bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 font-bold font-mono text-coffee-700 outline-none focus:border-coffee-400"
                   />
                 </div>
                 <div className="flex justify-between items-center"><span className="text-coffee-600">今日新增未結</span><span className="font-bold font-serif-brand">${fmt(metrics?.unpaid || 0)}</span></div>
@@ -528,8 +579,8 @@ export default function DailyView({
                   <span className="text-coffee-600">今日回款 (沖銷)</span>
                   <input 
                     type="number"
-                    value={dailyData.ar.collect || ''}
-                    onChange={e => updateDaily({ ar: { ...dailyData.ar, collect: parseNum(e.target.value) } })}
+                    value={dailyData?.ar?.collect || ''}
+                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 }), collect: parseNum(e.target.value) } })}
                     className="w-24 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-serif-brand text-mint-brand focus:border-mint-brand outline-none"
                   />
                 </div>
@@ -537,7 +588,7 @@ export default function DailyView({
               <div className="h-px bg-coffee-100 my-4" />
               <div className="flex justify-between items-center text-lg">
                 <span className="font-bold text-coffee-800">剩餘總未結帳款</span>
-                <span className="font-bold font-serif-brand text-danger-brand">${fmt((dailyData.ar.accum || 0) + (metrics?.unpaid || 0) - (dailyData.ar.collect || 0))}</span>
+                <span className="font-bold font-serif-brand text-danger-brand">${fmt((dailyData?.ar?.accum || 0) + (metrics?.unpaid || 0) - (dailyData?.ar?.collect || 0))}</span>
               </div>
             </div>
 
@@ -547,21 +598,21 @@ export default function DailyView({
                 <Truck className="w-5 h-5 text-amber-500" /> 物流分析與包材
               </h3>
               <div className="space-y-3 text-sm mb-6">
-                <div className="flex justify-between items-center"><span className="text-coffee-600">運費實收 (明細)</span><span className="font-bold font-serif-brand">${fmt(metrics?.ship || 0)}</span></div>
-                <div className="flex justify-between items-center"><span className="text-coffee-600">公關品運費 (不計入)</span><span className="font-bold font-serif-brand text-danger-brand">${fmt(metrics?.prShip || 0)}</span></div>
+                <div className="flex justify-between items-center"><span className="text-coffee-600">運費實收 (明細)</span><span className="font-bold font-mono">${fmt(metrics?.ship || 0)}</span></div>
+                <div className="flex justify-between items-center"><span className="text-coffee-600">公關品運費 (不計入)</span><span className="font-bold font-mono text-danger-brand">${fmt(metrics?.prShip || 0)}</span></div>
                 <div className="flex justify-between items-center">
                   <span className="text-coffee-600">運費實支 (支出)</span>
                   <input 
                     type="number"
-                    value={dailyData.ar.logSpent || ''}
-                    onChange={e => updateDaily({ ar: { ...dailyData.ar, logSpent: parseNum(e.target.value) } })}
-                    className="w-24 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-serif-brand outline-none focus:border-coffee-400"
+                    value={dailyData?.ar?.logSpent || ''}
+                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 }), logSpent: parseNum(e.target.value) } })}
+                    className="w-24 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono outline-none focus:border-coffee-400"
                   />
                 </div>
                 <div className="flex justify-between items-center">
                   <span className="text-coffee-600">物流服務額</span>
-                  <span className={cn("font-bold font-serif-brand", ((metrics?.ship || 0) - (dailyData.ar.logSpent || 0)) < 0 ? 'text-danger-brand' : 'text-mint-brand')}>
-                    ${fmt((metrics?.ship || 0) - (dailyData.ar.logSpent || 0))}
+                  <span className={cn("font-bold font-mono", ((metrics?.ship || 0) - (dailyData?.ar?.logSpent || 0)) < 0 ? 'text-danger-brand' : 'text-mint-brand')}>
+                    ${fmt((metrics?.ship || 0) - (dailyData?.ar?.logSpent || 0))}
                   </span>
                 </div>
               </div>
@@ -575,8 +626,8 @@ export default function DailyView({
                     <tr><th className="p-2 text-left">包材</th><th className="p-2">單價</th><th className="p-2">數量</th><th className="p-2 text-right">小計</th></tr>
                   </thead>
                   <tbody className="divide-y divide-coffee-50 bg-white">
-                    {settings.packagingItems.filter(p => p.active).map(pkg => {
-                      const qty = dailyData.packagingUsage[pkg.id] || 0;
+                    {(settings.packagingItems || []).filter(p => p.active).map(pkg => {
+                      const qty = dailyData?.packagingUsage?.[pkg.id] || 0;
                       return (
                         <tr key={pkg.id}>
                           <td className="p-2 text-left">{pkg.name}</td>
@@ -586,7 +637,7 @@ export default function DailyView({
                               type="number" 
                               className="w-12 text-center border border-gray-200 rounded py-0.5 outline-none focus:border-coffee-400" 
                               value={qty || ''}
-                              onChange={e => updateDaily({ packagingUsage: { ...dailyData.packagingUsage, [pkg.id]: parseNum(e.target.value) } })}
+                              onChange={e => updateDaily({ packagingUsage: { ...(dailyData?.packagingUsage || {}), [pkg.id]: parseNum(e.target.value) } })}
                             />
                           </td>
                           <td className="p-2 font-bold text-right text-rose-brand">${fmt(qty * pkg.price)}</td>
@@ -619,12 +670,14 @@ export default function DailyView({
                         <tr><th className="p-2 text-left">品項</th><th className="p-2">販售</th><th className="p-2">公關</th><th className="p-2 font-bold">總數</th></tr>
                       </thead>
                       <tbody className="divide-y divide-coffee-50">
-                        {settings.giftItems.filter(i => i.active || (metrics.qty.gb[i.name] + metrics.qty.prGB[i.name] > 0)).map(i => (
+                        {[...settings.giftItems, ...(settings.customCategories?.flatMap(c => c.name.includes('禮盒') ? c.items : []) || [])]
+                          .filter((i, idx, self) => (i.active || (metrics.qty.gb[i.name] + metrics.qty.prGB[i.name] > 0)) && self.findIndex(s => s.id === i.id) === idx)
+                          .map(i => (
                           <tr key={i.id}>
                             <td className="p-2 text-left font-medium">{i.name}</td>
-                            <td className="p-2">{metrics.qty.gb[i.name] || 0}</td>
-                            <td className="p-2 text-purple-600">{metrics.qty.prGB[i.name] || 0}</td>
-                            <td className="p-2 font-bold text-rose-brand">{(metrics.qty.gb[i.name] || 0) + (metrics.qty.prGB[i.name] || 0)}</td>
+                            <td className="p-2 font-mono font-bold">{metrics.qty.gb[i.name] || 0}</td>
+                            <td className="p-2 text-purple-600 font-mono font-bold">{metrics.qty.prGB[i.name] || 0}</td>
+                            <td className="p-2 font-bold text-rose-brand font-mono">{(metrics.qty.gb[i.name] || 0) + (metrics.qty.prGB[i.name] || 0)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -639,14 +692,21 @@ export default function DailyView({
                         <tr><th className="p-2 text-left">品項</th><th className="p-2">販售</th><th className="p-2">公關</th><th className="p-2 font-bold">總數</th></tr>
                       </thead>
                       <tbody className="divide-y divide-coffee-50">
-                        {settings.singleItems.filter(i => i.active || (metrics.qty.sg[i.name] + metrics.qty.prSG[i.name] > 0)).map(i => (
-                          <tr key={i.id}>
-                            <td className="p-2 text-left font-medium">{i.name}</td>
-                            <td className="p-2">{metrics.qty.sg[i.name] || 0}</td>
-                            <td className="p-2 text-purple-600">{metrics.qty.prSG[i.name] || 0}</td>
-                            <td className="p-2 font-bold text-rose-brand">{(metrics.qty.sg[i.name] || 0) + (metrics.qty.prSG[i.name] || 0)}</td>
-                          </tr>
-                        ))}
+                        {(() => {
+                           const activeNames = (settings.singleItems || []).filter(i => i.active).map(i => normalizeFlavorName(i.name));
+                           const soldNames = Object.keys(metrics.qty.flavorSales).filter(k => metrics.qty.flavorSales[k] > 0);
+                           const prNames = Object.keys(metrics.qty.flavorPR).filter(k => metrics.qty.flavorPR[k] > 0);
+                           const allNames = Array.from(new Set([...activeNames, ...soldNames, ...prNames]));
+
+                           return allNames.map(name => (
+                             <tr key={name}>
+                               <td className="p-2 text-left font-medium">{name}</td>
+                               <td className="p-2 font-mono font-bold">{metrics.qty.flavorSales[name] || 0}</td>
+                               <td className="p-2 text-purple-600 font-mono font-bold">{metrics.qty.flavorPR[name] || 0}</td>
+                               <td className="p-2 font-bold text-rose-brand font-mono">{(metrics.qty.flavorSales[name] || 0) + (metrics.qty.flavorPR[name] || 0)}</td>
+                             </tr>
+                           ));
+                        })()}
                       </tbody>
                     </table>
                   </div>
@@ -673,22 +733,15 @@ export default function DailyView({
                   </thead>
                   <tbody className="divide-y divide-coffee-50">
                     {(() => {
-                        const uniqueFlavors = Array.from(new Set([
-                            ...settings.singleItems.filter(i=>i.active && !i.name.includes('綜合')).map(i=>i.name)
-                        ]));
+                        const activeNames = (settings.singleItems || []).filter(i => i.active && !i.name.includes('綜合')).map(i => normalizeFlavorName(i.name));
+                        const soldNames = Object.keys(metrics.inventoryOut).filter(k => metrics.inventoryOut[k] > 0 && !k.includes('綜合'));
+                        const uniqueFlavors = Array.from(new Set([...activeNames, ...soldNames]));
 
                         return uniqueFlavors.map(f => {
-                            const inv = dailyData.inventory[f] || { org: 0, exp: 0, act: 0, los: 0 };
+                            const inv = dailyData?.inventory?.[normalizeFlavorName(f)] || { org: 0, exp: 0, act: 0, los: 0 };
                             
-                            let gbConsumption = 0;
-                            settings.giftItems.forEach(gb => {
-                                const countInBox = (gb.recipe && gb.recipe[f]) ? gb.recipe[f] : 0;
-                                const totalGBSold = (metrics.qty.gb[gb.name] || 0) + (metrics.qty.prGB[gb.name] || 0);
-                                gbConsumption += totalGBSold * countInBox;
-                            });
-            
-                            const outTotal = (metrics.qty.sg[f]||0) + (metrics.qty.prSG[f]||0) + gbConsumption;
-                            const flavorLossTotal = dailyData.losses.filter(l => l.flavor === f).reduce((sum, l) => sum + l.qty, 0);
+                            const outTotal = metrics.inventoryOut[f] || 0;
+                            const flavorLossTotal = dailyData.losses.filter(l => normalizeFlavorName(l.flavor) === f).reduce((sum, l) => sum + l.qty, 0);
 
                             const todayRemain = inv.org + inv.act - flavorLossTotal - outTotal;
                             let rate = 0; if(inv.act > 0) rate = (flavorLossTotal / inv.act) * 100;
@@ -696,27 +749,27 @@ export default function DailyView({
                             return (
                                 <tr key={f}>
                                     <td className="p-2 text-left font-bold">{f}</td>
-                                    <td className="p-2"><input type="number" readOnly value={inv.org || 0} className="w-10 text-center bg-gray-100 rounded text-gray-500 outline-none" /></td>
+                                    <td className="p-2"><input type="number" readOnly value={inv.org || 0} className="w-10 text-center bg-gray-100 rounded text-gray-500 font-mono font-bold outline-none" /></td>
                                     <td className="p-2">
                                         <input 
                                             type="number" 
                                             value={inv.exp || ''} 
-                                            onChange={e => updateDaily({ inventory: { ...dailyData.inventory, [f]: { ...inv, exp: parseNum(e.target.value) } } })}
-                                            className="w-12 text-center border border-gray-200 rounded focus:border-coffee-400 outline-none" 
+                                            onChange={e => updateDaily({ inventory: { ...dailyData.inventory, [normalizeFlavorName(f)]: { ...inv, exp: parseNum(e.target.value) } } })}
+                                            className="w-12 text-center border border-gray-200 rounded focus:border-coffee-400 font-mono font-bold outline-none" 
                                         />
                                     </td>
                                     <td className="p-2">
                                         <input 
                                             type="number" 
                                             value={inv.act || ''} 
-                                            onChange={e => updateDaily({ inventory: { ...dailyData.inventory, [f]: { ...inv, act: parseNum(e.target.value) } } })}
-                                            className="w-12 text-center border border-gray-200 rounded focus:border-coffee-400 outline-none" 
+                                            onChange={e => updateDaily({ inventory: { ...dailyData.inventory, [normalizeFlavorName(f)]: { ...inv, act: parseNum(e.target.value) } } })}
+                                            className="w-12 text-center border border-gray-200 rounded focus:border-coffee-400 font-mono font-bold outline-none" 
                                         />
                                     </td>
-                                    <td className="p-2"><input type="number" readOnly value={flavorLossTotal} className="w-10 text-center bg-gray-100 rounded text-gray-500 outline-none" /></td>
-                                    <td className="p-2 font-bold text-coffee-600">{outTotal}</td>
-                                    <td className={cn("p-2 font-bold text-sm", todayRemain < 0 ? 'text-danger-brand' : 'text-mint-brand')}>{todayRemain}</td>
-                                    <td className="p-2 text-coffee-400">{rate.toFixed(1)}%</td>
+                                    <td className="p-2"><input type="number" readOnly value={flavorLossTotal} className="w-10 text-center bg-gray-100 rounded text-gray-500 font-mono font-bold outline-none" /></td>
+                                    <td className="p-2 font-mono font-bold text-coffee-600">{outTotal}</td>
+                                    <td className={cn("p-2 font-mono font-bold text-sm", todayRemain < 0 ? 'text-danger-brand' : 'text-mint-brand')}>{todayRemain}</td>
+                                    <td className="p-2 text-coffee-400 font-mono font-bold">{rate.toFixed(1)}%</td>
                                 </tr>
                             );
                         });
@@ -758,9 +811,10 @@ export default function DailyView({
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-coffee-50">
-                    {dailyData.losses.map((loss, idx) => {
+                  {(dailyData?.losses || []).map((loss, idx) => {
                       const allFlavors = Array.from(new Set([
-                        ...settings.singleItems.filter(i=>i.active && !i.name.includes('綜合')).map(i=>i.name)
+                        ...(settings.singleItems || []).filter(i=>i.active && !i.name.includes('綜合')).map(i=>normalizeFlavorName(i.name)),
+                        ...(settings.customCategories || []).flatMap(c => (c.items || []).filter(i=>i.active).map(i=>normalizeFlavorName(i.name)))
                       ]));
                       return (
                         <tr key={loss.id}>
@@ -981,7 +1035,7 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f0ede8]">
-                  {settings[typeTag].map((item, idx) => (
+                  {settings[typeTag]?.map((item: any, idx: number) => (
                     <tr key={item.id} className="hover:bg-coffee-50 transition">
                       <td className="p-3">
                         <label className="relative inline-flex items-center cursor-pointer">
@@ -1001,7 +1055,7 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
                             onClick={() => setRecipeModal({ isOpen: true, gbIndex: idx })}
                             className="text-xs bg-coffee-100 hover:bg-coffee-200 text-coffee-700 font-bold px-3 py-1.5 rounded-lg transition"
                           >
-                            📝 配方 ({Object.values(item.recipe || {}).reduce((a,b)=>a+b, 0)}顆)
+                            📝 配方 ({Object.values(item.recipe || {}).reduce((acc: number, val: any) => acc + parseNum(val), 0)}顆)
                           </button>
                         </td>
                       )}
@@ -1056,7 +1110,7 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#f0ede8]">
-                {cat.items.map((item, idx) => (
+                {(cat.items || []).map((item: any, idx: number) => (
                   <tr key={item.id} className="hover:bg-coffee-50 transition">
                     <td className="p-3">
                       <label className="relative inline-flex items-center cursor-pointer">
@@ -1075,7 +1129,7 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
                     </td>
                   </tr>
                 ))}
-                {cat.items.length === 0 && <tr><td colSpan={4} className="p-6 text-gray-400 italic">尚無設定</td></tr>}
+                {(cat.items || []).length === 0 && <tr><td colSpan={4} className="p-6 text-gray-400 italic">尚無設定</td></tr>}
               </tbody>
             </table>
           </div>
@@ -1086,23 +1140,24 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[99] flex items-center justify-center animate-in fade-in p-4">
           <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl">
             <div className="flex justify-between items-center p-4 border-b border-coffee-100 bg-[#faf7f2]">
-              <h3 className="font-bold text-coffee-800">設定「{settings.giftItems[recipeModal.gbIndex].name}」配方</h3>
+              <h3 className="font-bold text-coffee-800">設定「{settings.giftItems?.[recipeModal.gbIndex!]?.name || '未知'}」配方</h3>
               <button onClick={() => setRecipeModal({ isOpen: false, gbIndex: null })} className="p-1 text-gray-400 hover:text-coffee-600 rounded"><Trash2 className="w-5 h-5 hidden"/><span className="text-xl leading-none">&times;</span></button>
             </div>
             <div className="p-6 space-y-4">
-              {settings.singleItems.map(sg => {
-                const gb = settings.giftItems[recipeModal.gbIndex!];
+              {(settings.singleItems || []).map(sg => {
+                const gb = (settings.giftItems || [])[recipeModal.gbIndex!];
+                if (!gb) return null;
                 const count = gb.recipe?.[sg.name] || 0;
                 return (
                   <div key={sg.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
-                    <span className="font-bold text-coffee-700">{sg.name}</span>
+                    <span className="font-bold text-coffee-700">{normalizeFlavorName(sg.name)}</span>
                     <input 
                       type="number" 
                       min="0"
                       className="w-16 text-center border-none shadow-sm rounded-md py-1 font-bold text-coffee-800 outline-none focus:ring-2 focus:ring-mint-brand" 
                       value={count}
                       onChange={(e) => {
-                        const newGBItems = [...settings.giftItems];
+                        const newGBItems = [...(settings.giftItems || [])];
                         if(!newGBItems[recipeModal.gbIndex!].recipe) newGBItems[recipeModal.gbIndex!].recipe = {};
                         newGBItems[recipeModal.gbIndex!].recipe![sg.name] = parseNum(e.target.value);
                         updateSettings({ ...settings, giftItems: newGBItems });
@@ -1130,6 +1185,7 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
 function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { settings: Settings; shopId: string; currentDate: string; dailyData: DailyReport; updateDaily: (patch: Partial<DailyReport>) => void }) {
   const [importText, setImportText] = useState('');
   const [parsedOrders, setParsedOrders] = useState<any[]>([]);
+  const [refreshKey, setRefreshKey] = useState(0);
   const [weeklyData, setWeeklyData] = useState<DailyReport[]>([]);
   const [weekRange, setWeekRange] = useState('');
 
@@ -1153,124 +1209,123 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
 
       const q = query(
         collection(db, 'shops', shopId, 'daily'),
-        where('dateKey', '>=', p1.replace(/-/g, '')),
-        where('dateKey', '<=', p2.replace(/-/g, ''))
+        where('date', '>=', p1),
+        where('date', '<=', p2)
       );
       const snap = await getDocs(q);
       setWeeklyData(snap.docs.map(doc => doc.data() as DailyReport));
     };
     fetchWeekly();
-  }, [currentDate, shopId, dailyData]); // adding dailyData dependency so it refreshes when saving current day
+  }, [currentDate, shopId, dailyData, refreshKey]); // adding dailyData and refreshKey dependency so it refreshes
 
   const processImport = () => {
     const raw = importText.trim();
     if (!raw) return alert("請貼上資料");
 
-    const isTSV = raw.indexOf('\t') !== -1;
-    let rows: string[][] = [];
-    if (isTSV) {
-      rows = raw.split('\n').map(r => r.split('\t').map(c => c.trim()));
-    } else {
-      rows = raw.split('\n').map(line => {
-        const result = [];
-        let current = '';
-        let inQuotes = false;
-        for (let i = 0; i < line.length; i++) {
-          const char = line[i];
-          if (char === '"') {
-            if (inQuotes && line[i+1] === '"') {
-              current += '"';
-              i++;
-            } else {
-              inQuotes = !inQuotes;
-            }
-          } else if (char === ',' && !inQuotes) {
-            result.push(current.trim());
-            current = '';
-          } else {
-            current += char;
-          }
-        }
-        result.push(current.trim());
-        return result;
-      });
-    }
+    const { data } = Papa.parse(raw, { skipEmptyLines: 'greedy' });
+    const rows = data as string[][];
 
     if (rows.length < 2) return alert("資料格式不正確 (需包含標題列)");
 
     const headers = rows[0];
     const dataRows = rows.slice(1);
 
-    const getIdx = (keywords: string[]) => headers.findIndex(h => keywords.some(k => h.includes(k)));
+    const getIdx = (keywords: string[]) => {
+      for (const k of keywords) {
+        const found = headers.findIndex(h => h.trim() === k);
+        if (found !== -1) return found;
+      }
+      return headers.findIndex(h => keywords.some(k => h.includes(k)));
+    };
 
     const idxBuyer = getIdx(['訂購人姓名', '姓名']);
-    const idxPhone = getIdx(['訂購人電話', '電話']);
-    const idxAddr = getIdx(['宅配地址', '地址']);
-    const idxStoreDate = getIdx(['預約取貨日期', '店取']);
-    const idxShipDate = getIdx(['宅配出貨日', '出貨']);
-    const idxMethod = getIdx(['取貨方式', '物流']);
+    const idxPhone = getIdx(['訂購人電話', '電話', '聯絡電話']);
+    const idxAddr = getIdx(['宅配地址', '地址', '收件地址']);
+    const idxRecipientName = getIdx(['收件人姓名']);
+    const idxRecipientStatus = getIdx(['收件人']);
+    const idxRecipientPhone = getIdx(['收件人電話']);
+    const idxStoreDate = getIdx(['預約取貨日期', '店取', '取貨日']);
+    const idxShipDate = getIdx(['宅配出貨日', '出貨', '出貨日']);
+    const idxMethod = getIdx(['取貨方式', '物流', '運送方式']);
 
-    const itemMap: { item: any, colIdx: number }[] = [];
-    
+    const itemMap: { item: any; colIdx: number }[] = [];
+    const allPossibleItems = [
+      ...(settings.giftItems || []),
+      ...(settings.singleItems || []),
+    ];
+
     headers.forEach((h, colIdx) => {
-      const isGBHeader = h.includes('禮盒');
-      const isSGHeader = h.includes('單顆');
-      
+      const cleanH = h.trim();
+      const isGBHeader = cleanH.includes('禮盒') || cleanH.includes('盒');
+      const isSGHeader = cleanH.includes('單顆') || cleanH.includes('個');
+
       let bestMatch = null;
       if (isGBHeader) {
-        bestMatch = settings.giftItems.find(i => h.includes(i.name) || i.name.includes(h));
+        bestMatch = (settings.giftItems || []).find((i) => cleanH.includes(i.name) || i.name.includes(cleanH));
+        if (!bestMatch) {
+          if (cleanH.includes('綜合')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('綜合'));
+          if (cleanH.includes('原味')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('原味'));
+          if (cleanH.includes('伯爵')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('伯爵'));
+          if (cleanH.includes('可可')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('可可'));
+          if (cleanH.includes('抹茶')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('抹茶'));
+        }
       } else if (isSGHeader) {
-        bestMatch = settings.singleItems.find(i => h.includes(i.name) || i.name.includes(h));
-      } else {
-        bestMatch = settings.giftItems.find(i => h.includes(i.name) || i.name.includes(h)) || 
-                    settings.singleItems.find(i => h.includes(i.name) || i.name.includes(h));
+        bestMatch = (settings.singleItems || []).find((i) => cleanH.includes(i.name) || i.name.includes(cleanH));
+        if (!bestMatch) {
+          if (cleanH.includes('原味')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('原味'));
+          if (cleanH.includes('伯爵')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('伯爵'));
+          if (cleanH.includes('可可')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('可可'));
+          if (cleanH.includes('抹茶')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('抹茶'));
+        }
       }
 
-      if (bestMatch) {
-         if (!itemMap.some(m => m.colIdx === colIdx)) {
-           itemMap.push({ item: bestMatch, colIdx });
-         }
-      } else {
-        // Fallback for custom categories or if not matched yet
-        const customItemsAcc = (settings.customCategories || []).flatMap(cat => cat.items);
-        const fallbackMatch = [...settings.packagingItems, ...customItemsAcc].find(i => h.includes(i.name) || i.name.includes(h));
-        if (fallbackMatch && !itemMap.some(m => m.colIdx === colIdx)) {
-          itemMap.push({ item: fallbackMatch, colIdx });
-        }
+      if (!bestMatch) {
+        bestMatch = (settings.giftItems || []).find((i) => cleanH.includes(i.name)) || 
+                    (settings.singleItems || []).find((i) => cleanH.includes(i.name));
+      }
+
+      if (bestMatch && !itemMap.some((m) => m.colIdx === colIdx)) {
+        itemMap.push({ item: bestMatch, colIdx });
       }
     });
 
     const parsed: any[] = [];
-    dataRows.forEach((row, rowIdx) => {
+    dataRows.forEach((row) => {
       if (!row.some(c => c)) return;
+      const rowStr = row.join('');
+      if (rowStr.includes('欄')) return; // Skip helper rows
 
       const method = idxMethod !== -1 && row[idxMethod] ? String(row[idxMethod]) : '';
       let targetDate = '';
-      if (method && method.includes('店')) {
+      if (method && (method.includes('店') || method.includes('自取'))) {
         targetDate = idxStoreDate !== -1 && row[idxStoreDate] ? String(row[idxStoreDate]) : '';
-      } else if (method && method.includes('宅配')) {
+      } else if (method && (method.includes('宅配') || method.includes('出貨') || method.includes('寄送'))) {
         targetDate = idxShipDate !== -1 && row[idxShipDate] ? String(row[idxShipDate]) : '';
       } else {
         targetDate = (idxStoreDate !== -1 && row[idxStoreDate] ? String(row[idxStoreDate]) : '') || (idxShipDate !== -1 && row[idxShipDate] ? String(row[idxShipDate]) : '');
       }
 
-      const d = normalizeDateKey(
-        targetDate.trim() ? targetDate.trim().replace(/\//g, '-') : currentDate
-      );
-
-      const buyer = idxBuyer !== -1 && row[idxBuyer] ? String(row[idxBuyer]) : `未命名訂單 (${rowIdx+1})`;
+      const d = targetDate.trim() ? targetDate.trim().replace(/\//g, '-') : currentDate;
+      
+      const buyer = idxBuyer !== -1 && row[idxBuyer] ? String(row[idxBuyer]) : '未知';
       const phone = idxPhone !== -1 && row[idxPhone] ? String(row[idxPhone]) : '';
-      let addr = idxAddr !== -1 && row[idxAddr] ? String(row[idxAddr]) : '';
-      if (!addr && method) addr = method; // fall back to method if address is empty
+      const addr = idxAddr !== -1 && row[idxAddr] ? String(row[idxAddr]) : '';
 
-      let shipAmt = 0;
-      if (method) {
-        const smatch = method.match(/運費(\d+)/);
-        if (smatch) {
-          shipAmt = parseInt(smatch[1]);
-        }
+      const rNameRaw = idxRecipientName !== -1 ? String(row[idxRecipientName] || '').trim() : '';
+      const rStatusRaw = idxRecipientStatus !== -1 ? String(row[idxRecipientStatus] || '').trim() : '';
+      
+      let recipientName = '';
+      if (rNameRaw && !['與訂購人相同', '與訂購人不同'].includes(rNameRaw)) {
+        recipientName = rNameRaw;
+      } else if (rStatusRaw && !['與訂購人相同', '與訂購人不同'].includes(rStatusRaw)) {
+        recipientName = rStatusRaw;
+      } else {
+        recipientName = buyer;
       }
-
+      
+      let recipientPhone = idxRecipientPhone !== -1 && row[idxRecipientPhone] ? String(row[idxRecipientPhone]) : '';
+      if (!recipientPhone) recipientPhone = phone;
+      
       const items: Record<string, number> = {};
       let prodAmt = 0;
       itemMap.forEach(m => {
@@ -1290,75 +1345,80 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
       if (Object.keys(items).length > 0) {
         parsed.push({
           date: d,
-          buyer, phone, addr, items, prodAmt, shipAmt
+          buyer, phone, addr, recipientName, recipientPhone, items, prodAmt
         });
       }
     });
 
+    if (parsed.length === 0) {
+      alert("解析完成，但未找到有效訂單資料。請檢查標題列是否包含「姓名/電話/取貨方式/項目名稱」等關鍵字。");
+    }
     setParsedOrders(parsed);
   };
 
   const confirmImport = async () => {
-    // Note: window.confirm is blocked in iframe previews, performing import directly
+    // Replaced window.confirm with silent proceed or more interactive check if needed.
+    // Given the user report, window.confirm might be blocking in their iframe.
+    // We will proceed without confirm or add a simple state-based one if needed.
+    // For now, let's just make it robust.
+    
+    if (parsedOrders.length === 0) return;
+
     // Group by date
     const byDate: Record<string, any[]> = {};
     parsedOrders.forEach(po => {
-      if (!byDate[po.date]) byDate[po.date] = [];
-      byDate[po.date].push(po);
+      const dKey = normalizeDateKey(po.date);
+      if (!byDate[dKey]) byDate[dKey] = [];
+      byDate[dKey].push(po);
     });
 
-    for (const [date, orders] of Object.entries(byDate)) {
-      if (date === currentDate) {
+    try {
+      for (const [date, orders] of Object.entries(byDate)) {
         const appended = orders.map(po => ({
           id: uid(),
           buyer: po.buyer,
           items: po.items,
           prodAmt: po.prodAmt,
-          shipAmt: po.shipAmt,
+          shipAmt: 0,
           discAmt: 0,
-          actualAmt: po.prodAmt + po.shipAmt,
+          actualAmt: po.prodAmt,
           status: '匯款' as const,
           note: `${po.phone} | ${po.addr}`.trim(),
           phone: po.phone,
-          address: po.addr
+          address: po.addr,
+          recipientName: po.recipientName,
+          recipientPhone: po.recipientPhone
         }));
-        updateDaily({ orders: [...dailyData.orders, ...appended] });
-      } else {
-        const dateKey = normalizeDateKey(date);
-        const ref = doc(db, 'shops', shopId, 'daily', dateKey);
-        const snap = await getDoc(ref);
-        let existingOrders: Order[] = [];
-        let existingData = {};
-        if (snap.exists()) {
-          existingData = snap.data();
-          existingOrders = snap.data().orders || [];
+
+        if (date === normalizeDateKey(currentDate)) {
+          updateDaily({ orders: [...dailyData.orders, ...appended] });
+        } else {
+          const dateKey = normalizeDateKey(date);
+          const ref = doc(db, 'shops', shopId, 'daily', dateKey);
+          const snap = await getDoc(ref);
+          let existingOrders: Order[] = [];
+          let existingData = {};
+          if (snap.exists()) {
+            existingData = snap.data();
+            existingOrders = snap.data().orders || [];
+          }
+          
+          await setDoc(ref, { 
+            ...existingData, 
+            date: dateKey,
+            orders: [...existingOrders, ...appended] 
+          }, { merge: true });
         }
-
-        const appended = orders.map(po => ({
-          id: uid(),
-          buyer: po.buyer,
-          items: po.items,
-          prodAmt: po.prodAmt,
-          shipAmt: po.shipAmt,
-          discAmt: 0,
-          actualAmt: po.prodAmt + po.shipAmt,
-          status: '匯款' as const,
-          note: `${po.phone} | ${po.addr}`.trim(),
-          phone: po.phone,
-          address: po.addr
-        }));
-        
-        await setDoc(ref, { 
-          ...existingData, 
-          dateKey, 
-          orders: [...existingOrders, ...appended] 
-        }, { merge: true });
       }
-    }
 
-    alert("匯入成功！");
-    setImportText('');
-    setParsedOrders([]);
+      setRefreshKey(prev => prev + 1);
+      setImportText('');
+      setParsedOrders([]);
+      alert("匯入成功！");
+    } catch (err) {
+      console.error(err);
+      alert("匯入發生錯誤，請稍後再試。");
+    }
   };
 
     const copyText = (text: string, e: React.MouseEvent<HTMLButtonElement>) => {
@@ -1405,17 +1465,27 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
             <div className="overflow-x-auto">
               <table className="w-full text-sm text-center border-collapse bg-white border border-gray-100 rounded-lg">
                 <thead className="bg-gray-50 text-gray-500">
-                  <tr><th className="p-2 border-b border-gray-100">日期</th><th className="p-2 border-b border-gray-100">訂購人</th><th className="p-2 border-b border-gray-100">電話</th><th className="p-2 border-b border-gray-100 text-left">項目</th><th className="p-2 border-b border-gray-100">運費</th><th className="p-2 border-b border-gray-100">總額</th></tr>
+                  <tr>
+                    <th className="p-2 border-b border-gray-100">日期</th>
+                    <th className="p-2 border-b border-gray-100">訂購人</th>
+                    <th className="p-2 border-b border-gray-100 text-left">收件人</th>
+                    <th className="p-2 border-b border-gray-100 text-left">項目</th>
+                    <th className="p-2 border-b border-gray-100 text-right">總額</th>
+                  </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
                   {parsedOrders.map((o, i) => (
                     <tr key={i} className="hover:bg-gray-50">
-                      <td className="p-2">{o.date}</td>
+                      <td className="p-2 font-mono font-bold">{o.date}</td>
                       <td className="p-2 font-bold">{o.buyer}</td>
-                      <td className="p-2">{o.phone}</td>
-                      <td className="p-2 text-left">{Object.keys(o.items).reduce((acc, curr) => acc + o.items[curr], 0)} 件商品</td>
-                      <td className="p-2">{o.shipAmt > 0 ? `$${fmt(o.shipAmt)}` : '-'}</td>
-                      <td className="p-2 font-bold text-rose-brand">${fmt(o.prodAmt + o.shipAmt)}</td>
+                      <td className="p-2 text-left">
+                        <div className="flex flex-col">
+                          <span className="font-bold text-coffee-700">{o.recipientName}</span>
+                          <span className="text-[10px] text-gray-400 font-mono">{o.recipientPhone}</span>
+                        </div>
+                      </td>
+                      <td className="p-2 text-left">{Object.keys(o.items).length} 項品項</td>
+                      <td className="p-2 font-bold text-rose-brand font-mono text-right">${fmt(o.prodAmt)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -1427,14 +1497,14 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
 
       {/* Weekly View */}
       <div className="glass-panel p-6 border border-coffee-100 shadow-sm bg-transparent">
-        <div className="flex justify-between items-center mb-4 pb-2 border-b border-coffee-100">
+        <div className="flex justify-between items-center mb-6 pb-2 border-b border-coffee-100">
           <h2 className="text-xl font-bold flex items-center gap-2 text-coffee-800">
             <CalendarDays className="w-5 h-5 text-coffee-500" /> 當週訂購名單 (依日期分組)
           </h2>
           <span className="text-sm font-bold text-coffee-400 bg-white px-3 py-1 rounded-lg border border-coffee-100">{weekRange}</span>
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+        <div className="space-y-8">
           {Array.from({length: 7}).map((_, i) => {
             const [y, m, d] = currentDate.split('-').map(Number);
             const selDate = new Date(y, m - 1, d);
@@ -1444,53 +1514,96 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
             curDate.setDate(selDate.getDate() + diffToMon + i);
             const dateStr = `${curDate.getFullYear()}-${String(curDate.getMonth()+1).padStart(2,'0')}-${String(curDate.getDate()).padStart(2,'0')}`;
             
-            // Check if we have weekly data or daily Data matches
             const data = weeklyData.find(w => w.date === dateStr) || (dailyData.date === dateStr ? dailyData : null);
             const validOrders = data?.orders?.filter(o => o.buyer.trim() || o.actualAmt > 0) || [];
 
             if (validOrders.length === 0) return null;
 
             return (
-              <div key={dateStr} className="flex flex-col bg-white rounded-xl shadow-sm border border-coffee-100 min-h-[200px] overflow-hidden">
-                <h3 className="bg-coffee-50 p-3 font-bold text-coffee-700 text-sm border-b border-coffee-100 flex items-center gap-2">
-                  <CalendarDays className="w-4 h-4 text-coffee-400" /> {dateStr}
+              <div key={dateStr} className="flex flex-col bg-white rounded-xl shadow-sm border border-coffee-100 overflow-hidden">
+                <h3 className="bg-coffee-50 p-3 font-bold text-coffee-800 text-sm border-b border-coffee-100 flex items-center gap-2 sticky top-0 z-10">
+                  <CalendarDays className="w-4 h-4 text-rose-brand" /> {dateStr}
+                  <span className="ml-auto text-[10px] text-coffee-400 font-bold uppercase tracking-wider">共 {validOrders.length} 筆訂單</span>
                 </h3>
-                <div className="flex-1 overflow-y-auto p-2">
-                  <table className="w-full text-xs text-center border-collapse">
-                    <thead className="bg-[#a2d2ff]/10 text-coffee-600">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left border-collapse">
+                    <thead className="bg-[#a2d2ff]/5 text-coffee-500 font-bold">
                       <tr>
-                        <th className="p-1 px-2 text-left w-1/3">訂購人</th>
-                        <th className="p-1 px-2 w-1/3">金額</th>
-                        <th className="p-1 px-2 text-right w-1/3">通訊/備路</th>
+                        <th className="p-3 border-b border-coffee-50">訂購人/金額</th>
+                        <th className="p-3 border-b border-coffee-50">項目內容</th>
+                        <th className="p-3 border-b border-coffee-50">收件資訊</th>
+                        <th className="p-3 border-b border-coffee-50 text-right">備註/地址</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-coffee-50">
-                      {validOrders.map((o: any) => (
-                        <tr key={o.id} className="hover:bg-coffee-50/50">
-                          <td className="p-1 px-2 text-left font-bold text-coffee-800">{o.buyer}</td>
-                          <td className="p-1 px-2 font-serif-brand font-bold text-rose-brand">${fmt(o.actualAmt)}</td>
-                          <td className="p-1 px-2 text-right">
-                            <div className="flex flex-col items-end gap-1">
-                              {o.phone && (
-                                <div className="flex items-center gap-1 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100 text-[10px] text-gray-500 whitespace-nowrap">
-                                  {o.phone}
-                                  <button onClick={(e) => copyText(o.phone, e)} className="hover:text-mint-brand transition-colors p-[2px] rounded hover:bg-mint-100" title="複製電話">
+                      {validOrders.map((o: any) => {
+                        const getItemName = (id: string) => {
+                          const item = [...settings.giftItems, ...settings.singleItems, ...(settings.customCategories || []).flatMap(c => c.items || [])].find(i => i?.id === id);
+                          return item ? item.name : id;
+                        };
+
+                        return (
+                          <tr key={o.id} className="hover:bg-coffee-50/30 transition">
+                            <td className="p-3 align-top">
+                              <div className="flex flex-col gap-0.5">
+                                <span className="font-bold text-coffee-800 text-[13px]">{o.buyer}</span>
+                                <span className="font-mono font-bold text-rose-brand text-[11px]">${fmt(o.actualAmt)}</span>
+                              </div>
+                            </td>
+                            <td className="p-3 align-top">
+                              <div className="text-coffee-600 leading-relaxed font-medium">
+                                {(o.items ? Object.entries(o.items) : [])
+                                  .filter(([_, q]) => parseNum(q) > 0)
+                                  .map(([k, q]) => `${getItemName(k)} x ${q}`)
+                                  .join(', ')}
+                              </div>
+                            </td>
+                            <td className="p-3 align-top">
+                              <div className="flex flex-col gap-1.5 min-w-[120px]">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-coffee-700">{o.recipientName || o.buyer}</span>
+                                  <button onClick={(e) => copyText(o.recipientName || o.buyer, e)} className="p-1 hover:bg-mint-100 rounded text-coffee-300 hover:text-mint-brand transition" title="複製收件人">
                                     <Copy className="w-3 h-3" />
                                   </button>
                                 </div>
-                              )}
-                              {o.note && (
-                                <span className="text-[10px] text-gray-400 truncate max-w-[80px]" title={o.note}>{o.note}</span>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[10px] font-mono font-bold text-coffee-400 bg-coffee-50 px-1.5 py-0.5 rounded border border-coffee-100">
+                                    {o.recipientPhone || o.phone || '無電話'}
+                                  </span>
+                                  {(o.recipientPhone || o.phone) && (
+                                    <button onClick={(e) => copyText(o.recipientPhone || o.phone, e)} className="p-1 hover:bg-mint-100 rounded text-coffee-300 hover:text-mint-brand transition" title="複製電話">
+                                      <Copy className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </td>
+                            <td className="p-3 text-right align-top">
+                              <div className="flex flex-col items-end gap-1.5">
+                                {o.address ? (
+                                  <div className="flex items-center gap-1.5 justify-end group">
+                                    <span className="text-[10px] text-coffee-500 max-w-[150px] truncate" title={o.address}>
+                                      {o.address}
+                                    </span>
+                                    <button onClick={(e) => copyText(o.address, e)} className="p-1 hover:bg-mint-100 rounded text-coffee-300 hover:text-mint-brand transition" title="複製地址">
+                                      <Copy className="w-3 h-3" />
+                                    </button>
+                                  </div>
+                                ) : (
+                                  <span className="text-[10px] text-coffee-300 italic">無收件地址</span>
+                                )}
+                                {o.note && (
+                                  <div className="text-[10px] text-coffee-400 italic max-w-[180px] break-all">
+                                    備註: {o.note}
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
-                </div>
-                <div className="bg-gray-50 p-2 text-right text-[10px] font-bold text-coffee-500 border-t border-gray-100">
-                  共 {validOrders.length} 筆訂單
                 </div>
               </div>
             );

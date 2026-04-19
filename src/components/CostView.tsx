@@ -186,7 +186,7 @@ export default function CostView({ settings, shopId }: { settings: Settings, sho
                   <span key={t} className="text-[10px] bg-coffee-100 text-coffee-600 px-1.5 py-0.5 rounded font-bold">{t}</span>
                 ))}
               </div>
-              <div className="text-xs text-coffee-400 font-mono mt-0.5">1單位成本: ${costs[r.id]?.toFixed(2)} / {r.unit || '單位'}</div>
+              <div className="text-xs text-coffee-400 font-serif-brand font-bold mt-0.5">1單位成本: ${costs[r.id]?.toFixed(2)} / {r.unit || '單位'}</div>
             </div>
           </div>
           <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
@@ -213,7 +213,7 @@ export default function CostView({ settings, shopId }: { settings: Settings, sho
                       return (
                         <li key={item.id} className="flex justify-between text-coffee-700">
                           <span>• {name || <span className="text-red-400">未知項目</span>}</span>
-                          <span className="font-mono">{item.quantity} {unit}</span>
+                          <span className="font-serif-brand font-bold">{item.quantity} {unit}</span>
                         </li>
                       );
                     })}
@@ -221,7 +221,7 @@ export default function CostView({ settings, shopId }: { settings: Settings, sho
                 </div>
                 <div>
                   <h5 className="font-bold text-coffee-600 border-b border-coffee-200 pb-1 mb-2">產出</h5>
-                  <div className="text-coffee-700 font-mono">{r.yield} {r.unit}</div>
+                  <div className="text-coffee-700 font-serif-brand font-bold">{r.yield} {r.unit}</div>
                 </div>
               </div>
             </motion.div>
@@ -346,11 +346,11 @@ export default function CostView({ settings, shopId }: { settings: Settings, sho
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-coffee-500 mb-1">產出數量 (number)</label>
-                    <input type="number" min="1" step="1" value={formData.yield || ''} onChange={e => setFormData({...formData, yield: parseInt(e.target.value, 10) || 0})} className="w-full border-b-2 border-coffee-200 bg-transparent py-2 outline-none focus:border-coffee-600 font-mono text-coffee-800" />
+                    <input type="number" min="1" step="1" value={formData.yield || ''} onChange={e => setFormData({...formData, yield: parseInt(e.target.value, 10) || 0})} className="w-full border-b-2 border-coffee-200 bg-transparent py-2 outline-none focus:border-coffee-600 font-serif-brand font-bold text-coffee-800" />
                   </div>
                   <div>
                     <label className="block text-xs font-bold text-coffee-500 mb-1">單位 (unit)</label>
-                    <input type="text" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})} className="w-full border-b-2 border-coffee-200 bg-transparent py-2 outline-none focus:border-coffee-600 font-mono text-coffee-800" placeholder="例如: 顆" />
+                    <input type="text" value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})} className="w-full border-b-2 border-coffee-200 bg-transparent py-2 outline-none focus:border-coffee-600 font-serif-brand font-bold text-coffee-800" placeholder="例如: 顆" />
                   </div>
                 </div>
 

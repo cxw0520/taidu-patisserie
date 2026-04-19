@@ -260,7 +260,7 @@ export default function PurchasingTab({
                        </div>
                        
                        <div className="md:col-span-12 text-right mt-1">
-                         <span className="text-[10px] text-coffee-400 font-bold">單價估算: <span className="text-mint-brand">{line.qty > 0 ? `$${fmt(line.amount / line.qty)}` : '-'}</span> / {materials.find(m => m.id === line.materialId)?.unit || '單位'}</span>
+                         <span className="text-[10px] text-coffee-400 font-bold">單價估算: <span className="text-mint-brand font-serif-brand font-bold">{line.qty > 0 ? `$${fmt(line.amount / line.qty)}` : '-'}</span> / {materials.find(m => m.id === line.materialId)?.unit || '單位'}</span>
                        </div>
                      </div>
                    ))}

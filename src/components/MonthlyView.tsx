@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
-import { fmt, parseNum, monthISO, uid } from '../lib/utils';
+import { fmt, parseNum, monthISO, uid, normalizeFlavorName } from '../lib/utils';
 import { DailyReport, Settings, Order, Material } from '../types';
 import { Wallet, PieChart as ChartIcon, TrendingUp, ReceiptText, Users, Home, Lightbulb, Wrench, Info, Megaphone, Trash2, Plus, X, CheckSquare, Square } from 'lucide-react';
 import { cn } from '../lib/utils';
@@ -27,6 +27,7 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
   const [selectedMonth, setSelectedMonth] = useState(monthISO());
   const [monthData, setMonthData] = useState<DailyReport[]>([]);
   const [fixedCosts, setFixedCosts] = useState<{ id: string, label: string, amount: number }[]>([]);
+  const [costOverrides, setCostOverrides] = useState<Record<string, number>>({});
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [activeTab, setActiveTab] = useState<'finance' | 'product'>('finance');
@@ -62,6 +63,11 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
             { id: 'misc', label: '會計雜項', amount: parseNum(data.fixed?.misc) || 0 },
             { id: 'ads', label: '行銷廣告', amount: parseNum(data.fixed?.ads) || 0 },
           ]);
+        }
+        if (data.costOverrides) {
+          setCostOverrides(data.costOverrides);
+        } else {
+          setCostOverrides({});
         }
       } else {
         // Try fetching the most recent month to carry over custom fixed cost definitions
@@ -124,12 +130,52 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
       memo[recipeId] = unitCost;
       return unitCost;
     };
-    return (name: string) => {
-      const recipe = recipes.find(r => r.name === name && r.type === 'finished');
+    return (nameOrItem: string | any) => {
+      const name = typeof nameOrItem === 'string' ? normalizeFlavorName(nameOrItem) : normalizeFlavorName(nameOrItem.name);
+      const itemId = typeof nameOrItem === 'object' ? nameOrItem.id : null;
+      
+      // Try finding by name (finished product)
+      const recipe = recipes.find(r => (normalizeFlavorName(r.name) === name || r.id === itemId) && r.type === 'finished');
       if (recipe) return calculate(recipe.id);
+
+      // Fallback for Gift Boxes: use their internal recipe if it exists
+      const item = settings.giftItems.find(i => normalizeFlavorName(i.name) === name || i.id === itemId);
+      if (item && item.recipe) {
+        let total = 0;
+        Object.entries(item.recipe).forEach(([flavor, qty]) => {
+          total += calculateRecipeByName(flavor) * parseNum(qty);
+        });
+        return total;
+      }
       return 0;
     };
-  }, [recipes, materials]);
+  }, [recipes, materials, settings.giftItems]);
+
+  const calculateRecipeByName = (name: string) => {
+    const r = recipes.find(rec => normalizeFlavorName(rec.name) === normalizeFlavorName(name));
+    if (!r) return 0;
+    
+    const memo: Record<string, number> = {};
+    const calculate = (recipeId: string, visited = new Set<string>()): number => {
+      if (memo[recipeId] !== undefined) return memo[recipeId];
+      if (visited.has(recipeId)) return 0;
+      const recipe = recipes.find(res => res.id === recipeId);
+      if (!recipe || recipe.yield <= 0) return 0;
+      let total = 0;
+      for (const it of recipe.items) {
+        if (it.type === 'material') {
+          const mat = materials.find(m => m.id === it.itemId);
+          total += (mat?.avgCost || 0) * it.quantity;
+        } else {
+          total += calculate(it.itemId, new Set([...visited, recipeId])) * it.quantity;
+        }
+      }
+      const unit = total / recipe.yield;
+      memo[recipeId] = unit;
+      return unit;
+    };
+    return calculate(r.id);
+  };
 
   // Rest of the UI calculation logic...
   return (
@@ -166,8 +212,11 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
           selectedMonth={selectedMonth}
           fixedCosts={fixedCosts}
           setFixedCosts={setFixedCosts}
+          costOverrides={costOverrides}
+          setCostOverrides={setCostOverrides}
           getRecipeCost={getRecipeCost}
           materials={materials}
+          recipes={recipes}
           showARModal={showARModal}
           setShowARModal={setShowARModal}
           selectedBuyer={selectedBuyer}
@@ -260,7 +309,7 @@ function ARReconciliationModal({ monthData, shopId, onClose, selectedBuyer, setS
                   <span className="font-bold text-coffee-700">{name}</span>
                   <div className="flex items-center gap-4">
                     <span className="text-sm text-coffee-400">{group.orders.length} 筆交易</span>
-                    <span className={cn("font-serif-brand font-bold text-lg", group.total > 0 ? "text-rose-brand" : "text-mint-brand")}>
+                    <span className={cn("font-mono font-bold text-lg", group.total > 0 ? "text-rose-brand" : "text-mint-brand")}>
                       ${fmt(group.total)} <span className="text-xs font-sans font-normal text-coffee-400 ml-1">未收</span>
                     </span>
                   </div>
@@ -273,10 +322,10 @@ function ARReconciliationModal({ monthData, shopId, onClose, selectedBuyer, setS
                 <div key={o.id} className={cn("flex justify-between items-center p-4 border rounded-xl transition", o.isReconciled ? "bg-mint-50/30 border-mint-200" : "bg-white border-rose-100")}>
                   <div className="flex flex-col gap-1">
                     <span className="text-xs font-bold text-coffee-400">{o.date}</span>
-                    <span className="font-bold text-coffee-800">{Object.entries(o.items).filter(([_,q]) => parseNum(q)>0).map(([k,q]) => `${k}x${q}`).join(', ')}</span>
+                    <span className="font-bold text-coffee-800">{Object.entries(o.items || {}).filter(([_,q]) => parseNum(q)>0).map(([k,q]) => `${k}x${q}`).join(', ')}</span>
                   </div>
                   <div className="flex items-center gap-4">
-                    <span className="font-serif-brand font-bold text-lg text-coffee-700">${fmt(o.actualAmt)}</span>
+                    <span className="font-mono font-bold text-lg text-coffee-700">${fmt(o.actualAmt)}</span>
                     <button 
                       onClick={() => toggleReconcile(o.date, o.id, !!o.isReconciled)}
                       className={cn("flex items-center gap-1 px-3 py-1.5 rounded-lg font-bold text-sm transition focus:ring-4 focus:outline-none", o.isReconciled ? "bg-mint-100 text-mint-700 hover:bg-mint-200 focus:ring-mint-50" : "bg-white border border-coffee-200 text-coffee-600 hover:bg-coffee-50 focus:ring-coffee-50 shadow-sm")}
@@ -295,7 +344,8 @@ function ARReconciliationModal({ monthData, shopId, onClose, selectedBuyer, setS
   );
 }
 
-function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, getRecipeCost, materials, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
+function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, getRecipeCost, materials, recipes, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
+  const [showFoodCostModal, setShowFoodCostModal] = useState(false);
   const stats = useMemo(() => {
     let salesTotal = 0;
     let discTotal = 0;
@@ -309,8 +359,9 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
     // Ingredients
     const itemSales: Record<string, number> = {};
-    const itemPR: Record<string, number> = {}; // track PR items separately if needed? Actually prompt says PR value
-    
+    const itemPR: Record<string, number> = {}; 
+    const itemQuantities: Record<string, number> = {}; // item.id -> total qty sold (sales + PR)
+
     // Spoilage
     let lossCost = 0;
 
@@ -319,10 +370,10 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
     monthData.forEach((d: DailyReport) => {
       // Daily Logistics
-      logSpent += parseNum(d.ar.logSpent);
+      logSpent += parseNum(d.ar?.logSpent);
       
       // Spoilage
-      d.losses.forEach(loss => {
+      (d.losses || []).forEach(loss => {
         const cost = getRecipeCost(loss.flavor);
         lossCost += cost * loss.qty;
       });
@@ -335,62 +386,83 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
         }
       });
 
-      d.orders.forEach(o => {
+      (d.orders || []).forEach(o => {
         if (o.status === '公關品') {
-          prTotal += o.prodAmt;
-          prShip += o.shipAmt; // track PR shipping
+          prTotal += o.prodAmt || 0;
+          prShip += o.shipAmt || 0; 
         } else {
-          salesTotal += o.prodAmt;
-          discTotal += o.discAmt;
-          if (o.status === '匯款') remit += o.actualAmt;
-          if (o.status === '現結') cash += o.actualAmt;
-          if (o.status === '未結帳款' || o.status === '已收帳款') ar += o.actualAmt;
+          salesTotal += o.prodAmt || 0;
+          discTotal += o.discAmt || 0;
+          if (o.status === '匯款') remit += o.actualAmt || 0;
+          if (o.status === '現結') cash += o.actualAmt || 0;
+          if (o.status === '未結帳款' || o.status === '已收帳款') ar += o.actualAmt || 0;
         }
 
         // Calculate sold items / components
-        Object.entries(o.items).forEach(([itemId, qtyStr]) => {
+        Object.entries(o.items || {}).forEach(([itemId, qtyStr]) => {
           const qty = parseNum(qtyStr);
           if (qty <= 0) return;
 
-          const single = settings.singleItems.find((i: any) => i.id === itemId);
-          if (single) {
-            itemSales[single.name] = (itemSales[single.name] || 0) + qty;
-            if (o.status === '公關品') itemPR[single.name] = (itemPR[single.name] || 0) + qty;
-          } else {
-            const gift = settings.giftItems.find((i: any) => i.id === itemId);
-            if (gift) {
-              // Add gift box default packaging
-              pkgUsage['禮盒紙盒'] = (pkgUsage['禮盒紙盒'] || 0) + qty;
-              pkgUsage['小卡'] = (pkgUsage['小卡'] || 0) + qty;
+          // Find the item definition to see if it has a recipe
+          const item = settings.singleItems.find((i: any) => i.id === itemId) || 
+                       settings.giftItems.find((i: any) => i.id === itemId) ||
+                       (settings.customCategories || []).flatMap(c => c.items).find((i: any) => i.id === itemId);
 
-              // Break down gift into singles
-              if (gift.recipe) {
-                Object.entries(gift.recipe).forEach(([flavor, rQty]) => {
-                  itemSales[flavor] = (itemSales[flavor] || 0) + qty * parseNum(rQty);
-                  if (o.status === '公關品') itemPR[flavor] = (itemPR[flavor] || 0) + qty * parseNum(rQty);
-                });
+          if (item) {
+            if (item.recipe) {
+              // It's a gift or complex item with a recipe - break it down
+              Object.entries(item.recipe || {}).forEach(([flavor, rQty]) => {
+                const normFlavor = normalizeFlavorName(flavor);
+                const vol = qty * parseNum(rQty);
+                itemSales[normFlavor] = (itemSales[normFlavor] || 0) + vol;
+                if (o.status === '公關品') itemPR[normFlavor] = (itemPR[normFlavor] || 0) + vol;
+              });
+              
+              // If it's specifically a gift box, we still need to track packaging separately
+              const isGift = settings.giftItems.find((i: any) => i.id === itemId);
+              if (isGift) {
+                pkgUsage['禮盒紙盒'] = (pkgUsage['禮盒紙盒'] || 0) + qty;
+                pkgUsage['小卡'] = (pkgUsage['小卡'] || 0) + qty;
               }
+            } else {
+              // It's a simple item - count it directly
+              const normName = normalizeFlavorName(item.name);
+              itemSales[normName] = (itemSales[normName] || 0) + qty;
+              if (o.status === '公關品') itemPR[normName] = (itemPR[normName] || 0) + qty;
             }
           }
         });
       });
     });
 
-    const netRevenue = salesTotal - discTotal - prTotal; // As per prompt
+    // Item Detailed Cost Breakdown (based on dessert/flavor names)
+    const flavorNames = Array.from(new Set([...Object.keys(itemSales), ...Object.keys(itemPR)]));
+    
+    const itemCostBreakdown = flavorNames.map((name: string) => {
+      const qty = (itemSales[name] || 0); // itemSales already includes both sales and PR in the loop above
+      // We need an ID for costOverrides if available
+      const itemDef = settings.singleItems.find((i: any) => i.name === name) || 
+                      settings.giftItems.find((i: any) => i.name === name) ||
+                      (settings.customCategories || []).flatMap(c => c.items).find((i: any) => i.name === name);
+      
+      const targetId = itemDef?.id || name;
+      const unitCost = costOverrides[targetId] !== undefined ? costOverrides[targetId] : getRecipeCost(name);
+      return { 
+        id: targetId,
+        name: name,
+        qty,
+        unitCost,
+        subtotal: qty * unitCost
+      };
+    }).filter((i: any) => i.qty > 0);
+
+    const netRevenue = salesTotal - discTotal - prTotal; 
     
     // Ingredients cost sum
-    let ingredCost = 0;
-    let prIngredCost = 0; // Cost of PR items
-    Object.entries(itemSales).forEach(([flavor, qty]) => {
-      const cost = getRecipeCost(flavor);
-      ingredCost += qty * cost;
-    });
-    // Calculate how much of ingred cost is from PR? Actually prompt says "售出公關品的成本計算...為 行銷費用-公關品"
-    // So PR cost = Cost of items given as PR. 
-    Object.entries(itemPR).forEach(([flavor, qty]) => {
-      const cost = getRecipeCost(flavor);
-      prIngredCost += qty * cost;
-    });
+    // Use the breakdown sum for consistency
+    const ingredCost = itemCostBreakdown.reduce((acc, cur) => acc + cur.subtotal, 0);
+
+    const prIngredCost = Object.entries(itemPR).reduce((acc, [flavor, qty]) => acc + qty * getRecipeCost(flavor), 0);
 
     // Packaging cost sum
     let pkgCostTotal = 0;
@@ -413,7 +485,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     return {
       salesTotal, discTotal, prTotal, netRevenue,
       remit, cash, ar,
-      itemSales, ingredCost,
+      itemSales, ingredCost, itemCostBreakdown,
       pkgDetails, pkgCostTotal,
       logSpent, lossCost,
       totalVariableCost,
@@ -421,7 +493,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       totalFixedCostsInput, totalMarketingAndFixed,
       netProfit
     };
-  }, [monthData, settings, getRecipeCost, materials, fixedCosts]);
+  }, [monthData, settings, getRecipeCost, materials, fixedCosts, costOverrides]);
 
   const updateFixedCostAmount = async (id: string, amount: number) => {
     const next = fixedCosts.map((c: any) => c.id === id ? { ...c, amount } : c);
@@ -433,16 +505,23 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     }, { merge: true });
   };
 
-  const addFixedCost = async () => {
-    const name = window.prompt("請輸入新的固定支出項目名稱:");
-    if (!name) return;
-    const next = [...fixedCosts, { id: uid(), label: name, amount: 0 }];
+  const [isAddingFixed, setIsAddingFixed] = useState(false);
+  const [newFixedName, setNewFixedName] = useState('');
+
+  const confirmAddFixed = async () => {
+    if (!newFixedName.trim()) {
+      setIsAddingFixed(false);
+      return;
+    }
+    const next = [...fixedCosts, { id: uid(), label: newFixedName.trim(), amount: 0 }];
     setFixedCosts(next);
     await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { 
       ym: selectedMonth, 
       fixedCostsList: next,
       updatedAt: new Date().toISOString()
     }, { merge: true });
+    setNewFixedName('');
+    setIsAddingFixed(false);
   };
 
   const removeFixedCost = async (id: string) => {
@@ -455,28 +534,36 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     }, { merge: true });
   };
 
+  const updateCostOverride = async (itemId: string, cost: number) => {
+    const next = { ...costOverrides, [itemId]: cost };
+    setCostOverrides(next);
+    await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { 
+      costOverrides: next 
+    }, { merge: true });
+  };
+
   return (
     <div className="space-y-8">
       {/* KPI Header */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-6">
-          <span className="text-coffee-400 font-bold text-sm mb-1 uppercase tracking-widest">本期淨營業額</span>
-          <span className="text-3xl font-serif-brand font-bold text-coffee-800">${fmt(stats.netRevenue)}</span>
+      <div className="flex flex-wrap md:flex-nowrap gap-4 items-stretch">
+        <div className="flex-1 min-w-[150px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
+          <span className="text-coffee-400 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">本期淨營業額</span>
+          <span className="text-xl md:text-2xl font-mono font-bold text-coffee-800">${fmt(stats.netRevenue)}</span>
         </div>
-        <div className="flex items-center justify-center text-coffee-300 font-bold text-2xl">-</div>
-        <div className="kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-6">
-          <span className="text-coffee-400 font-bold text-sm mb-1 uppercase tracking-widest">本期變動成本</span>
-          <span className="text-3xl font-serif-brand font-bold text-rose-brand">${fmt(stats.totalVariableCost)}</span>
+        <div className="flex items-center justify-center text-coffee-300 font-bold text-xl">-</div>
+        <div className="flex-1 min-w-[150px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
+          <span className="text-coffee-400 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">本期變動成本</span>
+          <span className="text-xl md:text-2xl font-mono font-bold text-rose-brand">${fmt(stats.totalVariableCost)}</span>
         </div>
-        <div className="flex items-center justify-center text-coffee-300 font-bold text-2xl">-</div>
-        <div className="kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-6">
-          <span className="text-coffee-400 font-bold text-sm mb-1 uppercase tracking-widest">行銷與固定支出</span>
-          <span className="text-3xl font-serif-brand font-bold text-rose-brand">${fmt(stats.totalMarketingAndFixed)}</span>
+        <div className="flex items-center justify-center text-coffee-300 font-bold text-xl">-</div>
+        <div className="flex-1 min-w-[150px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
+          <span className="text-coffee-400 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">行銷與固定支出</span>
+          <span className="text-xl md:text-2xl font-mono font-bold text-rose-brand">${fmt(stats.totalMarketingAndFixed)}</span>
         </div>
-        <div className="flex items-center justify-center text-coffee-300 font-bold text-2xl">=</div>
-        <div className="kpi-card bg-[#faf7f2] border border-coffee-100 shadow-md flex flex-col justify-center items-center py-6">
-          <span className="text-coffee-500 font-bold text-sm mb-1 uppercase tracking-widest">本期淨利</span>
-          <span className={cn("text-4xl font-serif-brand font-bold", stats.netProfit >= 0 ? "text-mint-brand" : "text-danger-brand")}>
+        <div className="flex items-center justify-center text-coffee-300 font-bold text-xl">=</div>
+        <div className="flex-[1.2] min-w-[180px] kpi-card bg-[#faf7f2] border border-coffee-100 shadow-md flex flex-col justify-center items-center py-4 px-2">
+          <span className="text-coffee-500 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">本期淨利</span>
+          <span className={cn("text-2xl md:text-3xl font-mono font-bold", stats.netProfit >= 0 ? "text-mint-brand" : "text-danger-brand")}>
             ${fmt(stats.netProfit)}
           </span>
         </div>
@@ -494,37 +581,37 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
           <div className="space-y-4 flex-1">
             <div className="flex justify-between items-center bg-coffee-50/50 p-3 rounded-xl border border-coffee-50">
               <span className="text-coffee-600 font-bold text-sm">售出產品總價值</span>
-              <span className="font-serif-brand font-bold">${fmt(stats.salesTotal)}</span>
+              <span className="font-mono font-bold">${fmt(stats.salesTotal)}</span>
             </div>
             <div className="flex justify-between items-center bg-coffee-50/50 p-3 rounded-xl border border-coffee-50">
               <span className="text-coffee-600 font-bold text-sm">折讓總金額</span>
-              <span className="font-serif-brand font-bold text-rose-brand">-${fmt(stats.discTotal)}</span>
+              <span className="font-mono font-bold text-rose-brand">-${fmt(stats.discTotal)}</span>
             </div>
             <div className="flex justify-between items-center bg-coffee-50/50 p-3 rounded-xl border border-coffee-50">
               <span className="text-coffee-600 font-bold text-sm">公關品總價值</span>
-              <span className="font-serif-brand font-bold text-coffee-500">(${fmt(stats.prTotal)})</span>
+              <span className="font-mono font-bold text-coffee-500">(${fmt(stats.prTotal)})</span>
             </div>
             <div className="flex justify-between items-center bg-coffee-100/50 p-4 rounded-xl border border-coffee-200 shadow-sm mt-2">
               <span className="text-coffee-800 font-bold">本月淨營業額</span>
-              <span className="font-serif-brand font-bold text-xl">${fmt(stats.netRevenue)}</span>
+              <span className="font-mono font-bold text-xl">${fmt(stats.netRevenue)}</span>
             </div>
 
             <div className="pt-4 mt-4 border-t border-coffee-100 space-y-3">
               <h4 className="text-sm font-bold text-coffee-400 uppercase tracking-widest mb-2">金流情況</h4>
               <div className="flex justify-between items-center px-2">
                 <span className="text-coffee-600 text-sm font-bold">現金收款</span>
-                <span className="font-serif-brand font-bold text-mint-brand">${fmt(stats.cash)}</span>
+                <span className="font-mono font-bold text-mint-brand">${fmt(stats.cash)}</span>
               </div>
               <div className="flex justify-between items-center px-2">
                 <span className="text-coffee-600 text-sm font-bold">銀行匯款</span>
-                <span className="font-serif-brand font-bold text-mint-brand">${fmt(stats.remit)}</span>
+                <span className="font-mono font-bold text-mint-brand">${fmt(stats.remit)}</span>
               </div>
               <button 
                 onClick={() => setShowARModal(true)}
                 className="w-full flex justify-between items-center px-3 py-2 bg-rose-50 border border-rose-100 rounded-lg hover:bg-rose-100 transition active:scale-95 group"
               >
                 <span className="text-rose-brand text-sm font-bold flex items-center gap-1">應收帳款 <Info className="w-3 h-3 group-hover:scale-110 transition"/></span>
-                <span className="font-serif-brand font-bold text-rose-brand">${fmt(stats.ar)}</span>
+                <span className="font-mono font-bold text-rose-brand">${fmt(stats.ar)}</span>
               </button>
             </div>
           </div>
@@ -539,20 +626,23 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
           </div>
           
           <div className="space-y-4 flex-1">
-            <div className="flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
-              <div className="flex justify-between items-center">
-                <span className="text-coffee-800 font-bold">食材成本</span>
-                <span className="font-serif-brand font-bold text-rose-brand">${fmt(stats.ingredCost)}</span>
+            <button 
+              onClick={() => setShowFoodCostModal(true)}
+              className="w-full flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100 hover:border-coffee-300 hover:shadow-md transition active:scale-[0.98] group text-left"
+            >
+              <div className="flex justify-between items-center w-full">
+                <span className="text-coffee-800 font-bold flex items-center gap-2">食材成本 <Plus className="w-3 h-3 text-coffee-400 group-hover:text-coffee-600"/></span>
+                <span className="font-mono font-bold text-rose-brand">${fmt(stats.ingredCost)}</span>
               </div>
               <div className="text-xs text-coffee-400 leading-tight">
-                包含各品項(含禮盒轉換單顆)銷售量 * 單位成品成本。
+                點擊查看各品項銷售與成本明細。
               </div>
-            </div>
+            </button>
 
             <div className="flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
               <div className="flex justify-between items-center">
                 <span className="text-coffee-800 font-bold">包材成本</span>
-                <span className="font-serif-brand font-bold text-rose-brand">${fmt(stats.pkgCostTotal)}</span>
+                <span className="font-mono font-bold text-rose-brand">${fmt(stats.pkgCostTotal)}</span>
               </div>
               {stats.pkgDetails.length > 0 && (
                 <div className="mt-2 flex flex-col gap-1 border-t border-coffee-100 pt-2">
@@ -565,8 +655,8 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                   {stats.pkgDetails.map((p, i) => (
                     <div key={i} className="grid grid-cols-4 text-xs text-coffee-600">
                       <span className="col-span-1 truncate">{p.name}</span>
-                      <span className="text-right font-mono">{p.qty}</span>
-                      <span className="text-right font-mono">${fmt(p.unitCost)}</span>
+                      <span className="text-right font-mono font-semibold">{p.qty}</span>
+                      <span className="text-right font-mono font-semibold">${fmt(p.unitCost)}</span>
                       <span className="text-right font-mono font-bold">${fmt(p.totalCost)}</span>
                     </div>
                   ))}
@@ -576,34 +666,53 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
             <div className="flex justify-between items-center p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
               <span className="text-coffee-800 font-bold">物流成本</span>
-              <span className="font-serif-brand font-bold text-rose-brand">${fmt(stats.logSpent)}</span>
+              <span className="font-mono font-bold text-rose-brand">${fmt(stats.logSpent)}</span>
             </div>
 
             <div className="flex justify-between items-center p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
               <span className="text-coffee-800 font-bold">耗損成本</span>
-              <span className="font-serif-brand font-bold text-rose-brand">${fmt(stats.lossCost)}</span>
+              <span className="font-mono font-bold text-rose-brand">${fmt(stats.lossCost)}</span>
             </div>
 
             <div className="flex justify-between items-center bg-rose-50/50 p-4 rounded-xl border border-rose-200 shadow-sm mt-4">
               <span className="text-rose-900 font-bold">本月變動成本</span>
-              <span className="font-serif-brand font-bold text-xl text-rose-brand">${fmt(stats.totalVariableCost)}</span>
+              <span className="font-mono font-bold text-xl text-rose-brand">${fmt(stats.totalVariableCost)}</span>
             </div>
           </div>
         </div>
 
         {/* Fixed Costs */}
         <div className="glass-panel p-6 bg-white flex flex-col gap-6">
-          <div className="border-b-2 border-coffee-800 pb-3 flex justify-between items-end">
-            <h3 className="text-xl font-bold text-coffee-800 flex items-center gap-2 tracking-wider">
-              <Home className="w-5 h-5 text-coffee-600" /> 行銷與固定成本
-            </h3>
-            <button 
-              onClick={addFixedCost}
-              className="text-xs bg-coffee-800 text-white px-2 py-1 rounded-md font-bold flex items-center gap-1 hover:bg-coffee-900 transition"
-            >
-              <Plus className="w-3 h-3" /> 新增
-            </button>
-          </div>
+            <div className="flex justify-between items-center p-4 border-b border-coffee-100 bg-[#faf7f2]">
+              <h3 className="font-bold text-coffee-800 flex items-center gap-2">
+                <Home className="w-5 h-5 text-coffee-600" /> 行銷與固定成本
+              </h3>
+              {isAddingFixed ? (
+                <div className="flex items-center gap-1">
+                  <input 
+                    autoFocus
+                    value={newFixedName}
+                    onChange={(e) => setNewFixedName(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && confirmAddFixed()}
+                    placeholder="項目名稱"
+                    className="text-xs border border-coffee-200 rounded px-1 py-1 outline-none w-24"
+                  />
+                  <button onClick={confirmAddFixed} className="text-xs bg-mint-brand text-white px-2 py-1 rounded font-bold hover:bg-mint-brand/80">
+                    確認
+                  </button>
+                  <button onClick={() => setIsAddingFixed(false)} className="text-xs text-coffee-400 hover:text-coffee-600 px-1">
+                    取消
+                  </button>
+                </div>
+              ) : (
+                <button 
+                  onClick={() => setIsAddingFixed(true)}
+                  className="text-xs bg-coffee-800 text-white px-2 py-1 rounded-md font-bold flex items-center gap-1 hover:bg-coffee-900 transition"
+                >
+                  <Plus className="w-3 h-3" /> 新增
+                </button>
+              )}
+            </div>
           
           <div className="space-y-3 flex-1 flex flex-col">
             <div className="flex justify-between items-center p-3 bg-indigo-50/50 rounded-xl border border-indigo-100">
@@ -611,7 +720,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                 <span className="text-indigo-900 font-bold text-sm">行銷費用-公關品</span>
                 <span className="text-[10px] text-indigo-400">公關品成本 + 寄出運費</span>
               </div>
-              <span className="font-serif-brand font-bold text-indigo-600">${fmt(stats.prMarketingCost)}</span>
+              <span className="font-mono font-bold text-indigo-600">${fmt(stats.prMarketingCost)}</span>
             </div>
             
             <div className="flex-1 overflow-y-auto space-y-2 pr-2" style={{ maxHeight: '250px' }}>
@@ -627,12 +736,12 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                     <span className="text-coffee-600 text-sm font-bold">{cost.label}</span>
                   </div>
                   <div className="flex items-end gap-1">
-                    <span className="text-coffee-300 font-serif-brand text-xs mb-1">$</span>
+                    <span className="text-coffee-300 font-mono text-xs mb-1">$</span>
                     <input 
                       type="number"
                       value={cost.amount || ''}
                       onChange={(e) => updateFixedCostAmount(cost.id, parseNum(e.target.value))}
-                      className="w-20 text-right bg-transparent border-b border-coffee-200 outline-none focus:border-coffee-500 font-serif-brand font-bold text-coffee-800"
+                      className="w-20 text-right bg-transparent border-b border-coffee-200 outline-none focus:border-coffee-500 font-mono font-bold text-coffee-800"
                     />
                   </div>
                 </div>
@@ -641,7 +750,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
             <div className="flex justify-between items-center bg-rose-50/50 p-4 rounded-xl border border-rose-200 shadow-sm mt-4">
               <span className="text-rose-900 font-bold">本月行銷與固定成本</span>
-              <span className="font-serif-brand font-bold text-xl text-rose-brand">${fmt(stats.totalMarketingAndFixed)}</span>
+              <span className="font-mono font-bold text-xl text-rose-brand">${fmt(stats.totalMarketingAndFixed)}</span>
             </div>
           </div>
         </div>
@@ -657,6 +766,86 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
             setSelectedBuyer={setSelectedBuyer}
           />
         )}
+        {showFoodCostModal && (
+           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+             <motion.div 
+               initial={{ opacity: 0, scale: 0.95 }}
+               animate={{ opacity: 1, scale: 1 }}
+               exit={{ opacity: 0, scale: 0.95 }}
+               className="w-full max-w-2xl bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden h-[80vh]"
+             >
+               <div className="flex justify-between items-center p-4 border-b border-coffee-100 bg-[#faf7f2]">
+                 <h3 className="font-bold text-coffee-800 flex items-center gap-2">
+                   <TrendingUp className="w-5 h-5 text-rose-brand" /> 
+                   食材成本明細
+                 </h3>
+                 <button onClick={() => setShowFoodCostModal(false)} className="p-1 hover:bg-coffee-200 rounded-lg text-coffee-500 transition">
+                   <X className="w-5 h-5" />
+                 </button>
+               </div>
+               
+               <div className="flex-1 overflow-y-auto">
+                 <table className="w-full text-sm text-left border-collapse">
+                   <thead className="bg-[#faf7f2] text-coffee-500 font-bold text-xs sticky top-0 z-10 shadow-sm">
+                     <tr>
+                       <th className="px-6 py-4 border-b border-coffee-100">品項名稱</th>
+                       <th className="px-6 py-4 border-b border-coffee-100 text-center">銷售數量</th>
+                       <th className="px-6 py-4 border-b border-coffee-100 text-right">單件成本</th>
+                       <th className="px-6 py-4 border-b border-coffee-100 text-right">小計</th>
+                     </tr>
+                   </thead>
+                   <tbody className="divide-y divide-coffee-50">
+                     {stats.itemCostBreakdown.map((item: any) => (
+                       <tr key={item.id} className="hover:bg-coffee-50/30 transition">
+                         <td className="px-6 py-4 font-bold text-coffee-800">{item.name}</td>
+                         <td className="px-6 py-4 text-center font-mono font-semibold">{item.qty}</td>
+                         <td className="px-6 py-4 text-right">
+                           <div className="flex flex-col items-end gap-2">
+                              <select 
+                                className="text-[10px] bg-coffee-50 border border-coffee-200 rounded px-1 py-0.5 outline-none focus:ring-1 focus:ring-rose-brand max-w-[120px] font-sans"
+                                value={recipes.find(r => r.name === item.name && r.type === 'finished')?.id || ''}
+                                onChange={(e) => {
+                                  const r = recipes.find(rec => rec.id === e.target.value);
+                                  if (r) {
+                                    updateCostOverride(item.id, getRecipeCost(r));
+                                  }
+                                }}
+                              >
+                                <option value="">選擇成品配方...</option>
+                                {recipes.filter(r => r.type === 'finished').map(r => (
+                                  <option key={r.id} value={r.id}>{r.name} (${fmt(getRecipeCost(r))})</option>
+                                ))}
+                              </select>
+                              <div className="flex items-center justify-end gap-1">
+                                <span className="text-[10px] text-coffee-300 font-mono font-bold">$</span>
+                                <input 
+                                  type="number"
+                                  value={item.unitCost || ''}
+                                  onChange={(e) => updateCostOverride(item.id, parseNum(e.target.value))}
+                                  className="w-16 text-right bg-transparent border-b border-coffee-200 focus:border-coffee-500 outline-none font-mono font-bold text-coffee-700"
+                                />
+                              </div>
+                            </div>
+                          </td>
+                         <td className="px-6 py-4 text-right font-mono font-bold text-coffee-900">${fmt(item.subtotal)}</td>
+                       </tr>
+                     ))}
+                   </tbody>
+                 </table>
+                 {stats.itemCostBreakdown.length === 0 && (
+                   <div className="text-center py-20 text-coffee-400 font-bold">本月尚無銷售資料</div>
+                 )}
+               </div>
+               
+               <div className="p-6 border-t border-coffee-100 bg-white">
+                 <div className="flex justify-between items-center">
+                   <span className="text-lg font-bold text-coffee-800">總計</span>
+                   <span className="text-2xl font-mono font-bold text-rose-brand">${fmt(stats.ingredCost)}</span>
+                 </div>
+               </div>
+             </motion.div>
+           </div>
+        )}
       </AnimatePresence>
     </div>
   );
@@ -666,23 +855,27 @@ function ProductTab({ monthData, settings }: any) {
   const productStats = useMemo(() => {
     const stats: Record<string, { qty: number, rev: number, category: string }> = {};
 
-    settings.giftItems.concat(settings.singleItems).forEach((item: any) => {
-      stats[item.id] = { qty: 0, rev: 0, category: item.category };
+    const allItems = [
+      ...settings.giftItems, 
+      ...settings.singleItems, 
+      ...(settings.customCategories || []).flatMap(c => c.items)
+    ];
+
+    allItems.forEach((item: any) => {
+      stats[item.id] = { qty: 0, rev: 0, category: item.category || 'single' };
     });
 
     monthData.forEach((d: DailyReport) => {
       d.orders.forEach(o => {
-        if (o.status === '公關品') return; // maybe exclude PR? Or include? Let's exclude PR from revenue stats, just sales.
+        if (o.status === '公關品') return; 
         
-        Object.entries(o.items).forEach(([itemId, qtyStr]) => {
+        Object.entries(o.items || {}).forEach(([itemId, qtyStr]) => {
           const qty = parseNum(qtyStr);
           if (qty <= 0) return;
           
           if (stats[itemId]) {
             stats[itemId].qty += qty;
-            // Revenue proportion. This is tricky because we only have total prodAmt and discAmt per order. 
-            // We can estimate revenue by looking at listed price
-            const item = settings.giftItems.concat(settings.singleItems).find((i:any) => i.id === itemId);
+            const item = allItems.find((i:any) => i.id === itemId);
             if (item) {
               stats[itemId].rev += qty * (item.price || 0);
             }
@@ -694,10 +887,16 @@ function ProductTab({ monthData, settings }: any) {
     return stats;
   }, [monthData, settings]);
 
+  const allItems = [
+    ...settings.giftItems, 
+    ...settings.singleItems, 
+    ...(settings.customCategories || []).flatMap(c => c.items)
+  ];
+
   const sortedItems = Object.entries(productStats)
     .sort((a: [string, any],b: [string, any]) => b[1].qty - a[1].qty)
     .map(([id, stat]: [string, any]) => {
-      const item = settings.giftItems.concat(settings.singleItems).find((i:any) => i.id === id);
+      const item = allItems.find((i:any) => i.id === id);
       return { id, name: item?.name || '未知', ...stat };
     })
     .filter((stat: any) => stat.qty > 0);
@@ -735,7 +934,7 @@ function ProductTab({ monthData, settings }: any) {
                     </span>
                   </td>
                   <td className="px-4 py-3 text-right font-mono font-bold text-coffee-700">{item.qty}</td>
-                  <td className="px-4 py-3 text-right font-mono text-coffee-600">${fmt(item.rev)}</td>
+                  <td className="px-4 py-3 text-right font-mono font-bold text-coffee-600">${fmt(item.rev)}</td>
                 </tr>
               ))}
             </tbody>

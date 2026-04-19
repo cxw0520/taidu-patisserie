@@ -353,8 +353,8 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
                         {line.accountName}
                       </td>
                       <td className="p-4 text-xs text-gray-400 italic">{line.lineDescription || ''}</td>
-                      <td className="p-4 text-right font-mono text-gray-700">{line.type === 'debit' ? line.amount.toLocaleString() : ''}</td>
-                      <td className="p-4 text-right font-mono text-gray-700">{line.type === 'credit' ? line.amount.toLocaleString() : ''}</td>
+                      <td className="p-4 text-right font-mono font-bold text-gray-700">{line.type === 'debit' ? line.amount.toLocaleString() : ''}</td>
+                      <td className="p-4 text-right font-mono font-bold text-gray-700">{line.type === 'credit' ? line.amount.toLocaleString() : ''}</td>
                       {idx === 0 && (
                         <td className="p-4 align-top text-center" rowSpan={entry.lines.length}>
                           <div className="flex flex-col gap-2 justify-start items-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -374,30 +374,30 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
 
       <AnimatePresence>
         {currentPendingAsset && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 font-sans">
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[100] p-4 font-sans border border-coffee-100 shadow-sm bg-transparent">
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="bg-white rounded-2xl shadow-2xl max-w-sm w-full overflow-hidden">
               <div className="p-4 border-b flex justify-between items-center bg-coffee-50">
                   <h3 className="font-bold text-coffee-700 flex items-center gap-2"><span>✨</span> 新增至資產總表?</h3>
               </div>
               <div className="p-6 space-y-4">
                   <p className="text-sm text-gray-600 font-medium">偵測到借方有「{currentPendingAsset.category}」相關的支出，要順便加入資產總表以便日後自動計算折舊嗎？</p>
-                  <div>
-                      <label className="block text-xs font-bold text-gray-500 mb-1">資產名稱 (來自摘要)</label>
-                      <input type="text" value={currentPendingAsset.name} onChange={e => setCurrentPendingAsset({...currentPendingAsset, name: e.target.value})} className="w-full border p-2 rounded focus:ring-2 focus:ring-coffee-300 outline-none font-bold text-coffee-700" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-3">
                       <div>
-                          <label className="block text-xs font-bold text-gray-500 mb-1">折舊年限 (年)</label>
-                          <input type="number" value={currentPendingAsset.usefulLife} onChange={e => setCurrentPendingAsset({...currentPendingAsset, usefulLife: Number(e.target.value)})} className="w-full border p-2 rounded focus:ring-2 focus:ring-coffee-300 outline-none text-right font-mono" />
+                          <label className="block text-xs font-bold text-gray-500 mb-1">資產名稱</label>
+                          <input type="text" value={currentPendingAsset.name} onChange={e => setCurrentPendingAsset({...currentPendingAsset, name: e.target.value})} className="w-full border p-2 rounded focus:ring-2 focus:ring-coffee-300 outline-none" />
+                      </div>
+                      <div>
+                          <label className="block text-xs font-bold text-gray-500 mb-1">使用年限 (年)</label>
+                          <input type="number" value={currentPendingAsset.usefulLife} onChange={e => setCurrentPendingAsset({...currentPendingAsset, usefulLife: Number(e.target.value)})} className="w-full border p-2 rounded focus:ring-2 focus:ring-coffee-300 outline-none text-right font-mono font-bold" />
                       </div>
                       <div>
                           <label className="block text-xs font-bold text-gray-500 mb-1">預估殘值</label>
-                          <input type="number" value={currentPendingAsset.residualValue} onChange={e => setCurrentPendingAsset({...currentPendingAsset, residualValue: Number(e.target.value)})} className="w-full border p-2 rounded focus:ring-2 focus:ring-coffee-300 outline-none text-right font-mono" />
+                          <input type="number" value={currentPendingAsset.residualValue} onChange={e => setCurrentPendingAsset({...currentPendingAsset, residualValue: Number(e.target.value)})} className="w-full border p-2 rounded focus:ring-2 focus:ring-coffee-300 outline-none text-right font-mono font-bold" />
                       </div>
                   </div>
                   <div className="grid grid-cols-2 gap-4 text-sm bg-gray-50 p-3 rounded-lg border border-gray-100">
-                      <div className="text-gray-500 font-bold">金額: <span className="text-gray-800 font-mono font-normal">{(currentPendingAsset.totalCost).toLocaleString()}</span></div>
-                      <div className="text-gray-500 font-bold">日期: <span className="text-gray-800 font-mono font-normal">{currentPendingAsset.purchaseDate}</span></div>
+                      <div className="text-gray-500 font-bold">金額: <span className="text-gray-800 font-mono font-bold">{(currentPendingAsset.totalCost).toLocaleString()}</span></div>
+                      <div className="text-gray-500 font-bold">日期: <span className="text-gray-800 font-mono font-bold">{currentPendingAsset.purchaseDate}</span></div>
                   </div>
                   <div className="mt-8 flex gap-3">
                       <button onClick={handleSkipAsset} className="flex-1 py-3 border border-gray-200 rounded-xl font-bold text-gray-500 hover:bg-gray-50 transition">不加入</button>

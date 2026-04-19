@@ -4,6 +4,7 @@
 @theme {
   --font-sans: "Noto Sans TC", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-serif-brand: "Georgia", serif;
+  --font-mono: "Consolas", "Courier New", monospace;
   
   --color-coffee-50: #FDFBF7;
   --color-coffee-100: #D7CCC8;
@@ -70,7 +71,7 @@
   }
 
   .kpi-value {
-    @apply text-2xl font-serif-brand font-bold text-coffee-600 truncate;
+    @apply text-2xl font-mono font-bold text-coffee-600 truncate;
   }
 }
 

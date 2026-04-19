@@ -149,7 +149,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                   <td className="py-4 px-6 font-bold text-coffee-800 text-base">{m.name}</td>
                   <td className="py-4 px-6"><span className="text-xs font-bold text-coffee-500 bg-coffee-100 px-2 py-1 rounded-lg">{m.category}</span></td>
                   <td className="py-4 px-6 text-right font-serif-brand font-bold text-lg text-coffee-900">{fmt(m.stock)} <span className="text-xs font-sans font-medium text-coffee-400">{m.unit}</span></td>
-                  <td className="py-4 px-6 text-right font-serif-brand text-coffee-500">${fmt(m.avgCost)}</td>
+                  <td className="py-4 px-6 text-right font-serif-brand font-bold text-coffee-500">${fmt(m.avgCost)}</td>
                   <td className="py-4 px-6 text-right font-serif-brand font-bold text-mint-brand text-lg">${fmt(m.stock * m.avgCost)}</td>
                   <td className="py-4 px-6 text-center">
                     <button 
