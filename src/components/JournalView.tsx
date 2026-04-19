@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, where, onSnapshot, doc, orderBy, setDoc } from 'firebase/firestore';
 import { JournalEntry, COAItem } from '../types';
-import { ClipboardList, BarChart3, BookOpen, Layers, Gem, Download, Upload } from 'lucide-react';
+import { ClipboardList, BarChart3, BookOpen, Layers, Gem, Download, Upload, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
@@ -68,6 +68,7 @@ type SubTab = 'journal' | 'reports' | 'ledger' | 'coa' | 'assets';
 
 export default function JournalView({ selectedYear, shopId }: { selectedYear: number, shopId: string }) {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('journal');
+  const [isMobileSubTabOpen, setIsMobileSubTabOpen] = useState(false);
   const [entries, setEntries] = useState<JournalEntry[]>([]);
   const [coa, setCoa] = useState<COAItem[]>(DEFAULT_COA);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
@@ -146,24 +147,52 @@ export default function JournalView({ selectedYear, shopId }: { selectedYear: nu
     <div className="space-y-6 md:space-y-8 h-full flex flex-col items-center">
       <div className="flex flex-col md:flex-row justify-between w-full max-w-6xl md:items-center gap-4">
         
-        {/* Navigation Tabs */}
-        <nav className="w-full md:w-auto flex bg-white/50 backdrop-blur-sm p-1.5 rounded-[24px] border border-coffee-50 shadow-inner overflow-x-auto no-scrollbar">
-          {subTabs.map((tab) => (
+        <div className="w-full md:w-auto relative">
+          <div className="md:hidden">
             <button
-              key={tab.id}
-              onClick={() => setActiveSubTab(tab.id as any)}
-              className={cn(
-                "px-4 md:px-6 py-2.5 md:py-3 rounded-2xl transition-all duration-500 font-bold flex items-center gap-2 text-sm whitespace-nowrap shrink-0",
-                activeSubTab === tab.id 
-                  ? "bg-coffee-600 text-white shadow-xl scale-105 active:scale-100" 
-                  : "text-coffee-400 hover:text-coffee-600 hover:bg-white/40"
-              )}
+              onClick={() => setIsMobileSubTabOpen(v => !v)}
+              className="w-full bg-white/80 border border-coffee-100 rounded-xl px-4 py-2.5 font-bold text-coffee-700 flex items-center justify-between"
             >
-              <tab.icon className={cn("w-4 h-4", activeSubTab === tab.id ? "text-white" : "text-coffee-300")} />
-              {tab.label}
+              <span>{subTabs.find(t => t.id === activeSubTab)?.label}</span>
+              {isMobileSubTabOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </button>
-          ))}
-        </nav>
+            {isMobileSubTabOpen && (
+              <div className="absolute z-20 mt-2 w-full bg-white border border-coffee-100 rounded-xl shadow-lg overflow-hidden">
+                {subTabs.map((tab) => (
+                  <button
+                    key={tab.id}
+                    onClick={() => { setActiveSubTab(tab.id as SubTab); setIsMobileSubTabOpen(false); }}
+                    className={cn(
+                      "w-full px-4 py-3 text-left text-sm font-bold border-b border-coffee-50 last:border-b-0 flex items-center gap-2",
+                      activeSubTab === tab.id ? "bg-coffee-50 text-coffee-700" : "text-coffee-500"
+                    )}
+                  >
+                    <tab.icon className="w-4 h-4" />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <nav className="hidden md:flex bg-white/50 backdrop-blur-sm p-1.5 rounded-[24px] border border-coffee-50 shadow-inner overflow-x-auto no-scrollbar">
+            {subTabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveSubTab(tab.id as SubTab)}
+                className={cn(
+                  "px-4 md:px-6 py-2.5 md:py-3 rounded-2xl transition-all duration-500 font-bold flex items-center gap-2 text-sm whitespace-nowrap shrink-0",
+                  activeSubTab === tab.id 
+                    ? "bg-coffee-600 text-white shadow-xl scale-105 active:scale-100" 
+                    : "text-coffee-400 hover:text-coffee-600 hover:bg-white/40"
+                )}
+              >
+                <tab.icon className={cn("w-4 h-4", activeSubTab === tab.id ? "text-white" : "text-coffee-300")} />
+                {tab.label}
+              </button>
+            ))}
+          </nav>
+        </div>
 
         {/* Action Buttons (Export / Import) */}
         <div className="flex items-center gap-3 self-end md:self-auto">

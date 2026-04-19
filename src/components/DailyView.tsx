@@ -26,7 +26,9 @@ import {
   CalendarDays,
   Gift,
   Cookie,
-  Package
+  Package,
+  Menu,
+  X
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -48,6 +50,7 @@ export default function DailyView({
   shopId: string 
 }) {
   const [subTab, setSubTab] = useState<'dashboard' | 'import' | 'settings'>('dashboard');
+  const [isMobileSubTabOpen, setIsMobileSubTabOpen] = useState(false);
   const [dailyData, setDailyData] = useState<DailyReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
@@ -301,24 +304,59 @@ export default function DailyView({
           </div>
         </div>
 
-        <div className="flex bg-coffee-100/50 p-1 rounded-xl">
-          {[
-            { id: 'dashboard', label: '銷售與戰情室', icon: LayoutDashboard },
-            { id: 'import', label: '訂單匯入', icon: FileUp },
-            { id: 'settings', label: '品項設定', icon: SettingsIcon },
-          ].map(t => (
+        <div className="relative w-full md:w-auto">
+          <div className="md:hidden">
             <button
-              key={t.id}
-              onClick={() => setSubTab(t.id as any)}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
-                subTab === t.id ? "bg-white text-coffee-700 shadow-sm" : "text-coffee-400 hover:text-coffee-600"
-              )}
+              onClick={() => setIsMobileSubTabOpen(v => !v)}
+              className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2.5 font-bold text-coffee-700 flex items-center justify-between shadow-sm"
             >
-              <t.icon className="w-4 h-4" />
-              {t.label}
+              <span>
+                {[{ id: 'dashboard', label: '銷售與戰情室' }, { id: 'import', label: '訂單匯入' }, { id: 'settings', label: '品項設定' }].find(t => t.id === subTab)?.label}
+              </span>
+              {isMobileSubTabOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
             </button>
-          ))}
+            {isMobileSubTabOpen && (
+              <div className="absolute z-20 mt-2 w-full bg-white border border-coffee-100 rounded-xl shadow-lg overflow-hidden">
+                {[
+                  { id: 'dashboard', label: '銷售與戰情室', icon: LayoutDashboard },
+                  { id: 'import', label: '訂單匯入', icon: FileUp },
+                  { id: 'settings', label: '品項設定', icon: SettingsIcon },
+                ].map(t => (
+                  <button
+                    key={t.id}
+                    onClick={() => { setSubTab(t.id as 'dashboard' | 'import' | 'settings'); setIsMobileSubTabOpen(false); }}
+                    className={cn(
+                      "w-full px-4 py-3 text-left text-sm font-bold border-b border-coffee-50 last:border-b-0 flex items-center gap-2",
+                      subTab === t.id ? "bg-coffee-50 text-coffee-700" : "text-coffee-500"
+                    )}
+                  >
+                    <t.icon className="w-4 h-4" />
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="hidden md:flex bg-coffee-100/50 p-1 rounded-xl">
+            {[
+              { id: 'dashboard', label: '銷售與戰情室', icon: LayoutDashboard },
+              { id: 'import', label: '訂單匯入', icon: FileUp },
+              { id: 'settings', label: '品項設定', icon: SettingsIcon },
+            ].map(t => (
+              <button
+                key={t.id}
+                onClick={() => setSubTab(t.id as 'dashboard' | 'import' | 'settings')}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
+                  subTab === t.id ? "bg-white text-coffee-700 shadow-sm" : "text-coffee-400 hover:text-coffee-600"
+                )}
+              >
+                <t.icon className="w-4 h-4" />
+                {t.label}
+              </button>
+            ))}
+          </div>
         </div>
         
         <button 
