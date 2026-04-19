@@ -103,6 +103,7 @@ export default function DailyView({
   const [subTab, setSubTab] = useState<'dashboard' | 'import' | 'settings'>('dashboard');
   const [isMobileSubTabOpen, setIsMobileSubTabOpen] = useState(false);
   const [dailyData, setDailyData] = useState<DailyReport | null>(null);
+  const [loadedDateKey, setLoadedDateKey] = useState('');
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const settings = useMemo(
@@ -123,6 +124,7 @@ export default function DailyView({
     let cancelled = false;
     setLoading(true);
     setDailyData(null);
+    setLoadedDateKey('');
 
     const start = async () => {
       const resolved = await getDailyDocRef(shopId, currentDate);
@@ -135,6 +137,7 @@ export default function DailyView({
           if (cancelled) return;
           if (snap.exists()) {
             const data = snap.data() as DailyReport;
+            setLoadedDateKey(targetDateKey);
             setDailyData({ ...data, date: targetDateKey, ar: { ...defaultAr(), ...(data.ar || {}) } });
           } else {
             const [y, m, d] = normalizeDateKey(currentDate).split('-').map(Number);
@@ -153,8 +156,9 @@ export default function DailyView({
               console.error('載入前一天日報失敗:', err);
             }
             if (cancelled) return;
+            setLoadedDateKey(targetDateKey);
             setDailyData({
-              date: currentDate,
+              date: targetDateKey,
               orders: [],
               dailyActive: {},
               ar: { ...defaultAr(), accum: accumFromPrev },
@@ -180,23 +184,30 @@ export default function DailyView({
   useEffect(() => {
     if (!dailyData || loading) return;
     const dateKey = normalizeDateKey(currentDate);
-    const dataDateKey = normalizeDateKey(dailyData.date || currentDate);
-    if (dataDateKey !== dateKey) return;
+    const dataDateKey = normalizeDateKey(dailyData.date || '');
+    if (!loadedDateKey) return;
+    if (loadedDateKey !== dateKey) return;
+    if (dataDateKey !== loadedDateKey) return;
     const t = setTimeout(async () => {
       setSaveStatus('saving');
       await setDoc(
-        doc(db, 'shops', shopId, 'daily', dateKey),
-        { ...dailyData, date: dateKey },
+        doc(db, 'shops', shopId, 'daily', loadedDateKey),
+        { ...dailyData, date: loadedDateKey },
         { merge: true }
       );
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     }, 1000);
     return () => clearTimeout(t);
-  }, [dailyData, currentDate, shopId]);
+  }, [dailyData, currentDate, loadedDateKey, loading, shopId]);
 
   const updateDaily = (patch: Partial<DailyReport>) => {
-    setDailyData(prev => prev ? { ...prev, ...patch } : null);
+    setDailyData(prev => {
+      if (!prev) return null;
+      const currentKey = normalizeDateKey(currentDate);
+      if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
+      return { ...prev, ...patch, date: loadedDateKey };
+    });
   };
 
   const metrics = useMemo(() => {
