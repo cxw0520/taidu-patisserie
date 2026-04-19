@@ -143,17 +143,17 @@ export default function JournalView({ selectedYear, shopId }: { selectedYear: nu
   ];
 
   return (
-    <div className="space-y-8 h-full flex flex-col items-center">
-      <div className="flex flex-col md:flex-row justify-between w-full max-w-6xl items-center gap-4">
+    <div className="space-y-6 md:space-y-8 h-full flex flex-col items-center">
+      <div className="flex flex-col md:flex-row justify-between w-full max-w-6xl md:items-center gap-4">
         
         {/* Navigation Tabs */}
-        <nav className="flex bg-white/50 backdrop-blur-sm p-1.5 rounded-[24px] border border-coffee-50 shadow-inner overflow-x-auto no-scrollbar">
+        <nav className="w-full md:w-auto flex bg-white/50 backdrop-blur-sm p-1.5 rounded-[24px] border border-coffee-50 shadow-inner overflow-x-auto no-scrollbar">
           {subTabs.map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveSubTab(tab.id as any)}
               className={cn(
-                "px-6 py-2.5 md:py-3 rounded-2xl transition-all duration-500 font-bold flex items-center gap-2 text-sm whitespace-nowrap",
+                "px-4 md:px-6 py-2.5 md:py-3 rounded-2xl transition-all duration-500 font-bold flex items-center gap-2 text-sm whitespace-nowrap shrink-0",
                 activeSubTab === tab.id 
                   ? "bg-coffee-600 text-white shadow-xl scale-105 active:scale-100" 
                   : "text-coffee-400 hover:text-coffee-600 hover:bg-white/40"
@@ -166,7 +166,7 @@ export default function JournalView({ selectedYear, shopId }: { selectedYear: nu
         </nav>
 
         {/* Action Buttons (Export / Import) */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 self-end md:self-auto">
           <label className="p-2.5 bg-white text-gray-500 rounded-xl border border-gray-200 hover:bg-gray-50 shadow-sm cursor-pointer flex items-center gap-2 font-bold text-sm transition-all hover:scale-105" title="匯入備份">
               <Upload className="w-4 h-4" /> 匯入
               <input type="file" className="hidden" accept=".json" onChange={handleImport} />
@@ -182,7 +182,7 @@ export default function JournalView({ selectedYear, shopId }: { selectedYear: nu
 
       </div>
 
-      <div className="flex-1 w-full max-w-6xl glass-panel p-6 md:p-10 bg-white/40 border-0 shadow-none">
+      <div className="flex-1 w-full max-w-6xl glass-panel p-3 md:p-10 bg-white/40 border-0 shadow-none">
         <AnimatePresence mode="wait">
           <motion.div key={activeSubTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }} className="h-full">
             {activeSubTab === 'journal' && <JournalTable entries={entries} coa={coa} selectedYear={selectedYear} shopId={shopId} />}

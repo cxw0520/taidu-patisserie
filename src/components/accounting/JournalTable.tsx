@@ -270,9 +270,9 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
 
   return (
     <div className="space-y-6 font-sans">
-      <div className="flex justify-between items-center">
-        <h2 className="text-xl font-semibold text-gray-700">{selectedYear} 年度 普通日記簿</h2>
-        <div className="flex gap-2">
+      <div className="flex flex-col md:flex-row justify-between md:items-center gap-3">
+        <h2 className="text-lg md:text-xl font-semibold text-gray-700">{selectedYear} 年度 普通日記簿</h2>
+        <div className="flex flex-wrap gap-2">
           <button 
             onClick={() => {
               const workbook = XLSX.utils.book_new();
@@ -304,7 +304,8 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
       )}
 
       <div className="bg-white rounded-xl shadow-sm overflow-hidden border border-gray-200">
-        <table className="w-full text-left border-collapse text-sm">
+        <div className="overflow-x-auto no-scrollbar">
+        <table className="w-full min-w-[980px] text-left border-collapse text-sm">
           <thead className="bg-coffee-50 text-coffee-700">
             <tr>
               <th className="p-4 border-b whitespace-nowrap">傳票編號 / 日期</th>
@@ -357,7 +358,7 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
                       <td className="p-4 text-right font-mono font-bold text-gray-700">{line.type === 'credit' ? line.amount.toLocaleString() : ''}</td>
                       {idx === 0 && (
                         <td className="p-4 align-top text-center" rowSpan={entry.lines.length}>
-                          <div className="flex flex-col gap-2 justify-start items-center opacity-0 group-hover:opacity-100 transition-opacity">
+                          <div className="flex flex-col gap-2 justify-start items-center">
                             <button onClick={() => setEditingEntryId(entry.id)} className="px-3 py-1 text-xs bg-white text-blue-600 border border-blue-200 rounded hover:bg-blue-50 shadow-sm font-bold w-full">編輯</button>
                             <button onClick={() => handleDelete(entry.id)} className="px-3 py-1 text-xs bg-white text-red-500 border border-red-200 rounded hover:bg-red-50 shadow-sm font-bold w-full">刪除</button>
                           </div>
@@ -370,6 +371,7 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
             ))}
           </tbody>
         </table>
+        </div>
       </div>
 
       <AnimatePresence>
