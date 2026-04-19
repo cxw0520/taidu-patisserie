@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import { db } from '../../lib/firebase';
-import { doc, setDoc } from 'firebase/firestore';
+import { deleteDoc, doc, setDoc } from 'firebase/firestore';
 import { Material, InventoryAdj } from '../../types';
 import { fmt, uid } from '../../lib/utils';
-import { Plus, Target, CheckCircle2, AlertCircle, Save } from 'lucide-react';
+import { Plus, Target, CheckCircle2, AlertCircle, Save, Trash2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 
@@ -54,6 +54,12 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
     
     setAdjModal(null);
     setAdjData({ actualQty: 0, reason: '' });
+  };
+
+  const handleDeleteMaterial = async (material: Material) => {
+    const confirmed = confirm(`確定刪除品項「${material.name}」？此動作不可復原。`);
+    if (!confirmed) return;
+    await deleteDoc(doc(db, 'shops', shopId, 'materials', material.id));
   };
 
   return (
@@ -118,7 +124,8 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
       </AnimatePresence>
 
       <div className="rounded-[32px] overflow-hidden border border-coffee-50 bg-white shadow-sm">
-        <table className="w-full text-sm text-left">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[860px] text-sm text-left">
           <thead className="bg-[#faf7f2]">
             <tr className="text-coffee-400 font-bold uppercase tracking-wider text-xs border-b border-coffee-100">
               <th className="py-4 px-6">狀態</th>
@@ -152,18 +159,27 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                   <td className="py-4 px-6 text-right font-serif-brand font-bold text-coffee-500">${fmt(m.avgCost)}</td>
                   <td className="py-4 px-6 text-right font-serif-brand font-bold text-mint-brand text-lg">${fmt(m.stock * m.avgCost)}</td>
                   <td className="py-4 px-6 text-center">
-                    <button 
-                      onClick={() => { setAdjModal(m); setAdjData({ actualQty: m.stock, reason: '' }); }}
-                      className="px-4 py-1.5 bg-coffee-100 text-coffee-600 rounded-full text-xs font-bold hover:bg-coffee-200 transition-colors inline-flex items-center gap-1"
-                    >
-                      <Target className="w-3 h-3" /> 庫存盤點
-                    </button>
+                    <div className="inline-flex gap-2">
+                      <button
+                        onClick={() => { setAdjModal(m); setAdjData({ actualQty: m.stock, reason: '' }); }}
+                        className="px-4 py-1.5 bg-coffee-100 text-coffee-600 rounded-full text-xs font-bold hover:bg-coffee-200 transition-colors inline-flex items-center gap-1"
+                      >
+                        <Target className="w-3 h-3" /> 庫存盤點
+                      </button>
+                      <button
+                        onClick={() => handleDeleteMaterial(m)}
+                        className="px-3 py-1.5 bg-rose-100 text-rose-700 rounded-full text-xs font-bold hover:bg-rose-200 transition-colors inline-flex items-center gap-1"
+                      >
+                        <Trash2 className="w-3 h-3" /> 刪除
+                      </button>
+                    </div>
                   </td>
                 </tr>
               );
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       <AnimatePresence>

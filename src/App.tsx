@@ -194,8 +194,8 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="px-6 md:px-10 py-6 md:py-8 flex items-center justify-between bg-transparent">
-        <div className="flex items-center gap-4">
+      <header className="px-4 md:px-10 py-5 md:py-8 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-transparent">
+        <div className="flex items-center gap-3 md:gap-4">
           <div className="w-16 h-16 bg-coffee-600 rounded-2xl flex items-center justify-center text-white font-bold text-2xl shadow-[0_4px_12px_rgba(93,46,23,0.2)] overflow-hidden relative font-serif-brand">
             {settings.logo ? (
               <img src={settings.logo} alt="logo" className="w-full h-full object-cover" />
@@ -204,7 +204,7 @@ export default function App() {
             )}
           </div>
           <div>
-            <h1 className="text-2xl md:text-3xl font-light text-coffee-600 tracking-[2px] font-serif-brand">態度貳貳日記簿</h1>
+            <h1 className="text-xl md:text-3xl font-light text-coffee-600 tracking-[2px] font-serif-brand">態度貳貳日記簿</h1>
             <div className="flex items-center gap-1.5 text-xs font-semibold text-mint-brand mt-1">
               <span className={cn(
                 "w-2 h-2 rounded-full",
@@ -216,7 +216,7 @@ export default function App() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 self-end lg:self-auto">
           <div className="flex items-center gap-2">
             <select 
               value={selectedYear}
@@ -240,14 +240,15 @@ export default function App() {
         </div>
       </header>
 
-      <nav className="flex justify-center gap-4 md:gap-8 mb-6">
+      <nav className="mb-6 px-4 md:px-10">
+        <div className="flex gap-2 md:gap-4 overflow-x-auto no-scrollbar">
         {tabs.map((tab) => {
           return (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as any)}
               className={cn(
-                "nav-tab flex items-center gap-2",
+                "nav-tab flex items-center gap-2 whitespace-nowrap shrink-0",
                 activeTab === tab.id && "nav-tab-active"
               )}
             >
@@ -255,9 +256,10 @@ export default function App() {
             </button>
           );
         })}
+        </div>
       </nav>
 
-      <main className="flex-1 px-4 md:px-10 pb-10">
+      <main className="flex-1 px-3 md:px-10 pb-10">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}

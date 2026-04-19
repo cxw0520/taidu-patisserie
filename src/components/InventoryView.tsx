@@ -64,7 +64,7 @@ export default function InventoryView({ selectedYear, shopId }: { selectedYear: 
         </nav>
       </div>
 
-      <div className="flex-1 glass-panel p-10 bg-white/40 border-0 shadow-none">
+      <div className="flex-1 glass-panel p-4 md:p-10 bg-white/40 border-0 shadow-none">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeSubTab}
