@@ -38,10 +38,46 @@ const normalizeDateKey = (v: string) => {
   const [y, m = '1', d = '1'] = v.split('-');
   return `${y}-${String(Number(m)).padStart(2, '0')}-${String(Number(d)).padStart(2, '0')}`;
 };
+const defaultAr = () => ({
+  accum: 0,
+  collect: 0,
+  logSpent: 0,
+  actualTotal: 0,
+  actualRemit: 0,
+  actualCash: 0,
+  actualUnpaid: 0,
+});
+const calcDayUnpaid = (orders: Order[] = []) =>
+  orders.filter(o => o.status === '未結帳款').reduce((sum, o) => sum + Number(o.actualAmt || 0), 0);
+const applyDailyActive = (settings: Settings, dailyActive?: DailyReport['dailyActive']): Settings => {
+  if (!dailyActive) return settings;
+  return {
+    ...settings,
+    giftItems: (settings.giftItems || []).map(item => ({
+      ...item,
+      active: dailyActive.giftItems?.[item.id] ?? item.active,
+    })),
+    singleItems: (settings.singleItems || []).map(item => ({
+      ...item,
+      active: dailyActive.singleItems?.[item.id] ?? item.active,
+    })),
+    packagingItems: (settings.packagingItems || []).map(item => ({
+      ...item,
+      active: dailyActive.packagingItems?.[item.id] ?? item.active,
+    })),
+    customCategories: (settings.customCategories || []).map(cat => ({
+      ...cat,
+      items: (cat.items || []).map(item => ({
+        ...item,
+        active: dailyActive.customCategories?.[cat.id]?.[item.id] ?? item.active,
+      })),
+    })),
+  };
+};
 export default function DailyView({ 
   currentDate, 
   setCurrentDate, 
-  settings, 
+  settings: baseSettings, 
   shopId 
 }: { 
   currentDate: string, 
@@ -54,6 +90,10 @@ export default function DailyView({
   const [dailyData, setDailyData] = useState<DailyReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const settings = useMemo(
+    () => applyDailyActive(baseSettings, dailyData?.dailyActive),
+    [baseSettings, dailyData?.dailyActive]
+  );
 
   useEffect(() => {
     (async () => {
@@ -80,19 +120,36 @@ export default function DailyView({
       const targetRef = !padSnap.exists() && legacyKey !== padKey ? legacyRef : padRef;
 
       unsub = onSnapshot(targetRef, (snap) => {
-        if (snap.exists()) {
-          setDailyData(snap.data() as DailyReport);
-        } else {
-          setDailyData({
-            date: currentDate,
-            orders: [],
-            ar: { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 },
-            inventory: {},
-            losses: [],
-            packagingUsage: {},
-          });
-        }
-        setLoading(false);
+        (async () => {
+          if (snap.exists()) {
+            const data = snap.data() as DailyReport;
+            setDailyData({ ...data, ar: { ...defaultAr(), ...(data.ar || {}) } });
+          } else {
+            const [y, m, d] = normalizeDateKey(currentDate).split('-').map(Number);
+            const prevDate = new Date(y, m - 1, d);
+            prevDate.setDate(prevDate.getDate() - 1);
+            const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(prevDate.getDate()).padStart(2, '0')}`;
+            let accumFromPrev = 0;
+            try {
+              const prevSnap = await getDoc(doc(db, 'shops', shopId, 'daily', prevKey));
+              if (prevSnap.exists()) {
+                const prev = prevSnap.data() as DailyReport;
+                const prevAr = { ...defaultAr(), ...(prev.ar || {}) };
+                accumFromPrev = Math.max(0, prevAr.accum + calcDayUnpaid(prev.orders || []) - prevAr.collect);
+              }
+            } catch (_) {}
+            setDailyData({
+              date: currentDate,
+              orders: [],
+              dailyActive: {},
+              ar: { ...defaultAr(), accum: accumFromPrev },
+              inventory: {},
+              losses: [],
+              packagingUsage: {},
+            });
+          }
+          setLoading(false);
+        })();
       });
     };
 
@@ -240,7 +297,7 @@ export default function DailyView({
           const qty = o.items?.[item.id] || 0;
           if (qty > 0 && item.materialRecipe) {
             Object.entries(item.materialRecipe || {}).forEach(([matId, usage]) => {
-              consumption[matId] = (consumption[matId] || 0) + qty * usage;
+              consumption[matId] = (consumption[matId] || 0) + qty * Number(usage || 0);
             });
           }
         });
@@ -573,26 +630,57 @@ export default function DailyView({
                 <CircleDollarSign className="w-5 h-5 text-rose-brand" /> 金流總結
               </h3>
               <div className="space-y-3 text-sm">
-                <div className="flex justify-between items-center"><span className="text-coffee-600">商品營業總額</span><span className="font-bold font-serif-brand">${fmt(metrics?.rev || 0)}</span></div>
-                <div className="flex justify-between items-center"><span className="text-coffee-600">運費</span><span className="font-bold font-serif-brand">${fmt(metrics?.ship || 0)}</span></div>
-                <div className="flex justify-between items-center"><span className="text-coffee-600">折讓</span><span className="font-bold font-serif-brand text-danger-brand">${fmt(metrics?.disc || 0)}</span></div>
-                <div className="flex justify-between items-center"><span className="text-coffee-600">公關品折算總額</span><span className="font-bold font-serif-brand">${fmt(metrics?.prVal || 0)}</span></div>
+                <div className="flex justify-between items-center"><span className="text-coffee-600">商品營業總額</span><span className="font-bold font-mono">${fmt(metrics?.rev || 0)}</span></div>
+                <div className="flex justify-between items-center"><span className="text-coffee-600">運費</span><span className="font-bold font-mono">${fmt(metrics?.ship || 0)}</span></div>
+                <div className="flex justify-between items-center"><span className="text-coffee-600">折讓</span><span className="font-bold font-mono text-danger-brand">${fmt(metrics?.disc || 0)}</span></div>
+                <div className="flex justify-between items-center"><span className="text-coffee-600">公關品折算總額</span><span className="font-bold font-mono">${fmt(metrics?.prVal || 0)}</span></div>
                 <div className="h-px bg-coffee-100 my-2" />
-                <div className="flex justify-between items-center"><span className="font-bold text-coffee-800">營業淨額</span><span className="font-bold font-serif-brand">${fmt((metrics?.recv || 0) - (metrics?.ship || 0))}</span></div>
-                <div className="flex justify-between items-center text-lg"><span className="font-bold text-coffee-800">應收總額</span><span className="font-bold font-serif-brand text-rose-brand">${fmt(metrics?.recv || 0)}</span></div>
-                <div className="flex justify-between items-center">
-                  <span className="font-bold text-coffee-800">實收總額</span>
-                  <input 
+                <div className="flex justify-between items-center text-lg">
+                  <span className="font-bold text-coffee-800">營業淨額</span>
+                  <span className="font-bold font-mono text-rose-brand">${fmt((metrics?.recv || 0) - (metrics?.ship || 0))}</span>
+                </div>
+                <div className="grid grid-cols-[1fr_auto_auto] gap-2 items-center text-xs text-coffee-500 font-bold uppercase tracking-wider">
+                  <span></span>
+                  <span className="text-right">應收</span>
+                  <span className="text-right">實收</span>
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-coffee-600">已收-匯款</span>
+                  <span className="font-bold font-mono text-right min-w-[96px]">${fmt(metrics?.remit || 0)}</span>
+                  <input
                     type="number"
-                    value={dailyData?.ar?.actualTotal || ''}
-                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 }), actualTotal: parseNum(e.target.value) } })}
-                    className="w-24 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
+                    value={dailyData?.ar?.actualRemit || ''}
+                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), actualRemit: parseNum(e.target.value) } })}
+                    className="w-28 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-coffee-600">已收-現金</span>
+                  <span className="font-bold font-mono text-right min-w-[96px]">${fmt(metrics?.cash || 0)}</span>
+                  <input
+                    type="number"
+                    value={dailyData?.ar?.actualCash || ''}
+                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), actualCash: parseNum(e.target.value) } })}
+                    className="w-28 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-coffee-600">今日未結帳款</span>
+                  <span className="font-bold font-mono text-right min-w-[96px] text-danger-brand">${fmt(metrics?.unpaid || 0)}</span>
+                  <input
+                    type="number"
+                    value={dailyData?.ar?.actualUnpaid || ''}
+                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), actualUnpaid: parseNum(e.target.value) } })}
+                    className="w-28 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
                   />
                 </div>
                 <div className="h-px bg-coffee-100 my-2" />
-                <div className="flex justify-between items-center"><span className="text-coffee-600">已收-匯款</span><span className="font-bold font-mono">${fmt(metrics?.remit || 0)}</span></div>
-                <div className="flex justify-between items-center"><span className="text-coffee-600">已收-現金</span><span className="font-bold font-mono">${fmt(metrics?.cash || 0)}</span></div>
-                <div className="flex justify-between items-center"><span className="text-coffee-600">今日未結帳款</span><span className="font-bold font-mono text-danger-brand">${fmt(metrics?.unpaid || 0)}</span></div>
+                <div className="flex justify-between items-center">
+                  <span className="font-bold text-coffee-800">實收總額</span>
+                  <span className="font-bold font-mono text-mint-brand">
+                    ${fmt((dailyData?.ar?.actualRemit || 0) + (dailyData?.ar?.actualCash || 0) + (dailyData?.ar?.actualUnpaid || 0))}
+                  </span>
+                </div>
               </div>
             </div>
 
@@ -607,26 +695,26 @@ export default function DailyView({
                   <input 
                     type="number"
                     value={dailyData?.ar?.accum || ''}
-                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 }), accum: parseNum(e.target.value) } })}
+                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), accum: parseNum(e.target.value) } })}
                     className="w-24 text-right bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 font-bold font-mono text-coffee-700 outline-none focus:border-coffee-400"
                   />
                 </div>
-                <div className="flex justify-between items-center"><span className="text-coffee-600">今日新增未結</span><span className="font-bold font-serif-brand">${fmt(metrics?.unpaid || 0)}</span></div>
+                <div className="flex justify-between items-center"><span className="text-coffee-600">今日新增未結</span><span className="font-bold font-mono">${fmt(metrics?.unpaid || 0)}</span></div>
                 <div className="h-px bg-coffee-100 my-2" />
                 <div className="flex justify-between items-center">
                   <span className="text-coffee-600">今日回款 (沖銷)</span>
                   <input 
                     type="number"
                     value={dailyData?.ar?.collect || ''}
-                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 }), collect: parseNum(e.target.value) } })}
-                    className="w-24 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-serif-brand text-mint-brand focus:border-mint-brand outline-none"
+                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), collect: parseNum(e.target.value) } })}
+                    className="w-24 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand outline-none"
                   />
                 </div>
               </div>
               <div className="h-px bg-coffee-100 my-4" />
               <div className="flex justify-between items-center text-lg">
                 <span className="font-bold text-coffee-800">剩餘總未結帳款</span>
-                <span className="font-bold font-serif-brand text-danger-brand">${fmt((dailyData?.ar?.accum || 0) + (metrics?.unpaid || 0) - (dailyData?.ar?.collect || 0))}</span>
+                <span className="font-bold font-mono text-danger-brand">${fmt((dailyData?.ar?.accum || 0) + (metrics?.unpaid || 0) - (dailyData?.ar?.collect || 0))}</span>
               </div>
             </div>
 
@@ -687,7 +775,7 @@ export default function DailyView({
               </div>
               <div className="text-right text-sm">
                 <span className="text-coffee-600 mr-2">包材總支出:</span>
-                <span className="font-bold font-serif-brand text-rose-brand">
+                <span className="font-bold font-mono text-rose-brand">
                   ${fmt(settings.packagingItems.reduce((sum, pkg) => sum + (pkg.price * (dailyData.packagingUsage[pkg.id] || 0)), 0))}
                 </span>
               </div>
@@ -936,7 +1024,7 @@ export default function DailyView({
       )}
 
       {subTab === 'settings' && (
-        <SettingsTab settings={settings} shopId={shopId} />
+        <SettingsTab settings={baseSettings} shopId={shopId} dailyActive={dailyData?.dailyActive} updateDaily={updateDaily} />
       )}
     </div>
   );
@@ -946,7 +1034,17 @@ export default function DailyView({
 // Sub-components for DailyView (to keep the main component readable)
 // -----------------------------------------------------------------------------
 
-function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string }) {
+function SettingsTab({
+  settings,
+  shopId,
+  dailyActive,
+  updateDaily,
+}: {
+  settings: Settings;
+  shopId: string;
+  dailyActive?: DailyReport['dailyActive'];
+  updateDaily: (patch: Partial<DailyReport>) => void;
+}) {
   const updateSettings = async (newSettings: Settings) => {
     try {
       await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), newSettings);
@@ -956,10 +1054,16 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
     }
   };
 
-  const handleToggle = (type: 'giftItems' | 'singleItems' | 'packagingItems', idx: number, active: boolean) => {
-    const newItems = [...settings[type]];
-    newItems[idx] = { ...newItems[idx], active };
-    updateSettings({ ...settings, [type]: newItems });
+  const handleToggle = (type: 'giftItems' | 'singleItems' | 'packagingItems', itemId: string, active: boolean) => {
+    updateDaily({
+      dailyActive: {
+        ...(dailyActive || {}),
+        [type]: {
+          ...((dailyActive && dailyActive[type]) || {}),
+          [itemId]: active,
+        },
+      },
+    });
   };
 
   const handleChange = (type: 'giftItems' | 'singleItems' | 'packagingItems', idx: number, field: string, val: any) => {
@@ -1003,10 +1107,19 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
     updateSettings({ ...settings, customCategories: newCategories });
   };
 
-  const handleCustomToggle = (catIdx: number, itemIdx: number, active: boolean) => {
-    const newCategories = [...(settings.customCategories || [])];
-    newCategories[catIdx].items[itemIdx].active = active;
-    updateSettings({ ...settings, customCategories: newCategories });
+  const handleCustomToggle = (catId: string, itemId: string, active: boolean) => {
+    updateDaily({
+      dailyActive: {
+        ...(dailyActive || {}),
+        customCategories: {
+          ...((dailyActive && dailyActive.customCategories) || {}),
+          [catId]: {
+            ...(((dailyActive && dailyActive.customCategories && dailyActive.customCategories[catId]) || {})),
+            [itemId]: active,
+          },
+        },
+      },
+    });
   };
 
   const handleCustomChange = (catIdx: number, itemIdx: number, field: string, val: any) => {
@@ -1065,7 +1178,7 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
               <table className="w-full text-sm text-center border-collapse bg-white">
                 <thead className="bg-[#faf7f2] text-coffee-600">
                   <tr>
-                    <th className="p-3 w-32 border-b border-[#f0ede8]">今日上架 (顯示於明細)</th>
+                    <th className="p-3 w-32 border-b border-[#f0ede8]">今日上架 (依日期保留)</th>
                     <th className="p-3 border-b border-[#f0ede8]">品項名稱</th>
                     <th className="p-3 border-b border-[#f0ede8]">預設商品單價</th>
                     {t.type === 'giftItems' && <th className="p-3 border-b border-[#f0ede8]">內容配方</th>}
@@ -1077,7 +1190,12 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
                     <tr key={item.id} className="hover:bg-coffee-50 transition">
                       <td className="p-3">
                         <label className="relative inline-flex items-center cursor-pointer">
-                          <input type="checkbox" className="sr-only peer" checked={item.active} onChange={(e) => handleToggle(typeTag, idx, e.target.checked)} />
+                          <input
+                            type="checkbox"
+                            className="sr-only peer"
+                            checked={dailyActive?.[typeTag]?.[item.id] ?? item.active}
+                            onChange={(e) => handleToggle(typeTag, item.id, e.target.checked)}
+                          />
                           <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-mint-brand"></div>
                         </label>
                       </td>
@@ -1141,7 +1259,7 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
             <table className="w-full text-sm text-center border-collapse bg-white">
               <thead className="bg-[#faf7f2] text-coffee-600">
                 <tr>
-                  <th className="p-3 w-32 border-b border-[#f0ede8]">今日上架 (顯示於明細)</th>
+                  <th className="p-3 w-32 border-b border-[#f0ede8]">今日上架 (依日期保留)</th>
                   <th className="p-3 border-b border-[#f0ede8]">品項名稱</th>
                   <th className="p-3 border-b border-[#f0ede8]">預設商品單價</th>
                   <th className="p-3 w-20 border-b border-[#f0ede8]">移除</th>
@@ -1152,7 +1270,12 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
                   <tr key={item.id} className="hover:bg-coffee-50 transition">
                     <td className="p-3">
                       <label className="relative inline-flex items-center cursor-pointer">
-                        <input type="checkbox" className="sr-only peer" checked={item.active} onChange={(e) => handleCustomToggle(catIdx, idx, e.target.checked)} />
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={dailyActive?.customCategories?.[cat.id]?.[item.id] ?? item.active}
+                          onChange={(e) => handleCustomToggle(cat.id, item.id, e.target.checked)}
+                        />
                         <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-mint-brand"></div>
                       </label>
                     </td>

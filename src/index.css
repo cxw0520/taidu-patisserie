@@ -3,7 +3,7 @@
 
 @theme {
   --font-sans: "Noto Sans TC", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-serif-brand: "Georgia", serif;
+  --font-serif-brand: "Consolas", "Courier New", monospace;
   --font-mono: "Consolas", "Courier New", monospace;
   
   --color-coffee-50: #FDFBF7;

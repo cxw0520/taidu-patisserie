@@ -117,11 +117,20 @@ export interface LossEntry {
 export interface DailyReport {
   date: string;
   orders: Order[];
+  dailyActive?: {
+    giftItems?: Record<string, boolean>;
+    singleItems?: Record<string, boolean>;
+    packagingItems?: Record<string, boolean>;
+    customCategories?: Record<string, Record<string, boolean>>;
+  };
   ar: {
     accum: number;
     collect: number;
     logSpent: number;
     actualTotal: number;
+    actualRemit?: number;
+    actualCash?: number;
+    actualUnpaid?: number;
   };
   inventory: Record<string, InventoryItem>;
   losses: LossEntry[];

@@ -196,7 +196,7 @@ export default function App() {
     <div className="min-h-screen flex flex-col">
       <header className="px-4 md:px-10 py-5 md:py-8 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-transparent">
         <div className="flex items-center gap-3 md:gap-4">
-          <div className="w-16 h-16 bg-coffee-600 rounded-2xl flex items-center justify-center text-white font-bold text-2xl shadow-[0_4px_12px_rgba(93,46,23,0.2)] overflow-hidden relative font-serif-brand">
+          <div className="w-16 h-16 bg-coffee-600 rounded-2xl flex items-center justify-center text-white font-bold text-2xl shadow-[0_4px_12px_rgba(93,46,23,0.2)] overflow-hidden relative">
             {settings.logo ? (
               <img src={settings.logo} alt="logo" className="w-full h-full object-cover" />
             ) : (
@@ -204,7 +204,7 @@ export default function App() {
             )}
           </div>
           <div>
-            <h1 className="text-xl md:text-3xl font-light text-coffee-600 tracking-[2px] font-serif-brand">態度貳貳日記簿</h1>
+            <h1 className="text-xl md:text-3xl font-light text-coffee-600 tracking-[2px]">態度貳貳日記簿</h1>
             <div className="flex items-center gap-1.5 text-xs font-semibold text-mint-brand mt-1">
               <span className={cn(
                 "w-2 h-2 rounded-full",
