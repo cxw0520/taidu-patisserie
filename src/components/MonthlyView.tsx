@@ -1,20 +1,42 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, doc, onSnapshot, setDoc } from 'firebase/firestore';
-import { fmt, parseNum, monthISO } from '../lib/utils';
-import { DailyReport, Settings } from '../types';
-import { Wallet, PieChart as ChartIcon, TrendingUp, ReceiptText, Users, Home, Lightbulb, Wrench, Info, Megaphone } from 'lucide-react';
+import { collection, query, where, getDocs, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
+import { fmt, parseNum, monthISO, uid } from '../lib/utils';
+import { DailyReport, Settings, Order, Material } from '../types';
+import { Wallet, PieChart as ChartIcon, TrendingUp, ReceiptText, Users, Home, Lightbulb, Wrench, Info, Megaphone, Trash2, Plus, X, CheckSquare, Square } from 'lucide-react';
 import { cn } from '../lib/utils';
+import { motion, AnimatePresence } from 'motion/react';
+
+interface RecipeItem {
+  id: string;
+  type: 'material' | 'half';
+  itemId: string;
+  quantity: number;
+}
+
+interface Recipe {
+  id: string;
+  name: string;
+  type: 'finished' | 'half';
+  yield: number;
+  unit: string;
+  items: RecipeItem[];
+}
 
 export default function MonthlyView({ settings, shopId }: { settings: Settings, shopId: string }) {
   const [selectedMonth, setSelectedMonth] = useState(monthISO());
   const [monthData, setMonthData] = useState<DailyReport[]>([]);
-  const [fixedCosts, setFixedCosts] = useState<Record<string, number>>({});
-  const [loading, setLoading] = useState(true);
+  const [fixedCosts, setFixedCosts] = useState<{ id: string, label: string, amount: number }[]>([]);
+  const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [activeTab, setActiveTab] = useState<'finance' | 'product'>('finance');
+  
+  // AR Modal State
+  const [showARModal, setShowARModal] = useState(false);
+  const [selectedBuyer, setSelectedBuyer] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchMonth = async () => {
-      setLoading(true);
       const q = query(
         collection(db, 'shops', shopId, 'daily'),
         where('date', '>=', `${selectedMonth}-01`),
@@ -22,200 +44,705 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
       );
       const snap = await getDocs(q);
       setMonthData(snap.docs.map(d => d.data() as DailyReport));
-      setLoading(false);
     };
     fetchMonth();
 
-    const unsub = onSnapshot(doc(db, 'shops', shopId, 'monthly', selectedMonth), (snap) => {
-      if (snap.exists()) setFixedCosts(snap.data().fixed || {});
-      else setFixedCosts({});
+    const unsubMonthly = onSnapshot(doc(db, 'shops', shopId, 'monthly', selectedMonth), async (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (Array.isArray(data.fixedCostsList)) {
+          setFixedCosts(data.fixedCostsList);
+        } else {
+          // Legacy migration
+          setFixedCosts([
+            { id: 'rent', label: '店鋪房租', amount: parseNum(data.fixed?.rent) || 0 },
+            { id: 'util', label: '水電雜支', amount: parseNum(data.fixed?.util) || 0 },
+            { id: 'staff', label: '人事費用', amount: parseNum(data.fixed?.staff) || 0 },
+            { id: 'maint', label: '設備維修', amount: parseNum(data.fixed?.maint) || 0 },
+            { id: 'misc', label: '會計雜項', amount: parseNum(data.fixed?.misc) || 0 },
+            { id: 'ads', label: '行銷廣告', amount: parseNum(data.fixed?.ads) || 0 },
+          ]);
+        }
+      } else {
+        // Try fetching the most recent month to carry over custom fixed cost definitions
+        const qMonths = query(collection(db, 'shops', shopId, 'monthly'));
+        const monthSnaps = await getDocs(qMonths);
+        
+        let previousDefs = [
+          { id: uid(), label: '店鋪房租', amount: 0 },
+          { id: uid(), label: '水電雜支', amount: 0 },
+          { id: uid(), label: '人事費用', amount: 0 },
+          { id: uid(), label: '行銷廣告', amount: 0 },
+          { id: uid(), label: '網路費', amount: 0 }
+        ];
+
+        if (!monthSnaps.empty) {
+          const sorted = monthSnaps.docs.map(d => d.data()).sort((a,b) => b.ym?.localeCompare(a.ym));
+          const latest = sorted[0];
+          if (latest && Array.isArray(latest.fixedCostsList)) {
+            // Carry over definitions but reset amounts to 0 to prevent accidental charge? 
+            // The prompt says "新增後的保留紀錄下月可以不用再重新新增". 
+            // It might imply keeping amounts or resetting. Let's keep amounts! Users usually have same rent.
+            previousDefs = latest.fixedCostsList.map((c: any) => ({ ...c, id: uid() })); // Assign new IDs or keep same? better keep new or same. Let's keep same.
+            previousDefs = latest.fixedCostsList;
+          }
+        }
+        setFixedCosts(previousDefs);
+      }
     });
-    return () => unsub();
+
+    const unsubMat = onSnapshot(query(collection(db, 'shops', shopId, 'materials')), (snap) => {
+      setMaterials(snap.docs.map(d => d.data() as Material));
+    });
+
+    const unsubRec = onSnapshot(query(collection(db, 'shops', shopId, 'recipes')), (snap) => {
+      setRecipes(snap.docs.map(d => d.data() as Recipe));
+    });
+
+    return () => { unsubMonthly(); unsubMat(); unsubRec(); };
   }, [selectedMonth, shopId]);
 
-  const stats = useMemo(() => {
-    const s = {
-      rev: 0,
-      ship: 0,
-      disc: 0,
-      pr: 0,
-      remit: 0,
-      cash: 0,
-      ar: 0,
-      logSpent: 0,
-      pkgCost: 0,
-      ingredCost: 0
-    };
-
-    monthData.forEach(d => {
-      d.orders.forEach(o => {
-        const isPR = o.status === '公關品';
-        if (isPR) {
-          s.pr += o.prodAmt;
+  // Cost calculation function
+  const getRecipeCost = useMemo(() => {
+    const memo: Record<string, number> = {};
+    const calculate = (recipeId: string, visited = new Set<string>()): number => {
+      if (memo[recipeId] !== undefined) return memo[recipeId];
+      if (visited.has(recipeId)) return 0;
+      const recipe = recipes.find(r => r.id === recipeId);
+      if (!recipe || recipe.yield <= 0) return 0;
+      
+      let total = 0;
+      for (const item of recipe.items) {
+        if (item.type === 'material') {
+          const mat = materials.find(m => m.id === item.itemId);
+          total += (mat?.avgCost || 0) * item.quantity;
         } else {
-          s.rev += o.prodAmt;
-          s.ship += o.shipAmt;
-          s.disc += o.discAmt;
-          if (o.status === '匯款') s.remit += o.actualAmt;
-          if (o.status === '現結') s.cash += o.actualAmt;
-          if (o.status === '未結帳款') s.ar += o.actualAmt;
+          total += calculate(item.itemId, new Set([...visited, recipeId])) * item.quantity;
         }
+      }
+      const unitCost = total / recipe.yield;
+      memo[recipeId] = unitCost;
+      return unitCost;
+    };
+    return (name: string) => {
+      const recipe = recipes.find(r => r.name === name && r.type === 'finished');
+      if (recipe) return calculate(recipe.id);
+      return 0;
+    };
+  }, [recipes, materials]);
+
+  // Rest of the UI calculation logic...
+  return (
+    <div className="space-y-6 animate-in fade-in duration-500 h-full font-sans">
+      {/* Month Selector and Tabs */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="flex bg-coffee-100/50 p-1 rounded-2xl w-fit border border-coffee-100">
+          <button 
+            onClick={() => setActiveTab('finance')}
+            className={cn("px-6 py-2.5 rounded-xl font-bold transition flex items-center gap-2", activeTab === 'finance' ? 'bg-white text-coffee-800 shadow-sm' : 'text-coffee-500 hover:text-coffee-700')}
+          >
+            財務報表
+          </button>
+          <button 
+            onClick={() => setActiveTab('product')}
+            className={cn("px-6 py-2.5 rounded-xl font-bold transition flex items-center gap-2", activeTab === 'product' ? 'bg-white text-coffee-800 shadow-sm' : 'text-coffee-500 hover:text-coffee-700')}
+          >
+            產品數據
+          </button>
+        </div>
+        <input 
+          type="month"
+          value={selectedMonth}
+          onChange={(e) => setSelectedMonth(e.target.value)}
+          className="bg-white border border-coffee-200 rounded-xl px-4 py-2.5 font-bold text-coffee-600 outline-none focus:border-coffee-500 transition-all shadow-sm"
+        />
+      </div>
+
+      {activeTab === 'finance' && (
+        <FinanceTab 
+          monthData={monthData} 
+          settings={settings} 
+          shopId={shopId} 
+          selectedMonth={selectedMonth}
+          fixedCosts={fixedCosts}
+          setFixedCosts={setFixedCosts}
+          getRecipeCost={getRecipeCost}
+          materials={materials}
+          showARModal={showARModal}
+          setShowARModal={setShowARModal}
+          selectedBuyer={selectedBuyer}
+          setSelectedBuyer={setSelectedBuyer}
+        />
+      )}
+      
+      {activeTab === 'product' && (
+        <ProductTab monthData={monthData} settings={settings} />
+      )}
+    </div>
+  );
+}
+
+function ARReconciliationModal({ monthData, shopId, onClose, selectedBuyer, setSelectedBuyer }: any) {
+  // Aggregate AR orders
+  const buyerGroups = useMemo(() => {
+    const groups: Record<string, { total: number, orders: (Order & { date: string })[] }> = {};
+    monthData.forEach((d: DailyReport) => {
+      d.orders.forEach(o => {
+        if (o.status === '未結帳款' || o.status === '已收帳款') {
+          const name = o.buyer || '未知買家';
+          if (!groups[name]) groups[name] = { total: 0, orders: [] };
+          // Only add to total if it's NOT reconciled? Or total AR regardless?
+          // Let's say total un-reconciled AR:
+          if (o.status === '未結帳款' && !o.isReconciled) {
+            groups[name].total += o.actualAmt;
+          }
+          groups[name].orders.push({ ...o, date: d.date });
+        }
+      });
+    });
+    return groups;
+  }, [monthData]);
+
+  const toggleReconcile = async (date: string, orderId: string, currentReconciled: boolean) => {
+    try {
+      // Find the daily doc
+      const dayData = monthData.find((d: DailyReport) => d.date === date);
+      if (!dayData) return;
+      
+      const newOrders = dayData.orders.map((o: Order) => {
+        if (o.id === orderId) {
+          return { 
+            ...o, 
+            isReconciled: !currentReconciled,
+            status: (!currentReconciled) ? '已收帳款' : '未結帳款' as any
+          };
+        }
+        return o;
+      });
+
+      await setDoc(doc(db, 'shops', shopId, 'daily', date), { orders: newOrders }, { merge: true });
+    } catch (err) {
+      console.error(err);
+      alert('更新失敗');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.95 }}
+        className="w-full max-w-2xl bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden max-h-[85vh]"
+      >
+        <div className="flex justify-between items-center p-4 border-b border-coffee-100 bg-[#faf7f2]">
+          <h3 className="font-bold text-coffee-800 flex items-center gap-2">
+            <Info className="w-5 h-5 text-rose-brand" /> 
+            {selectedBuyer ? `應收帳款紀錄 - ${selectedBuyer}` : '本月應收帳款統整'}
+          </h3>
+          <button onClick={selectedBuyer ? () => setSelectedBuyer(null) : onClose} className="p-1 hover:bg-coffee-200 rounded-lg text-coffee-500 transition">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
         
-        // Estimate ingredient cost (simplified)
-        Object.entries(o.items).forEach(([id, qty]) => {
-          const item = [...settings.giftItems, ...settings.singleItems].find(i => i.id === id);
-          if (item) {
-            const unitCost = item.category === 'gift' ? 420 : 45;
-            s.ingredCost += parseNum(qty) * unitCost;
+        <div className="p-4 overflow-y-auto flex-1">
+          {!selectedBuyer ? (
+            <div className="space-y-2">
+              {Object.keys(buyerGroups).length === 0 && (
+                <div className="text-center py-8 text-coffee-400 font-bold">本月無應收帳款紀錄</div>
+              )}
+              {Object.entries(buyerGroups).map(([name, group]: [string, any]) => (
+                <div 
+                  key={name}
+                  onClick={() => setSelectedBuyer(name)}
+                  className="flex justify-between items-center p-4 bg-white border border-coffee-100 hover:border-rose-300 hover:shadow-md rounded-xl cursor-pointer transition"
+                >
+                  <span className="font-bold text-coffee-700">{name}</span>
+                  <div className="flex items-center gap-4">
+                    <span className="text-sm text-coffee-400">{group.orders.length} 筆交易</span>
+                    <span className={cn("font-serif-brand font-bold text-lg", group.total > 0 ? "text-rose-brand" : "text-mint-brand")}>
+                      ${fmt(group.total)} <span className="text-xs font-sans font-normal text-coffee-400 ml-1">未收</span>
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {buyerGroups[selectedBuyer]?.orders.map(o => (
+                <div key={o.id} className={cn("flex justify-between items-center p-4 border rounded-xl transition", o.isReconciled ? "bg-mint-50/30 border-mint-200" : "bg-white border-rose-100")}>
+                  <div className="flex flex-col gap-1">
+                    <span className="text-xs font-bold text-coffee-400">{o.date}</span>
+                    <span className="font-bold text-coffee-800">{Object.entries(o.items).filter(([_,q]) => parseNum(q)>0).map(([k,q]) => `${k}x${q}`).join(', ')}</span>
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <span className="font-serif-brand font-bold text-lg text-coffee-700">${fmt(o.actualAmt)}</span>
+                    <button 
+                      onClick={() => toggleReconcile(o.date, o.id, !!o.isReconciled)}
+                      className={cn("flex items-center gap-1 px-3 py-1.5 rounded-lg font-bold text-sm transition focus:ring-4 focus:outline-none", o.isReconciled ? "bg-mint-100 text-mint-700 hover:bg-mint-200 focus:ring-mint-50" : "bg-white border border-coffee-200 text-coffee-600 hover:bg-coffee-50 focus:ring-coffee-50 shadow-sm")}
+                    >
+                      {o.isReconciled ? <CheckSquare className="w-4 h-4"/> : <Square className="w-4 h-4"/>}
+                      {o.isReconciled ? '已沖銷' : '未沖銷'}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, getRecipeCost, materials, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
+  const stats = useMemo(() => {
+    let salesTotal = 0;
+    let discTotal = 0;
+    let prTotal = 0;
+    let remit = 0;
+    let cash = 0;
+    let ar = 0;
+
+    let prShip = 0;
+    let logSpent = 0;
+
+    // Ingredients
+    const itemSales: Record<string, number> = {};
+    const itemPR: Record<string, number> = {}; // track PR items separately if needed? Actually prompt says PR value
+    
+    // Spoilage
+    let lossCost = 0;
+
+    // Packaging usage
+    const pkgUsage: Record<string, number> = {}; // name -> qty
+
+    monthData.forEach((d: DailyReport) => {
+      // Daily Logistics
+      logSpent += parseNum(d.ar.logSpent);
+      
+      // Spoilage
+      d.losses.forEach(loss => {
+        const cost = getRecipeCost(loss.flavor);
+        lossCost += cost * loss.qty;
+      });
+
+      // Daily packaging (from forms)
+      Object.entries(d.packagingUsage || {}).forEach(([pkgId, qty]) => {
+        const pkg = settings.packagingItems.find((p: any) => p.id === pkgId);
+        if (pkg) {
+          pkgUsage[pkg.name] = (pkgUsage[pkg.name] || 0) + parseNum(qty);
+        }
+      });
+
+      d.orders.forEach(o => {
+        if (o.status === '公關品') {
+          prTotal += o.prodAmt;
+          prShip += o.shipAmt; // track PR shipping
+        } else {
+          salesTotal += o.prodAmt;
+          discTotal += o.discAmt;
+          if (o.status === '匯款') remit += o.actualAmt;
+          if (o.status === '現結') cash += o.actualAmt;
+          if (o.status === '未結帳款' || o.status === '已收帳款') ar += o.actualAmt;
+        }
+
+        // Calculate sold items / components
+        Object.entries(o.items).forEach(([itemId, qtyStr]) => {
+          const qty = parseNum(qtyStr);
+          if (qty <= 0) return;
+
+          const single = settings.singleItems.find((i: any) => i.id === itemId);
+          if (single) {
+            itemSales[single.name] = (itemSales[single.name] || 0) + qty;
+            if (o.status === '公關品') itemPR[single.name] = (itemPR[single.name] || 0) + qty;
+          } else {
+            const gift = settings.giftItems.find((i: any) => i.id === itemId);
+            if (gift) {
+              // Add gift box default packaging
+              pkgUsage['禮盒紙盒'] = (pkgUsage['禮盒紙盒'] || 0) + qty;
+              pkgUsage['小卡'] = (pkgUsage['小卡'] || 0) + qty;
+
+              // Break down gift into singles
+              if (gift.recipe) {
+                Object.entries(gift.recipe).forEach(([flavor, rQty]) => {
+                  itemSales[flavor] = (itemSales[flavor] || 0) + qty * parseNum(rQty);
+                  if (o.status === '公關品') itemPR[flavor] = (itemPR[flavor] || 0) + qty * parseNum(rQty);
+                });
+              }
+            }
           }
         });
       });
-      s.logSpent += parseNum(d.ar.logSpent);
-      Object.entries(d.packagingUsage || {}).forEach(([id, qty]) => {
-        const p = settings.packagingItems.find(x => x.id === id);
-        if (p) s.pkgCost += parseNum(qty) * parseNum(p.price);
-      });
     });
 
-    const fixedTotal: number = Object.values(fixedCosts).reduce<number>((acc, val) => acc + parseNum(val), 0);
-    const variable: number = s.ingredCost + s.pkgCost + s.logSpent;
-    const net: number = s.rev - s.disc - variable - fixedTotal;
+    const netRevenue = salesTotal - discTotal - prTotal; // As per prompt
+    
+    // Ingredients cost sum
+    let ingredCost = 0;
+    let prIngredCost = 0; // Cost of PR items
+    Object.entries(itemSales).forEach(([flavor, qty]) => {
+      const cost = getRecipeCost(flavor);
+      ingredCost += qty * cost;
+    });
+    // Calculate how much of ingred cost is from PR? Actually prompt says "售出公關品的成本計算...為 行銷費用-公關品"
+    // So PR cost = Cost of items given as PR. 
+    Object.entries(itemPR).forEach(([flavor, qty]) => {
+      const cost = getRecipeCost(flavor);
+      prIngredCost += qty * cost;
+    });
 
-    return { ...s, fixedTotal, variable, net };
-  }, [monthData, fixedCosts, settings]);
+    // Packaging cost sum
+    let pkgCostTotal = 0;
+    const pkgDetails = Object.entries(pkgUsage).map(([name, qty]) => {
+      const mat = materials.find((m: Material) => m.name === name && m.category === '包材');
+      const unitCost = mat?.avgCost || 0;
+      const totalCost = qty * unitCost;
+      pkgCostTotal += totalCost;
+      return { name, qty, unitCost, totalCost };
+    });
 
-  const updateFixed = async (key: string, val: number) => {
-    const next = { ...fixedCosts, [key]: val };
+    const totalVariableCost = ingredCost + pkgCostTotal + logSpent + lossCost;
+
+    const prMarketingCost = prIngredCost + prShip;
+    const totalFixedCostsInput = fixedCosts.reduce((acc: number, cur: any) => acc + parseNum(cur.amount), 0);
+    const totalMarketingAndFixed = totalFixedCostsInput + prMarketingCost;
+
+    const netProfit = netRevenue - totalVariableCost - totalMarketingAndFixed;
+
+    return {
+      salesTotal, discTotal, prTotal, netRevenue,
+      remit, cash, ar,
+      itemSales, ingredCost,
+      pkgDetails, pkgCostTotal,
+      logSpent, lossCost,
+      totalVariableCost,
+      prIngredCost, prShip, prMarketingCost,
+      totalFixedCostsInput, totalMarketingAndFixed,
+      netProfit
+    };
+  }, [monthData, settings, getRecipeCost, materials, fixedCosts]);
+
+  const updateFixedCostAmount = async (id: string, amount: number) => {
+    const next = fixedCosts.map((c: any) => c.id === id ? { ...c, amount } : c);
     setFixedCosts(next);
     await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { 
       ym: selectedMonth, 
-      fixed: next,
+      fixedCostsList: next,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  };
+
+  const addFixedCost = async () => {
+    const name = window.prompt("請輸入新的固定支出項目名稱:");
+    if (!name) return;
+    const next = [...fixedCosts, { id: uid(), label: name, amount: 0 }];
+    setFixedCosts(next);
+    await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { 
+      ym: selectedMonth, 
+      fixedCostsList: next,
+      updatedAt: new Date().toISOString()
+    }, { merge: true });
+  };
+
+  const removeFixedCost = async (id: string) => {
+    const next = fixedCosts.filter((c: any) => c.id !== id);
+    setFixedCosts(next);
+    await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { 
+      ym: selectedMonth, 
+      fixedCostsList: next,
       updatedAt: new Date().toISOString()
     }, { merge: true });
   };
 
   return (
-    <div className="space-y-8 animate-in fade-in duration-500 h-full">
-      <div className="glass-panel p-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-8">
-          <div>
-            <h3 className="section-title">
-              <ReceiptText className="w-5 h-5 inline-block mr-2 mb-1" /> 態度貳貳營運月報表
+    <div className="space-y-8">
+      {/* KPI Header */}
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-6">
+          <span className="text-coffee-400 font-bold text-sm mb-1 uppercase tracking-widest">本期淨營業額</span>
+          <span className="text-3xl font-serif-brand font-bold text-coffee-800">${fmt(stats.netRevenue)}</span>
+        </div>
+        <div className="flex items-center justify-center text-coffee-300 font-bold text-2xl">-</div>
+        <div className="kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-6">
+          <span className="text-coffee-400 font-bold text-sm mb-1 uppercase tracking-widest">本期變動成本</span>
+          <span className="text-3xl font-serif-brand font-bold text-rose-brand">${fmt(stats.totalVariableCost)}</span>
+        </div>
+        <div className="flex items-center justify-center text-coffee-300 font-bold text-2xl">-</div>
+        <div className="kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-6">
+          <span className="text-coffee-400 font-bold text-sm mb-1 uppercase tracking-widest">行銷與固定支出</span>
+          <span className="text-3xl font-serif-brand font-bold text-rose-brand">${fmt(stats.totalMarketingAndFixed)}</span>
+        </div>
+        <div className="flex items-center justify-center text-coffee-300 font-bold text-2xl">=</div>
+        <div className="kpi-card bg-[#faf7f2] border border-coffee-100 shadow-md flex flex-col justify-center items-center py-6">
+          <span className="text-coffee-500 font-bold text-sm mb-1 uppercase tracking-widest">本期淨利</span>
+          <span className={cn("text-4xl font-serif-brand font-bold", stats.netProfit >= 0 ? "text-mint-brand" : "text-danger-brand")}>
+            ${fmt(stats.netProfit)}
+          </span>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+        {/* Revenue Overview */}
+        <div className="glass-panel p-6 bg-white flex flex-col gap-6">
+          <div className="border-b-2 border-coffee-800 pb-3">
+            <h3 className="text-xl font-bold text-coffee-800 flex items-center gap-2 tracking-wider">
+              <Wallet className="w-5 h-5 text-coffee-600" /> 營收概況
             </h3>
-            <p className="text-coffee-400 text-sm mt-1">匯總單月數據，深入分析營收與固定支出佔比。</p>
           </div>
-          <input 
-            type="month"
-            value={selectedMonth}
-            onChange={(e) => setSelectedMonth(e.target.value)}
-            className="bg-white border border-coffee-200 rounded-full px-6 py-2 font-bold text-coffee-600 outline-none focus:ring-2 focus:ring-rose-brand/20 focus:border-rose-brand transition-all shadow-sm"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-10">
-          <div className="kpi-card border border-coffee-50 shadow-sm">
-            <span className="kpi-label">本月營業淨額</span>
-            <span className="kpi-value">${fmt(stats.rev - stats.disc)}</span>
-          </div>
-          <div className="kpi-card border border-coffee-50 shadow-sm">
-            <span className="kpi-label">變動成本合計</span>
-            <span className="kpi-value text-rose-brand">${fmt(stats.variable)}</span>
-          </div>
-          <div className="kpi-card border border-coffee-50 shadow-sm">
-            <span className="kpi-label">本月固定支出</span>
-            <span className="kpi-value text-rose-brand">${fmt(stats.fixedTotal)}</span>
-          </div>
-          <div className="kpi-card border border-coffee-50 shadow-sm bg-[#faf7f2]">
-            <span className="kpi-label">全月預估獲利</span>
-            <span className="kpi-value text-mint-brand">${fmt(stats.net)}</span>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
-          <div className="lg:col-span-12 space-y-8">
-            <div className="rounded-[24px] overflow-hidden border border-coffee-50 bg-white shadow-sm">
-              <table className="w-full text-sm">
-                <thead className="bg-[#faf7f2]">
-                  <tr className="text-coffee-400 font-bold uppercase tracking-widest text-[10px]">
-                    <th className="px-6 py-4 text-left border-b border-[#f0ede8]">財務明細項目</th>
-                    <th className="px-6 py-4 text-right border-b border-[#f0ede8]">金額</th>
-                    <th className="px-6 py-4 text-left border-b border-[#f0ede8] pl-10">對應說明</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-[#f0ede8]">
-                  <tr className="hover:bg-coffee-50/20 transition-colors">
-                    <td className="px-6 py-4 flex items-center gap-3">
-                      <div className="w-8 h-8 bg-mint-brand/10 rounded-full flex items-center justify-center text-mint-brand">
-                        <TrendingUp className="w-4 h-4" />
-                      </div>
-                      <span className="font-bold text-coffee-700">銷售營業總額</span>
-                    </td>
-                    <td className="px-6 py-4 text-right font-serif-brand font-bold text-lg text-coffee-800">${fmt(stats.rev)}</td>
-                    <td className="px-6 py-4 text-coffee-400 pl-10">當月合計商品訂單金額 (未扣折扣)</td>
-                  </tr>
-                  <tr className="hover:bg-coffee-50/20 transition-colors">
-                    <td className="px-6 py-4 flex items-center gap-3">
-                      <div className="w-8 h-8 bg-rose-brand/10 rounded-full flex items-center justify-center text-rose-brand">
-                        <Wallet className="w-4 h-4" />
-                      </div>
-                      <span className="font-bold text-coffee-700">行銷折讓與公關品</span>
-                    </td>
-                    <td className="px-6 py-4 text-right font-serif-brand font-bold text-lg text-rose-brand">-${fmt(stats.disc + stats.pr)}</td>
-                    <td className="px-6 py-4 text-coffee-400 pl-10">含折扣、手續費、運補及公關成本</td>
-                  </tr>
-                  <tr className="hover:bg-coffee-50/20 transition-colors">
-                    <td className="px-6 py-4 flex items-center gap-3">
-                      <div className="w-8 h-8 bg-coffee-100 rounded-full flex items-center justify-center text-coffee-600">
-                        <ChartIcon className="w-4 h-4" />
-                      </div>
-                      <span className="font-bold text-coffee-700">全月變動成本</span>
-                    </td>
-                    <td className="px-6 py-4 text-right font-serif-brand font-bold text-lg text-rose-brand">-${fmt(stats.variable)}</td>
-                    <td className="px-6 py-4 text-coffee-400 pl-10">含預估食材、包材支出與實際物流費用</td>
-                  </tr>
-                </tbody>
-              </table>
+          
+          <div className="space-y-4 flex-1">
+            <div className="flex justify-between items-center bg-coffee-50/50 p-3 rounded-xl border border-coffee-50">
+              <span className="text-coffee-600 font-bold text-sm">售出產品總價值</span>
+              <span className="font-serif-brand font-bold">${fmt(stats.salesTotal)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-coffee-50/50 p-3 rounded-xl border border-coffee-50">
+              <span className="text-coffee-600 font-bold text-sm">折讓總金額</span>
+              <span className="font-serif-brand font-bold text-rose-brand">-${fmt(stats.discTotal)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-coffee-50/50 p-3 rounded-xl border border-coffee-50">
+              <span className="text-coffee-600 font-bold text-sm">公關品總價值</span>
+              <span className="font-serif-brand font-bold text-coffee-500">(${fmt(stats.prTotal)})</span>
+            </div>
+            <div className="flex justify-between items-center bg-coffee-100/50 p-4 rounded-xl border border-coffee-200 shadow-sm mt-2">
+              <span className="text-coffee-800 font-bold">本月淨營業額</span>
+              <span className="font-serif-brand font-bold text-xl">${fmt(stats.netRevenue)}</span>
             </div>
 
-            <div className="glass-panel p-8">
-              <h3 className="section-title mb-8">
-                <Users className="w-5 h-5 inline-block mr-2 mb-1" /> 固定支出管理 (Fixed Expenses)
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mt-4">
-                {[
-                  { id: 'rent', label: '店鋪房租', icon: Home },
-                  { id: 'util', label: '水電雜支', icon: Lightbulb },
-                  { id: 'staff', label: '人事費用', icon: Users },
-                  { id: 'maint', label: '設備維修', icon: Wrench },
-                  { id: 'misc', label: '會計雜項', icon: Info },
-                  { id: 'ads', label: '行銷廣告', icon: Megaphone },
-                ].map(item => (
-                  <div key={item.id} className="kpi-card border border-coffee-50 group hover:border-rose-brand hover:shadow-md transition-all">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 bg-coffee-50 rounded-xl flex items-center justify-center text-coffee-600 group-hover:bg-rose-brand group-hover:text-white transition-colors">
-                          <item.icon className="w-4 h-4" />
-                        </div>
-                        <span className="font-bold text-coffee-700 text-sm">{item.label}</span>
-                      </div>
-                    </div>
-                    <div className="flex items-end gap-1">
-                      <span className="text-coffee-300 font-serif-brand text-xs mb-1">$</span>
-                      <input 
-                        type="number"
-                        className="w-full text-2xl font-serif-brand font-bold bg-transparent border-b border-transparent focus:border-rose-brand outline-none text-coffee-800 transition-all placeholder:text-coffee-50"
-                        placeholder="0"
-                        value={fixedCosts[item.id] || ''}
-                        onChange={(e) => updateFixed(item.id, parseNum(e.target.value))}
-                      />
-                    </div>
-                  </div>
-                ))}
+            <div className="pt-4 mt-4 border-t border-coffee-100 space-y-3">
+              <h4 className="text-sm font-bold text-coffee-400 uppercase tracking-widest mb-2">金流情況</h4>
+              <div className="flex justify-between items-center px-2">
+                <span className="text-coffee-600 text-sm font-bold">現金收款</span>
+                <span className="font-serif-brand font-bold text-mint-brand">${fmt(stats.cash)}</span>
               </div>
+              <div className="flex justify-between items-center px-2">
+                <span className="text-coffee-600 text-sm font-bold">銀行匯款</span>
+                <span className="font-serif-brand font-bold text-mint-brand">${fmt(stats.remit)}</span>
+              </div>
+              <button 
+                onClick={() => setShowARModal(true)}
+                className="w-full flex justify-between items-center px-3 py-2 bg-rose-50 border border-rose-100 rounded-lg hover:bg-rose-100 transition active:scale-95 group"
+              >
+                <span className="text-rose-brand text-sm font-bold flex items-center gap-1">應收帳款 <Info className="w-3 h-3 group-hover:scale-110 transition"/></span>
+                <span className="font-serif-brand font-bold text-rose-brand">${fmt(stats.ar)}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Variable Costs */}
+        <div className="glass-panel p-6 bg-white flex flex-col gap-6">
+          <div className="border-b-2 border-coffee-800 pb-3">
+            <h3 className="text-xl font-bold text-coffee-800 flex items-center gap-2 tracking-wider">
+              <ChartIcon className="w-5 h-5 text-coffee-600" /> 營業變動成本
+            </h3>
+          </div>
+          
+          <div className="space-y-4 flex-1">
+            <div className="flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
+              <div className="flex justify-between items-center">
+                <span className="text-coffee-800 font-bold">食材成本</span>
+                <span className="font-serif-brand font-bold text-rose-brand">${fmt(stats.ingredCost)}</span>
+              </div>
+              <div className="text-xs text-coffee-400 leading-tight">
+                包含各品項(含禮盒轉換單顆)銷售量 * 單位成品成本。
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
+              <div className="flex justify-between items-center">
+                <span className="text-coffee-800 font-bold">包材成本</span>
+                <span className="font-serif-brand font-bold text-rose-brand">${fmt(stats.pkgCostTotal)}</span>
+              </div>
+              {stats.pkgDetails.length > 0 && (
+                <div className="mt-2 flex flex-col gap-1 border-t border-coffee-100 pt-2">
+                  <div className="grid grid-cols-4 text-[10px] text-coffee-400 font-bold uppercase">
+                    <span className="col-span-1">項目</span>
+                    <span className="text-right">使用量</span>
+                    <span className="text-right">單價</span>
+                    <span className="text-right">總費</span>
+                  </div>
+                  {stats.pkgDetails.map((p, i) => (
+                    <div key={i} className="grid grid-cols-4 text-xs text-coffee-600">
+                      <span className="col-span-1 truncate">{p.name}</span>
+                      <span className="text-right font-mono">{p.qty}</span>
+                      <span className="text-right font-mono">${fmt(p.unitCost)}</span>
+                      <span className="text-right font-mono font-bold">${fmt(p.totalCost)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-between items-center p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
+              <span className="text-coffee-800 font-bold">物流成本</span>
+              <span className="font-serif-brand font-bold text-rose-brand">${fmt(stats.logSpent)}</span>
+            </div>
+
+            <div className="flex justify-between items-center p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
+              <span className="text-coffee-800 font-bold">耗損成本</span>
+              <span className="font-serif-brand font-bold text-rose-brand">${fmt(stats.lossCost)}</span>
+            </div>
+
+            <div className="flex justify-between items-center bg-rose-50/50 p-4 rounded-xl border border-rose-200 shadow-sm mt-4">
+              <span className="text-rose-900 font-bold">本月變動成本</span>
+              <span className="font-serif-brand font-bold text-xl text-rose-brand">${fmt(stats.totalVariableCost)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Fixed Costs */}
+        <div className="glass-panel p-6 bg-white flex flex-col gap-6">
+          <div className="border-b-2 border-coffee-800 pb-3 flex justify-between items-end">
+            <h3 className="text-xl font-bold text-coffee-800 flex items-center gap-2 tracking-wider">
+              <Home className="w-5 h-5 text-coffee-600" /> 行銷與固定成本
+            </h3>
+            <button 
+              onClick={addFixedCost}
+              className="text-xs bg-coffee-800 text-white px-2 py-1 rounded-md font-bold flex items-center gap-1 hover:bg-coffee-900 transition"
+            >
+              <Plus className="w-3 h-3" /> 新增
+            </button>
+          </div>
+          
+          <div className="space-y-3 flex-1 flex flex-col">
+            <div className="flex justify-between items-center p-3 bg-indigo-50/50 rounded-xl border border-indigo-100">
+              <div className="flex flex-col">
+                <span className="text-indigo-900 font-bold text-sm">行銷費用-公關品</span>
+                <span className="text-[10px] text-indigo-400">公關品成本 + 寄出運費</span>
+              </div>
+              <span className="font-serif-brand font-bold text-indigo-600">${fmt(stats.prMarketingCost)}</span>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto space-y-2 pr-2" style={{ maxHeight: '250px' }}>
+              {fixedCosts.map((cost: any) => (
+                <div key={cost.id} className="flex justify-between items-center p-2 hover:bg-coffee-50/50 rounded-lg group transition">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => removeFixedCost(cost.id)}
+                      className="opacity-0 group-hover:opacity-100 text-danger-brand p-1 hover:bg-danger-brand/10 rounded transition"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                    <span className="text-coffee-600 text-sm font-bold">{cost.label}</span>
+                  </div>
+                  <div className="flex items-end gap-1">
+                    <span className="text-coffee-300 font-serif-brand text-xs mb-1">$</span>
+                    <input 
+                      type="number"
+                      value={cost.amount || ''}
+                      onChange={(e) => updateFixedCostAmount(cost.id, parseNum(e.target.value))}
+                      className="w-20 text-right bg-transparent border-b border-coffee-200 outline-none focus:border-coffee-500 font-serif-brand font-bold text-coffee-800"
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex justify-between items-center bg-rose-50/50 p-4 rounded-xl border border-rose-200 shadow-sm mt-4">
+              <span className="text-rose-900 font-bold">本月行銷與固定成本</span>
+              <span className="font-serif-brand font-bold text-xl text-rose-brand">${fmt(stats.totalMarketingAndFixed)}</span>
             </div>
           </div>
         </div>
       </div>
+
+      <AnimatePresence>
+        {showARModal && (
+          <ARReconciliationModal 
+            monthData={monthData} 
+            shopId={shopId} 
+            onClose={() => { setShowARModal(false); setSelectedBuyer(null); }}
+            selectedBuyer={selectedBuyer}
+            setSelectedBuyer={setSelectedBuyer}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+function ProductTab({ monthData, settings }: any) {
+  const productStats = useMemo(() => {
+    const stats: Record<string, { qty: number, rev: number, category: string }> = {};
+
+    settings.giftItems.concat(settings.singleItems).forEach((item: any) => {
+      stats[item.id] = { qty: 0, rev: 0, category: item.category };
+    });
+
+    monthData.forEach((d: DailyReport) => {
+      d.orders.forEach(o => {
+        if (o.status === '公關品') return; // maybe exclude PR? Or include? Let's exclude PR from revenue stats, just sales.
+        
+        Object.entries(o.items).forEach(([itemId, qtyStr]) => {
+          const qty = parseNum(qtyStr);
+          if (qty <= 0) return;
+          
+          if (stats[itemId]) {
+            stats[itemId].qty += qty;
+            // Revenue proportion. This is tricky because we only have total prodAmt and discAmt per order. 
+            // We can estimate revenue by looking at listed price
+            const item = settings.giftItems.concat(settings.singleItems).find((i:any) => i.id === itemId);
+            if (item) {
+              stats[itemId].rev += qty * (item.price || 0);
+            }
+          }
+        });
+      });
+    });
+
+    return stats;
+  }, [monthData, settings]);
+
+  const sortedItems = Object.entries(productStats)
+    .sort((a: [string, any],b: [string, any]) => b[1].qty - a[1].qty)
+    .map(([id, stat]: [string, any]) => {
+      const item = settings.giftItems.concat(settings.singleItems).find((i:any) => i.id === id);
+      return { id, name: item?.name || '未知', ...stat };
+    })
+    .filter((stat: any) => stat.qty > 0);
+
+  return (
+    <div className="glass-panel p-6 bg-white space-y-6">
+      <div className="border-b-2 border-coffee-800 pb-3">
+        <h3 className="text-xl font-bold text-coffee-800 flex items-center gap-2 tracking-wider">
+          <ChartIcon className="w-5 h-5 text-coffee-600" /> 產品銷售數據 (不含公關品)
+        </h3>
+      </div>
+      
+      {sortedItems.length === 0 ? (
+        <div className="text-center text-coffee-400 py-10 font-bold border border-dashed border-coffee-200 rounded-xl bg-[#faf7f2]">
+          本月尚無產品銷售資料
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-[#faf7f2] text-coffee-400 font-bold tracking-widest uppercase text-xs">
+              <tr>
+                <th className="px-4 py-3 rounded-l-xl">產品名稱按銷售量排序</th>
+                <th className="px-4 py-3">分類</th>
+                <th className="px-4 py-3 text-right">銷售數量</th>
+                <th className="px-4 py-3 text-right rounded-r-xl">預估創造營收</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#f0ede8]">
+              {sortedItems.map(item => (
+                <tr key={item.id} className="hover:bg-coffee-50/30 transition">
+                  <td className="px-4 py-3 font-bold text-coffee-800">{item.name}</td>
+                  <td className="px-4 py-3 text-coffee-500 text-xs">
+                    <span className={cn("px-2 py-1 rounded-md font-bold", item.category === 'gift' ? "bg-rose-100 text-rose-700" : "bg-coffee-100 text-coffee-700")}>
+                      {item.category === 'gift' ? '禮盒' : '單顆'}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-right font-mono font-bold text-coffee-700">{item.qty}</td>
+                  <td className="px-4 py-3 text-right font-mono text-coffee-600">${fmt(item.rev)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+

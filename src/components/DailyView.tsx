@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { doc, onSnapshot, setDoc, getDoc, query, collection, where, getDocs, limit, orderBy } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, query, collection, where, getDocs, limit, orderBy, runTransaction } from 'firebase/firestore';
 import { fmt, uid, parseNum, todayISO } from '../lib/utils';
 import { DailyReport, Settings, Order, LossEntry } from '../types';
 import { 
@@ -30,8 +30,11 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
-import { runTransaction } from 'firebase/firestore';
 
+const normalizeDateKey = (v: string) => {
+  const [y, m = '1', d = '1'] = v.split('-');
+  return `${y}-${String(Number(m)).padStart(2, '0')}-${String(Number(d)).padStart(2, '0')}`;
+};
 export default function DailyView({ 
   currentDate, 
   setCurrentDate, 
@@ -47,15 +50,12 @@ export default function DailyView({
   const [dailyData, setDailyData] = useState<DailyReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const normalizeDateKey = (v: string) => {
-    const [y, m = '1', d = '1'] = v.split('-');
-    return `${y}-${String(Number(m)).padStart(2, '0')}-${String(Number(d)).padStart(2, '0')}`;
-  };
+
   useEffect(() => {
     (async () => {
       const q = query(collection(db, 'shops', shopId, 'daily'), limit(20), orderBy('date', 'desc'));
       const s = await getDocs(q);
-      console.log('[DailyView] available daily docs:', s.docs.map((d) => ({ id: d.id, ...d.data() })));
+      
     })();
   }, [shopId]);
 
@@ -63,7 +63,7 @@ export default function DailyView({
     let unsub: (() => void) | undefined;
 
     const start = async () => {
-      const padKey = currentDate; // e.g. 2026-04-17
+      const padKey = normalizeDateKey(currentDate); // e.g. 2026-04-17
       const legacyKey = currentDate.replace(
         /^(\d{4})-0?(\d{1,2})-0?(\d{1,2})$/,
         (_, y, m, d) => `${y}-${Number(m)}-${Number(d)}`
@@ -104,7 +104,12 @@ export default function DailyView({
     if (!dailyData || loading) return;
     const t = setTimeout(async () => {
       setSaveStatus('saving');
-      await setDoc(doc(db, 'shops', shopId, 'daily', currentDate), dailyData);
+      const dateKey = normalizeDateKey(currentDate);
+      await setDoc(
+        doc(db, 'shops', shopId, 'daily', dateKey),
+        { ...dailyData, date: dateKey },
+        { merge: true }
+      );
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
     }, 1000);
@@ -669,8 +674,7 @@ export default function DailyView({
                   <tbody className="divide-y divide-coffee-50">
                     {(() => {
                         const uniqueFlavors = Array.from(new Set([
-                            ...settings.giftItems.filter(i=>i.active && i.name!=='綜合').map(i=>i.name),
-                            ...settings.singleItems.filter(i=>i.active && i.name!=='綜合').map(i=>i.name)
+                            ...settings.singleItems.filter(i=>i.active && !i.name.includes('綜合')).map(i=>i.name)
                         ]));
 
                         return uniqueFlavors.map(f => {
@@ -730,10 +734,9 @@ export default function DailyView({
                 </h3>
                 <button 
                   onClick={() => {
-                    const flavors = Array.from(new Set([
-                      ...settings.giftItems.filter(i=>i.active && i.name!=='綜合').map(i=>i.name),
-                      ...settings.singleItems.filter(i=>i.active && i.name!=='綜合').map(i=>i.name)
-                    ]));
+                         const flavors = Array.from(new Set([
+                           ...settings.singleItems.filter(i=>i.active && !i.name.includes('綜合')).map(i=>i.name)
+                         ]));
                     updateDaily({
                       losses: [...dailyData.losses, { id: uid(), flavor: flavors[0] || '', qty: 0, type: '技術', notes: '' }]
                     })
@@ -757,8 +760,7 @@ export default function DailyView({
                   <tbody className="divide-y divide-coffee-50">
                     {dailyData.losses.map((loss, idx) => {
                       const allFlavors = Array.from(new Set([
-                        ...settings.giftItems.filter(i=>i.active && i.name!=='綜合').map(i=>i.name),
-                        ...settings.singleItems.filter(i=>i.active && i.name!=='綜合').map(i=>i.name)
+                        ...settings.singleItems.filter(i=>i.active && !i.name.includes('綜合')).map(i=>i.name)
                       ]));
                       return (
                         <tr key={loss.id}>
@@ -1128,6 +1130,37 @@ function SettingsTab({ settings, shopId }: { settings: Settings; shopId: string 
 function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { settings: Settings; shopId: string; currentDate: string; dailyData: DailyReport; updateDaily: (patch: Partial<DailyReport>) => void }) {
   const [importText, setImportText] = useState('');
   const [parsedOrders, setParsedOrders] = useState<any[]>([]);
+  const [weeklyData, setWeeklyData] = useState<DailyReport[]>([]);
+  const [weekRange, setWeekRange] = useState('');
+
+  useEffect(() => {
+    const fetchWeekly = async () => {
+      const [y, m, d] = currentDate.split('-').map(Number);
+      const selDate = new Date(y, m - 1, d);
+      const day = selDate.getDay();
+      const diffToMon = (day === 0 ? -6 : 1 - day);
+      const monday = new Date(selDate);
+      monday.setDate(selDate.getDate() + diffToMon);
+      
+      const sunday = new Date(monday); 
+      sunday.setDate(monday.getDate() + 6);
+      
+      const fmtYMD = (date: Date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,'0')}-${String(date.getDate()).padStart(2,'0')}`;
+      
+      const p1 = fmtYMD(monday);
+      const p2 = fmtYMD(sunday);
+      setWeekRange(`${p1} 至 ${p2}`);
+
+      const q = query(
+        collection(db, 'shops', shopId, 'daily'),
+        where('dateKey', '>=', p1.replace(/-/g, '')),
+        where('dateKey', '<=', p2.replace(/-/g, ''))
+      );
+      const snap = await getDocs(q);
+      setWeeklyData(snap.docs.map(doc => doc.data() as DailyReport));
+    };
+    fetchWeekly();
+  }, [currentDate, shopId, dailyData]); // adding dailyData dependency so it refreshes when saving current day
 
   const processImport = () => {
     const raw = importText.trim();
@@ -1177,38 +1210,57 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
     const idxShipDate = getIdx(['宅配出貨日', '出貨']);
     const idxMethod = getIdx(['取貨方式', '物流']);
 
-    const customItemsAcc = (settings.customCategories || []).flatMap(cat => cat.items);
-    const allItems = [...settings.giftItems, ...settings.singleItems, ...settings.packagingItems, ...customItemsAcc].sort((a,b) => b.name.length - a.name.length);
     const itemMap: { item: any, colIdx: number }[] = [];
     
     headers.forEach((h, colIdx) => {
-      const match = allItems.find(i => h.includes(i.name) || i.name.includes(h));
-      if (match) {
-        if (!itemMap.some(m => m.colIdx === colIdx)) {
-          itemMap.push({ item: match, colIdx });
+      const isGBHeader = h.includes('禮盒');
+      const isSGHeader = h.includes('單顆');
+      
+      let bestMatch = null;
+      if (isGBHeader) {
+        bestMatch = settings.giftItems.find(i => h.includes(i.name) || i.name.includes(h));
+      } else if (isSGHeader) {
+        bestMatch = settings.singleItems.find(i => h.includes(i.name) || i.name.includes(h));
+      } else {
+        bestMatch = settings.giftItems.find(i => h.includes(i.name) || i.name.includes(h)) || 
+                    settings.singleItems.find(i => h.includes(i.name) || i.name.includes(h));
+      }
+
+      if (bestMatch) {
+         if (!itemMap.some(m => m.colIdx === colIdx)) {
+           itemMap.push({ item: bestMatch, colIdx });
+         }
+      } else {
+        // Fallback for custom categories or if not matched yet
+        const customItemsAcc = (settings.customCategories || []).flatMap(cat => cat.items);
+        const fallbackMatch = [...settings.packagingItems, ...customItemsAcc].find(i => h.includes(i.name) || i.name.includes(h));
+        if (fallbackMatch && !itemMap.some(m => m.colIdx === colIdx)) {
+          itemMap.push({ item: fallbackMatch, colIdx });
         }
       }
     });
 
     const parsed: any[] = [];
     dataRows.forEach((row, rowIdx) => {
-      if (row.length < 3 || !row.some(c => c)) return;
+      if (!row.some(c => c)) return;
 
-      const method = idxMethod !== -1 && row[idxMethod] ? row[idxMethod] : '';
+      const method = idxMethod !== -1 && row[idxMethod] ? String(row[idxMethod]) : '';
       let targetDate = '';
       if (method && method.includes('店')) {
-        targetDate = idxStoreDate !== -1 ? row[idxStoreDate] : '';
+        targetDate = idxStoreDate !== -1 && row[idxStoreDate] ? String(row[idxStoreDate]) : '';
       } else if (method && method.includes('宅配')) {
-        targetDate = idxShipDate !== -1 ? row[idxShipDate] : '';
+        targetDate = idxShipDate !== -1 && row[idxShipDate] ? String(row[idxShipDate]) : '';
       } else {
-        targetDate = (idxStoreDate !== -1 && row[idxStoreDate]) || (idxShipDate !== -1 && row[idxShipDate]) || '';
+        targetDate = (idxStoreDate !== -1 && row[idxStoreDate] ? String(row[idxStoreDate]) : '') || (idxShipDate !== -1 && row[idxShipDate] ? String(row[idxShipDate]) : '');
       }
 
-      const d = targetDate.trim() ? targetDate.trim().replace(/\//g, '-') : currentDate;
+      const d = normalizeDateKey(
+        targetDate.trim() ? targetDate.trim().replace(/\//g, '-') : currentDate
+      );
 
-      const buyer = idxBuyer !== -1 ? row[idxBuyer] : `未命名訂單 (${rowIdx+1})`;
-      const phone = idxPhone !== -1 ? row[idxPhone] : '';
-      let addr = idxAddr !== -1 ? row[idxAddr] : '';
+      const buyer = idxBuyer !== -1 && row[idxBuyer] ? String(row[idxBuyer]) : `未命名訂單 (${rowIdx+1})`;
+      const phone = idxPhone !== -1 && row[idxPhone] ? String(row[idxPhone]) : '';
+      let addr = idxAddr !== -1 && row[idxAddr] ? String(row[idxAddr]) : '';
       if (!addr && method) addr = method; // fall back to method if address is empty
 
       let shipAmt = 0;
@@ -1272,7 +1324,8 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
         }));
         updateDaily({ orders: [...dailyData.orders, ...appended] });
       } else {
-        const ref = doc(db, 'shops', shopId, 'daily', date);
+        const dateKey = normalizeDateKey(date);
+        const ref = doc(db, 'shops', shopId, 'daily', dateKey);
         const snap = await getDoc(ref);
         let existingOrders: Order[] = [];
         let existingData = {};
@@ -1297,7 +1350,7 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
         
         await setDoc(ref, { 
           ...existingData, 
-          date, 
+          dateKey, 
           orders: [...existingOrders, ...appended] 
         }, { merge: true });
       }
@@ -1308,6 +1361,17 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
     setParsedOrders([]);
   };
 
+    const copyText = (text: string, e: React.MouseEvent<HTMLButtonElement>) => {
+      navigator.clipboard.writeText(text).then(() => {
+        const btn = e.currentTarget;
+        const oldClass = btn.className;
+        btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-mint-brand"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+        setTimeout(() => {
+          btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>';
+        }, 1500);
+      });
+    };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="glass-panel p-6 shadow-sm border border-coffee-100">
@@ -1316,8 +1380,8 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
             <FileUp className="w-5 h-5 text-mint-brand" /> 訂單匯入
           </h2>
           <div className="flex items-center gap-2">
-            <button className="px-4 py-2 border border-coffee-200 bg-white text-coffee-600 font-bold rounded-xl shadow-sm hover:bg-gray-50 transition" onClick={() => { setImportText(''); setParsedOrders([]); }}>清空</button>
-            <button className="px-4 py-2 bg-coffee-600 text-white font-bold rounded-xl shadow-sm hover:bg-coffee-700 transition flex items-center gap-2" onClick={processImport}>
+            <button className="px-4 py-2 border border-coffee-200 bg-white text-coffee-600 font-bold rounded-xl shadow-sm hover:bg-gray-50 transition active:scale-95" onClick={() => { setImportText(''); setParsedOrders([]); }}>清空</button>
+            <button className="px-4 py-2 bg-coffee-600 text-white font-bold rounded-xl shadow-sm hover:bg-coffee-700 transition active:scale-95 flex items-center gap-2" onClick={processImport}>
               <Wand2 className="w-4 h-4" /> 解析資料
             </button>
           </div>
@@ -1361,14 +1425,92 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
         )}
       </div>
 
-      {/* Weekly View (Optional Placeholder) */}
-      <div className="glass-panel p-6 border border-coffee-100 shadow-sm bg-coffee-50/30">
-        <h2 className="text-lg font-bold flex items-center gap-2 text-coffee-800 mb-4">
-          <CalendarDays className="w-5 h-5 text-coffee-500" /> 匯入與歷史說明
-        </h2>
-        <div className="text-sm text-coffee-600 bg-white p-4 rounded-xl shadow-sm border border-coffee-50 leading-relaxed">
-          若有匯入到其他日期的訂單，請切換上方的日期挑選器至該日，即可檢視明細並自動結算總金額及存貨扣減。<br/><br/>
-          * 解析時會自動使用您在「品項設定」中的名稱對應表單欄位，請確認表單欄位名稱包含品項關鍵字（例：包含「原味」或「原味禮盒」字眼）。
+      {/* Weekly View */}
+      <div className="glass-panel p-6 border border-coffee-100 shadow-sm bg-transparent">
+        <div className="flex justify-between items-center mb-4 pb-2 border-b border-coffee-100">
+          <h2 className="text-xl font-bold flex items-center gap-2 text-coffee-800">
+            <CalendarDays className="w-5 h-5 text-coffee-500" /> 當週訂購名單 (依日期分組)
+          </h2>
+          <span className="text-sm font-bold text-coffee-400 bg-white px-3 py-1 rounded-lg border border-coffee-100">{weekRange}</span>
+        </div>
+        
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {Array.from({length: 7}).map((_, i) => {
+            const [y, m, d] = currentDate.split('-').map(Number);
+            const selDate = new Date(y, m - 1, d);
+            const day = selDate.getDay();
+            const diffToMon = (day === 0 ? -6 : 1 - day);
+            const curDate = new Date(selDate);
+            curDate.setDate(selDate.getDate() + diffToMon + i);
+            const dateStr = `${curDate.getFullYear()}-${String(curDate.getMonth()+1).padStart(2,'0')}-${String(curDate.getDate()).padStart(2,'0')}`;
+            
+            // Check if we have weekly data or daily Data matches
+            const data = weeklyData.find(w => w.date === dateStr) || (dailyData.date === dateStr ? dailyData : null);
+            const validOrders = data?.orders?.filter(o => o.buyer.trim() || o.actualAmt > 0) || [];
+
+            if (validOrders.length === 0) return null;
+
+            return (
+              <div key={dateStr} className="flex flex-col bg-white rounded-xl shadow-sm border border-coffee-100 min-h-[200px] overflow-hidden">
+                <h3 className="bg-coffee-50 p-3 font-bold text-coffee-700 text-sm border-b border-coffee-100 flex items-center gap-2">
+                  <CalendarDays className="w-4 h-4 text-coffee-400" /> {dateStr}
+                </h3>
+                <div className="flex-1 overflow-y-auto p-2">
+                  <table className="w-full text-xs text-center border-collapse">
+                    <thead className="bg-[#a2d2ff]/10 text-coffee-600">
+                      <tr>
+                        <th className="p-1 px-2 text-left w-1/3">訂購人</th>
+                        <th className="p-1 px-2 w-1/3">金額</th>
+                        <th className="p-1 px-2 text-right w-1/3">通訊/備路</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-coffee-50">
+                      {validOrders.map((o: any) => (
+                        <tr key={o.id} className="hover:bg-coffee-50/50">
+                          <td className="p-1 px-2 text-left font-bold text-coffee-800">{o.buyer}</td>
+                          <td className="p-1 px-2 font-serif-brand font-bold text-rose-brand">${fmt(o.actualAmt)}</td>
+                          <td className="p-1 px-2 text-right">
+                            <div className="flex flex-col items-end gap-1">
+                              {o.phone && (
+                                <div className="flex items-center gap-1 bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100 text-[10px] text-gray-500 whitespace-nowrap">
+                                  {o.phone}
+                                  <button onClick={(e) => copyText(o.phone, e)} className="hover:text-mint-brand transition-colors p-[2px] rounded hover:bg-mint-100" title="複製電話">
+                                    <Copy className="w-3 h-3" />
+                                  </button>
+                                </div>
+                              )}
+                              {o.note && (
+                                <span className="text-[10px] text-gray-400 truncate max-w-[80px]" title={o.note}>{o.note}</span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="bg-gray-50 p-2 text-right text-[10px] font-bold text-coffee-500 border-t border-gray-100">
+                  共 {validOrders.length} 筆訂單
+                </div>
+              </div>
+            );
+          })}
+          
+          {weekRange && !Array.from({length: 7}).some((_, i) => {
+            const [y, m, d] = currentDate.split('-').map(Number);
+            const selDate = new Date(y, m - 1, d);
+            const day = selDate.getDay();
+            const diffToMon = (day === 0 ? -6 : 1 - day);
+            const curDate = new Date(selDate);
+            curDate.setDate(selDate.getDate() + diffToMon + i);
+            const dateStr = `${curDate.getFullYear()}-${String(curDate.getMonth()+1).padStart(2,'0')}-${String(curDate.getDate()).padStart(2,'0')}`;
+            const data = weeklyData.find(w => w.date === dateStr) || (dailyData.date === dateStr ? dailyData : null);
+            return (data?.orders?.filter(o => o.buyer.trim() || o.actualAmt > 0) || []).length > 0;
+          }) && (
+            <div className="col-span-full flex justify-center items-center py-12 bg-white/50 border border-dashed border-coffee-200 rounded-xl">
+              <span className="text-coffee-400 font-bold">本週尚無任何訂單紀錄</span>
+            </div>
+          )}
         </div>
       </div>
     </div>

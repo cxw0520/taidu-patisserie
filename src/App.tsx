@@ -30,8 +30,6 @@ import DailyView from './components/DailyView';
 import MonthlyView from './components/MonthlyView';
 import CostView from './components/CostView';
 import InventoryView from './components/InventoryView';
-import type { ShopSettings } from './types';
-
 
 const DEFAULT_SETTINGS: Settings = {
   giftItems: [

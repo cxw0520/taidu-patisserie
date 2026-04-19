@@ -55,7 +55,7 @@ export interface Order {
   shipAmt: number;
   discAmt: number;
   actualAmt: number;
-  status: '匯款' | '現結' | '未結帳款' | '公關品';
+  status: '匯款' | '現結' | '未結帳款' | '公關品' | '已收帳款';
   note: string;
   deliveryMethod?: string;
   pickupDate?: string;
@@ -63,6 +63,7 @@ export interface Order {
   recipientPhone?: string;
   shipDate?: string;
   email?: string;
+  isReconciled?: boolean; // tracking reconciliation
 }
 
 export interface JournalLine {
