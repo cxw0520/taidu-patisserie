@@ -231,10 +231,18 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
   );
 }
 
-function ARReconciliationModal({ monthData, shopId, onClose, selectedBuyer, setSelectedBuyer }: any) {
+function ARReconciliationModal({ monthData, settings, shopId, onClose, selectedBuyer, setSelectedBuyer }: any) {
   const getCollected = (o: Order) => parseNum((o as any).arCollectedCash) + parseNum((o as any).arCollectedRemit);
   const getRemaining = (o: Order) => Math.max(0, parseNum(o.actualAmt) - getCollected(o));
   const [collectForm, setCollectForm] = useState<Record<string, { method: '現金' | '匯款'; amount: string }>>({});
+  const itemNameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    [...(settings.giftItems || []), ...(settings.singleItems || []), ...((settings.customCategories || []).flatMap((c: any) => c.items || []))]
+      .forEach((item: any) => {
+        map[item.id] = item.name;
+      });
+    return map;
+  }, [settings]);
 
   // Aggregate AR orders
   const buyerGroups = useMemo(() => {
@@ -363,7 +371,12 @@ function ARReconciliationModal({ monthData, shopId, onClose, selectedBuyer, setS
                 <div key={o.id} className={cn("flex justify-between items-center p-4 border rounded-xl transition", o.isReconciled ? "bg-mint-50/30 border-mint-200" : "bg-white border-rose-100")}>
                   <div className="flex flex-col gap-1">
                     <span className="text-xs font-bold text-coffee-400">{o.date}</span>
-                    <span className="font-bold text-coffee-800">{Object.entries(o.items || {}).filter(([_,q]) => parseNum(q)>0).map(([k,q]) => `${k}x${q}`).join(', ')}</span>
+                    <span className="font-bold text-coffee-800">
+                      {Object.entries(o.items || {})
+                        .filter(([_, q]) => parseNum(q) > 0)
+                        .map(([k, q]) => `${itemNameMap[k] || k}x${q}`)
+                        .join(', ')}
+                    </span>
                     <span className="text-xs text-coffee-500">已收 ${fmt(collected)} / 未收 ${fmt(remaining)}</span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -826,6 +839,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
         {showARModal && (
           <ARReconciliationModal 
             monthData={monthData} 
+            settings={settings}
             shopId={shopId} 
             onClose={() => { setShowARModal(false); setSelectedBuyer(null); }}
             selectedBuyer={selectedBuyer}
