@@ -243,6 +243,12 @@ function ARReconciliationModal({ monthData, settings, shopId, onClose, selectedB
       });
     return map;
   }, [settings]);
+  const getDisplayItemName = (itemKey: string) => {
+    const found = itemNameMap[itemKey];
+    if (found) return found;
+    if (/^id_[a-z0-9]+$/i.test(itemKey)) return '未知品項';
+    return itemKey;
+  };
 
   // Aggregate AR orders
   const buyerGroups = useMemo(() => {
@@ -374,7 +380,7 @@ function ARReconciliationModal({ monthData, settings, shopId, onClose, selectedB
                     <span className="font-bold text-coffee-800">
                       {Object.entries(o.items || {})
                         .filter(([_, q]) => parseNum(q) > 0)
-                        .map(([k, q]) => `${itemNameMap[k] || k}x${q}`)
+                        .map(([k, q]) => `${getDisplayItemName(k)}x${q}`)
                         .join(', ')}
                     </span>
                     <span className="text-xs text-coffee-500">已收 ${fmt(collected)} / 未收 ${fmt(remaining)}</span>
