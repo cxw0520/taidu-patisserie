@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { collection, query, where, getDocs, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
+import { collection, query, where, getDocs, getDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
 import { fmt, parseNum, monthISO, uid, normalizeFlavorName } from '../lib/utils';
 import { DailyReport, Settings, Order, Material } from '../types';
-import { Wallet, PieChart as ChartIcon, TrendingUp, ReceiptText, Users, Home, Lightbulb, Wrench, Info, Megaphone, Trash2, Plus, X, CheckSquare, Square } from 'lucide-react';
+import { Wallet, PieChart as ChartIcon, TrendingUp, ReceiptText, Users, Home, Lightbulb, Wrench, Info, Megaphone, Trash2, Plus, X } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -37,16 +37,16 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
   const [selectedBuyer, setSelectedBuyer] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchMonth = async () => {
-      const q = query(
-        collection(db, 'shops', shopId, 'daily'),
-        where('date', '>=', `${selectedMonth}-01`),
-        where('date', '<=', `${selectedMonth}-31`)
+    const qDaily = query(
+      collection(db, 'shops', shopId, 'daily'),
+      where('date', '>=', `${selectedMonth}-01`),
+      where('date', '<=', `${selectedMonth}-31`)
+    );
+    const unsubDaily = onSnapshot(qDaily, (snap) => {
+      setMonthData(
+        snap.docs.map(d => ({ ...(d.data() as DailyReport), _docId: d.id } as DailyReport))
       );
-      const snap = await getDocs(q);
-      setMonthData(snap.docs.map(d => d.data() as DailyReport));
-    };
-    fetchMonth();
+    });
 
     const unsubMonthly = onSnapshot(doc(db, 'shops', shopId, 'monthly', selectedMonth), async (snap) => {
       if (snap.exists()) {
@@ -105,7 +105,7 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
       setRecipes(snap.docs.map(d => d.data() as Recipe));
     });
 
-    return () => { unsubMonthly(); unsubMat(); unsubRec(); };
+    return () => { unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); };
   }, [selectedMonth, shopId]);
 
   // Cost calculation function
@@ -232,44 +232,81 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
 }
 
 function ARReconciliationModal({ monthData, shopId, onClose, selectedBuyer, setSelectedBuyer }: any) {
+  const getCollected = (o: Order) => parseNum((o as any).arCollectedCash) + parseNum((o as any).arCollectedRemit);
+  const getRemaining = (o: Order) => Math.max(0, parseNum(o.actualAmt) - getCollected(o));
+  const [collectForm, setCollectForm] = useState<Record<string, { method: '現金' | '匯款'; amount: string }>>({});
+
   // Aggregate AR orders
   const buyerGroups = useMemo(() => {
-    const groups: Record<string, { total: number, orders: (Order & { date: string })[] }> = {};
+    const groups: Record<string, { total: number, orders: (Order & { date: string; sourceDocId: string })[] }> = {};
     monthData.forEach((d: DailyReport) => {
       d.orders.forEach(o => {
         if (o.status === '未結帳款' || o.status === '已收帳款') {
           const name = o.buyer || '未知買家';
           if (!groups[name]) groups[name] = { total: 0, orders: [] };
-          // Only add to total if it's NOT reconciled? Or total AR regardless?
-          // Let's say total un-reconciled AR:
-          if (o.status === '未結帳款' && !o.isReconciled) {
-            groups[name].total += o.actualAmt;
-          }
-          groups[name].orders.push({ ...o, date: d.date });
+          const remain = getRemaining(o);
+          groups[name].total += remain;
+          groups[name].orders.push({ ...o, date: d.date, sourceDocId: (d as any)._docId || d.date });
         }
       });
     });
     return groups;
   }, [monthData]);
 
-  const toggleReconcile = async (date: string, orderId: string, currentReconciled: boolean) => {
+  const resolveDayRef = async (sourceDocId: string, date: string) => {
+    const directRef = doc(db, 'shops', shopId, 'daily', sourceDocId);
+    const directSnap = await getDoc(directRef);
+    if (directSnap.exists()) return directRef;
+    const normalized = date.replace(/^(\d{4})-0?(\d{1,2})-0?(\d{1,2})$/, (_, y, m, d) => `${y}-${String(Number(m)).padStart(2, '0')}-${String(Number(d)).padStart(2, '0')}`);
+    const legacy = date.replace(/^(\d{4})-0?(\d{1,2})-0?(\d{1,2})$/, (_, y, m, d) => `${y}-${Number(m)}-${Number(d)}`);
+    const normalizedRef = doc(db, 'shops', shopId, 'daily', normalized);
+    const normalizedSnap = await getDoc(normalizedRef);
+    if (normalizedSnap.exists()) return normalizedRef;
+    if (legacy !== normalized) {
+      const legacyRef = doc(db, 'shops', shopId, 'daily', legacy);
+      const legacySnap = await getDoc(legacyRef);
+      if (legacySnap.exists()) return legacyRef;
+    }
+    return normalizedRef;
+  };
+
+  const collectArPayment = async (order: Order & { date: string; sourceDocId: string }) => {
+    const rowKey = `${order.date}-${order.id}`;
+    const method = collectForm[rowKey]?.method || '現金';
+    const amount = parseNum(collectForm[rowKey]?.amount || 0);
+    const remaining = getRemaining(order);
+    const applyAmount = Math.min(amount, remaining);
+    if (applyAmount <= 0) return;
+
     try {
-      // Find the daily doc
-      const dayData = monthData.find((d: DailyReport) => d.date === date);
+      const dayData = monthData.find((d: any) => ((d as any)._docId || d.date) === order.sourceDocId);
       if (!dayData) return;
-      
+
       const newOrders = dayData.orders.map((o: Order) => {
-        if (o.id === orderId) {
-          return { 
-            ...o, 
-            isReconciled: !currentReconciled,
-            status: (!currentReconciled) ? '已收帳款' : '未結帳款' as any
+        if (o.id === order.id) {
+          const prevCash = parseNum((o as any).arCollectedCash);
+          const prevRemit = parseNum((o as any).arCollectedRemit);
+          const nextCash = method === '現金' ? prevCash + applyAmount : prevCash;
+          const nextRemit = method === '匯款' ? prevRemit + applyAmount : prevRemit;
+          const totalCollected = nextCash + nextRemit;
+          const fullyCollected = totalCollected >= parseNum(o.actualAmt);
+          return {
+            ...o,
+            arCollectedCash: nextCash,
+            arCollectedRemit: nextRemit,
+            isReconciled: fullyCollected,
+            status: fullyCollected ? '已收帳款' : '未結帳款'
           };
         }
         return o;
       });
 
-      await setDoc(doc(db, 'shops', shopId, 'daily', date), { orders: newOrders }, { merge: true });
+      const dayRef = await resolveDayRef(order.sourceDocId, order.date);
+      await setDoc(dayRef, { orders: newOrders }, { merge: true });
+      setCollectForm(prev => ({
+        ...prev,
+        [rowKey]: { method, amount: '' }
+      }));
     } catch (err) {
       console.error(err);
       alert('更新失敗');
@@ -318,24 +355,48 @@ function ARReconciliationModal({ monthData, shopId, onClose, selectedBuyer, setS
             </div>
           ) : (
             <div className="space-y-3">
-              {buyerGroups[selectedBuyer]?.orders.map(o => (
+              {buyerGroups[selectedBuyer]?.orders.map(o => {
+                const rowKey = `${o.date}-${o.id}`;
+                const remaining = getRemaining(o);
+                const collected = getCollected(o);
+                return (
                 <div key={o.id} className={cn("flex justify-between items-center p-4 border rounded-xl transition", o.isReconciled ? "bg-mint-50/30 border-mint-200" : "bg-white border-rose-100")}>
                   <div className="flex flex-col gap-1">
                     <span className="text-xs font-bold text-coffee-400">{o.date}</span>
                     <span className="font-bold text-coffee-800">{Object.entries(o.items || {}).filter(([_,q]) => parseNum(q)>0).map(([k,q]) => `${k}x${q}`).join(', ')}</span>
+                    <span className="text-xs text-coffee-500">已收 ${fmt(collected)} / 未收 ${fmt(remaining)}</span>
                   </div>
-                  <div className="flex items-center gap-4">
-                    <span className="font-mono font-bold text-lg text-coffee-700">${fmt(o.actualAmt)}</span>
-                    <button 
-                      onClick={() => toggleReconcile(o.date, o.id, !!o.isReconciled)}
-                      className={cn("flex items-center gap-1 px-3 py-1.5 rounded-lg font-bold text-sm transition focus:ring-4 focus:outline-none", o.isReconciled ? "bg-mint-100 text-mint-700 hover:bg-mint-200 focus:ring-mint-50" : "bg-white border border-coffee-200 text-coffee-600 hover:bg-coffee-50 focus:ring-coffee-50 shadow-sm")}
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono font-bold text-lg text-coffee-700 min-w-[88px] text-right">${fmt(o.actualAmt)}</span>
+                    <select
+                      value={collectForm[rowKey]?.method || '現金'}
+                      onChange={(e) => setCollectForm(prev => ({ ...prev, [rowKey]: { method: e.target.value as '現金' | '匯款', amount: prev[rowKey]?.amount || '' } }))}
+                      className="border border-coffee-200 rounded-lg px-2 py-1 text-sm font-bold text-coffee-700 bg-white"
+                      disabled={remaining <= 0}
                     >
-                      {o.isReconciled ? <CheckSquare className="w-4 h-4"/> : <Square className="w-4 h-4"/>}
-                      {o.isReconciled ? '已沖銷' : '未沖銷'}
+                      <option value="現金">現金</option>
+                      <option value="匯款">匯款</option>
+                    </select>
+                    <input
+                      type="number"
+                      min={0}
+                      max={remaining}
+                      value={collectForm[rowKey]?.amount || ''}
+                      onChange={(e) => setCollectForm(prev => ({ ...prev, [rowKey]: { method: prev[rowKey]?.method || '現金', amount: e.target.value } }))}
+                      className="w-24 text-right border border-coffee-200 rounded-lg px-2 py-1 font-mono font-bold text-coffee-800 outline-none focus:border-coffee-500"
+                      placeholder="收回金額"
+                      disabled={remaining <= 0}
+                    />
+                    <button
+                      onClick={() => collectArPayment(o)}
+                      disabled={remaining <= 0}
+                      className="px-3 py-1.5 rounded-lg font-bold text-sm transition bg-coffee-800 text-white hover:bg-coffee-900 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      入帳
                     </button>
                   </div>
                 </div>
-              ))}
+              )})}
             </div>
           )}
         </div>
@@ -387,16 +448,21 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       });
 
       (d.orders || []).forEach(o => {
-        if (o.status === '公關品') {
-          prTotal += o.prodAmt || 0;
-          prShip += o.shipAmt || 0; 
-        } else {
-          salesTotal += o.prodAmt || 0;
-          discTotal += o.discAmt || 0;
-          if (o.status === '匯款') remit += o.actualAmt || 0;
-          if (o.status === '現結') cash += o.actualAmt || 0;
-          if (o.status === '未結帳款' || o.status === '已收帳款') ar += o.actualAmt || 0;
-        }
+          if (o.status === '公關品') {
+            prTotal += o.prodAmt || 0;
+            prShip += o.shipAmt || 0; 
+          } else {
+            salesTotal += o.prodAmt || 0;
+            discTotal += o.discAmt || 0;
+            if (o.status === '匯款') remit += o.actualAmt || 0;
+            if (o.status === '現結') cash += o.actualAmt || 0;
+            cash += parseNum((o as any).arCollectedCash);
+            remit += parseNum((o as any).arCollectedRemit);
+            if (o.status === '未結帳款' || o.status === '已收帳款') {
+              const remaining = Math.max(0, parseNum(o.actualAmt) - parseNum((o as any).arCollectedCash) - parseNum((o as any).arCollectedRemit));
+              ar += remaining;
+            }
+          }
 
         // Calculate sold items / components
         Object.entries(o.items || {}).forEach(([itemId, qtyStr]) => {

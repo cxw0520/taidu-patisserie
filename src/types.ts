@@ -64,6 +64,8 @@ export interface Order {
   shipDate?: string;
   email?: string;
   isReconciled?: boolean; // tracking reconciliation
+  arCollectedCash?: number;
+  arCollectedRemit?: number;
 }
 
 export interface JournalLine {
