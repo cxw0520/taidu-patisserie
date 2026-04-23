@@ -61,7 +61,7 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
   const [loginError, setLoginError] = useState<string | null>(null);
 
-  const shopId = 'tai_du_2025';
+  const shopId = user?.uid || '';
 
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => {
@@ -71,18 +71,18 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || !shopId) return;
 
     (async () => {
       try {
-        // 1) 強制建立 shop root doc（這步做完 console 就會看到 tai_du_2025）
+        // 1) 建立此帳號專屬 shop root doc（doc id = uid）
         await setDoc(
           doc(db, 'shops', shopId),
           {
             id: shopId,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-            ownerUid: auth.currentUser?.uid ?? null,
+            ownerUid: user.uid,
           },
           { merge: true }
         );
