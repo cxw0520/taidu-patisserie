@@ -87,22 +87,11 @@ export default function JournalView({ selectedYear, shopId }: { selectedYear: nu
 
   useEffect(() => {
     const unsub = onSnapshot(doc(db, 'shops', shopId, 'meta', 'coa'), async (snap) => {
-      const dbList = snap.exists() ? snap.data().list : [];
-      let mergedList = [...dbList];
-      let needsUpdate = false;
-      
-      for (const def of DEFAULT_COA) {
-        if (!mergedList.find((c: COAItem) => c.id === def.id)) {
-          mergedList.push(def);
-          needsUpdate = true;
-        }
-      }
-      
-      if (needsUpdate) {
-        mergedList.sort((a, b) => a.id.localeCompare(b.id));
-        await setDoc(doc(db, 'shops', shopId, 'meta', 'coa'), { list: mergedList });
+      if (!snap.exists() || !snap.data()?.list) {
+        await setDoc(doc(db, 'shops', shopId, 'meta', 'coa'), { list: DEFAULT_COA }, { merge: true });
       } else {
-        setCoa(dbList);
+        const sortedList = [...snap.data().list].sort((a: COAItem, b: COAItem) => a.id.localeCompare(b.id));
+        setCoa(sortedList);
       }
     });
 
