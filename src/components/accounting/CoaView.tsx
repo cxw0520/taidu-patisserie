@@ -146,7 +146,7 @@ export default function CoaView({ coa, shopId }: { coa: COAItem[], shopId: strin
                 </td>
                 <td className="px-6 py-4 text-coffee-400 font-medium">{a.side === 'debit' ? '借方 (Dr)' : '貸方 (Cr)'}</td>
                 <td className="px-6 py-4 text-right">
-                  <div className="flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  <div className="flex justify-end gap-1">
                     <button onClick={() => startEdit(a)} className="p-2 text-coffee-300 hover:text-coffee-600 rounded-lg hover:bg-coffee-100"><Edit2 className="w-4 h-4" /></button>
                     <button onClick={() => handleDelete(a.id)} className="p-2 text-coffee-200 hover:text-danger-brand rounded-lg hover:bg-danger-brand/5"><Trash2 className="w-4 h-4" /></button>
                   </div>
