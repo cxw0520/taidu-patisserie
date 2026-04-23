@@ -6,6 +6,8 @@ export interface Material {
   minAlert: number;
   stock: number;
   avgCost: number;
+  purchaseUnit?: string;
+  purchaseUnitRate?: number;
 }
 
 export interface PurchaseLine {
@@ -158,4 +160,54 @@ export interface COAItem {
   name: string;
   type: string;
   side: 'debit' | 'credit';
+}
+
+export interface Vendor {
+  id: string;
+  name: string;
+}
+
+export interface MaterialCostRecord {
+  id: string;
+  materialId: string;
+  qty: number;
+  unit: string;
+  price: number;
+  unitCost: number;
+  date: string;
+  timestamp?: number;
+}
+
+export interface DailyUsageItem {
+  id: string;
+  type: 'material' | 'recipe';
+  itemId: string;
+  qty: number;
+  unitCost: number;
+  totalCost: number;
+  recipeYield?: number;
+}
+
+export interface DailyUsageRec {
+  id: string;
+  date: string;
+  items: DailyUsageItem[];
+  totalValue: number;
+}
+
+export interface RecipeItem {
+  id: string;
+  type: 'material' | 'half';
+  itemId: string;
+  quantity: number;
+}
+
+export interface Recipe {
+  id: string;
+  name: string;
+  type: 'finished' | 'half';
+  yield: number;
+  unit: string;
+  items: RecipeItem[];
+  tags: string[];
 }

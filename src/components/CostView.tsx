@@ -1,28 +1,11 @@
 import React, { useState, useEffect, useMemo, KeyboardEvent } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, doc, setDoc, onSnapshot, deleteDoc } from 'firebase/firestore';
-import { Settings, Material } from '../types';
+import { Settings, Material, Recipe, RecipeItem } from '../types';
 import { Plus, Edit2, ChevronDown, ChevronRight, Save, Trash2, PieChart, Tag, Filter, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uid, fmt } from '../lib/utils';
 import { cn } from '../lib/utils';
-
-interface RecipeItem {
-  id: string;
-  type: 'material' | 'half';
-  itemId: string;
-  quantity: number;
-}
-
-interface Recipe {
-  id: string;
-  name: string;
-  type: 'finished' | 'half';
-  yield: number;
-  unit: string;
-  items: RecipeItem[];
-  tags: string[];
-}
 
 const emptyRecipe = (): Recipe => ({
   id: '',

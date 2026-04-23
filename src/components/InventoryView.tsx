@@ -2,14 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestore';
 import { Material, Purchase, InventoryAdj } from '../types';
-import { Package, ShoppingCart, Target, Menu, X } from 'lucide-react';
+import { Package, ShoppingCart, Target, Menu, X, Calculator, Calendar } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
 
 import PurchasingTab from './inventory/PurchasingTab';
 import StockTab from './inventory/StockTab';
+import MaterialCostTab from './inventory/MaterialCostTab';
+import DailyUsageTab from './inventory/DailyUsageTab';
 
-type SubTab = 'purchases' | 'stock';
+type SubTab = 'purchases' | 'stock' | 'material_cost' | 'daily_usage';
 
 export default function InventoryView({ selectedYear, shopId }: { selectedYear: number, shopId: string }) {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('purchases');
@@ -41,6 +43,8 @@ export default function InventoryView({ selectedYear, shopId }: { selectedYear: 
   const subTabs = [
     { id: 'purchases', label: '進貨管理', icon: ShoppingCart },
     { id: 'stock', label: '庫存與盤點', icon: Target },
+    { id: 'material_cost', label: '食材成本', icon: Calculator },
+    { id: 'daily_usage', label: '本日使用量', icon: Calendar },
   ];
 
   return (
@@ -109,6 +113,12 @@ export default function InventoryView({ selectedYear, shopId }: { selectedYear: 
             )}
             {activeSubTab === 'stock' && (
               <StockTab materials={materials} shopId={shopId} />
+            )}
+            {activeSubTab === 'material_cost' && (
+              <MaterialCostTab materials={materials} shopId={shopId} />
+            )}
+            {activeSubTab === 'daily_usage' && (
+              <DailyUsageTab materials={materials} shopId={shopId} />
             )}
           </motion.div>
         </AnimatePresence>

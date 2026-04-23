@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { db } from '../../lib/firebase';
-import { deleteDoc, doc, setDoc, writeBatch } from 'firebase/firestore';
-import { Material, Purchase, PurchaseLine } from '../../types';
+import { collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
+import { Material, Purchase, PurchaseLine, Vendor } from '../../types';
 import { fmt, uid } from '../../lib/utils';
 import { Eye, Pencil, Plus, Search, Store, Trash2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
@@ -22,6 +22,14 @@ export default function PurchasingTab({
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7));
   const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
   const [vendorDetail, setVendorDetail] = useState<{ vendor: string; month: string } | null>(null);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+
+  React.useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'shops', shopId, 'vendors'), snap => {
+      setVendors(snap.docs.map(d => d.data() as Vendor));
+    });
+    return unsub;
+  }, [shopId]);
 
   const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
     name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0
@@ -48,6 +56,10 @@ export default function PurchasingTab({
       .filter(p => p.vendor === vendorDetail.vendor && p.date.startsWith(vendorDetail.month))
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [purchases, vendorDetail]);
+
+  const selectedMonthTotal = useMemo(() => {
+    return vendorStats.reduce((sum, v) => sum + v.total, 0);
+  }, [vendorStats]);
 
   const materialMap = useMemo(() => {
     const m: Record<string, Material> = {};
@@ -175,6 +187,11 @@ export default function PurchasingTab({
     await applyMaterialUpdates(deltaByMaterial);
     await setDoc(doc(db, 'shops', shopId, 'purchases', purchaseId), payload);
 
+    if (formData.vendor && !vendors.find(v => v.name === formData.vendor)) {
+      const vId = uid();
+      await setDoc(doc(db, 'shops', shopId, 'vendors', vId), { id: vId, name: formData.vendor });
+    }
+
     setIsModalOpen(false);
     setEditingPurchase(null);
     setFormData({ date: new Date().toISOString().substring(0, 10), vendor: '', lines: [], notes: '' });
@@ -208,12 +225,18 @@ export default function PurchasingTab({
             <h3 className="text-lg font-bold text-coffee-800 flex items-center gap-2">
               <Store className="w-5 h-5 text-coffee-400" /> 各廠商進貨分析
             </h3>
-            <input
-              type="month"
-              value={selectedMonth}
-              onChange={e => setSelectedMonth(e.target.value)}
-              className="bg-white border border-coffee-200 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-coffee-500 transition-colors"
-            />
+            <div className="flex items-center gap-4">
+              <div className="text-right flex items-center gap-2">
+                <span className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest hidden sm:inline">本月總進貨:</span>
+                <span className="text-xl font-serif-brand font-bold text-rose-brand">${fmt(selectedMonthTotal)}</span>
+              </div>
+              <input
+                type="month"
+                value={selectedMonth}
+                onChange={e => setSelectedMonth(e.target.value)}
+                className="bg-white border border-coffee-200 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-coffee-500 transition-colors"
+              />
+            </div>
           </div>
           <div className="overflow-x-auto">
             <table className="w-full text-sm text-left min-w-[360px]">
@@ -360,7 +383,10 @@ export default function PurchasingTab({
                   </div>
                   <div>
                     <label className="text-xs font-bold text-coffee-400 uppercase ml-1">廠商名稱</label>
-                    <input type="text" required value={formData.vendor} onChange={e => setFormData({ ...formData, vendor: e.target.value })} placeholder="例如: 好又多原料行" className="w-full mt-1 bg-coffee-50/50 border border-coffee-100 rounded-2xl px-5 py-3 outline-none focus:border-mint-brand" />
+                    <input type="text" required list="vendor-list" value={formData.vendor} onChange={e => setFormData({ ...formData, vendor: e.target.value })} placeholder="例如: 好又多原料行" className="w-full mt-1 bg-coffee-50/50 border border-coffee-100 rounded-2xl px-5 py-3 outline-none focus:border-mint-brand" />
+                    <datalist id="vendor-list">
+                      {vendors.map(v => <option key={v.id} value={v.name} />)}
+                    </datalist>
                   </div>
                 </div>
 
