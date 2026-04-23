@@ -8,3 +8,5 @@ coverage/
 !.env.example
 *settings.json
 *instruction.md
+*.mjs
+*firestore-shop-copy-guide.md
