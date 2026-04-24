@@ -165,6 +165,10 @@ export interface COAItem {
 export interface Vendor {
   id: string;
   name: string;
+  phone?: string;
+  email?: string;
+  category?: string;
+  notes?: string;
 }
 
 export interface MaterialCostRecord {

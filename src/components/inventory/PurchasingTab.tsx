@@ -3,7 +3,7 @@ import { db } from '../../lib/firebase';
 import { collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
 import { Material, Purchase, PurchaseLine, Vendor } from '../../types';
 import { fmt, uid } from '../../lib/utils';
-import { Eye, Pencil, Plus, Search, Store, Trash2 } from 'lucide-react';
+import { Eye, Pencil, Plus, Search, Store, Trash2, Users, Phone, Mail } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
 export default function PurchasingTab({
@@ -22,7 +22,10 @@ export default function PurchasingTab({
   const [selectedMonth, setSelectedMonth] = useState(new Date().toISOString().substring(0, 7));
   const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
   const [vendorDetail, setVendorDetail] = useState<{ vendor: string; month: string } | null>(null);
+  const [isVendorDbOpen, setIsVendorDbOpen] = useState(false);
+  const [editingVendor, setEditingVendor] = useState<Partial<Vendor> | null>(null);
   const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [isNewVendorMode, setIsNewVendorMode] = useState(false);
 
   React.useEffect(() => {
     const unsub = onSnapshot(collection(db, 'shops', shopId, 'vendors'), snap => {
@@ -75,6 +78,7 @@ export default function PurchasingTab({
       lines: [],
       notes: ''
     });
+    setIsNewVendorMode(false);
     setIsModalOpen(true);
   };
 
@@ -87,6 +91,7 @@ export default function PurchasingTab({
       lines: purchase.lines.map(l => ({ ...l })),
       notes: purchase.notes || ''
     });
+    setIsNewVendorMode(false);
     setIsModalOpen(true);
   };
 
@@ -204,6 +209,27 @@ export default function PurchasingTab({
     await deleteDoc(doc(db, 'shops', shopId, 'purchases', purchase.id));
   };
 
+  const handleSaveVendor = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingVendor?.name) return alert('請填寫廠商名稱');
+    const vId = editingVendor.id || uid();
+    const payloadStart: Partial<Vendor> = {
+      id: vId,
+      name: editingVendor.name,
+      phone: editingVendor.phone || '',
+      email: editingVendor.email || '',
+      category: editingVendor.category || '',
+      notes: editingVendor.notes || ''
+    };
+    await setDoc(doc(db, 'shops', shopId, 'vendors', vId), payloadStart as Vendor);
+    setEditingVendor(null);
+  };
+
+  const handleDeleteVendor = async (vendor: Vendor) => {
+    if (!confirm(`確定刪除廠商：${vendor.name}？(注意：已存在的進貨記錄仍會保留其名稱)`)) return;
+    await deleteDoc(doc(db, 'shops', shopId, 'vendors', vendor.id));
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
@@ -211,12 +237,20 @@ export default function PurchasingTab({
           <h2 className="text-xl font-bold text-coffee-800">進貨紀錄與廠商帳款</h2>
           <p className="text-sm text-coffee-400">登錄/編輯進貨單，系統自動更新庫存與平均成本。</p>
         </div>
-        <button
-          onClick={openCreateModal}
-          className="bg-coffee-600 text-white px-6 py-3 rounded-full font-bold flex items-center gap-2 hover:bg-coffee-700 transition shadow-lg active:scale-95"
-        >
-          <Plus className="w-5 h-5" /> 新增進貨單
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setIsVendorDbOpen(true)}
+            className="bg-white border border-coffee-200 text-coffee-700 px-6 py-3 rounded-full font-bold flex items-center gap-2 hover:bg-coffee-50 transition shadow-sm active:scale-95"
+          >
+            <Users className="w-5 h-5" /> 廠商資料庫
+          </button>
+          <button
+            onClick={openCreateModal}
+            className="bg-coffee-600 text-white px-6 py-3 rounded-full font-bold flex items-center gap-2 hover:bg-coffee-700 transition shadow-lg active:scale-95"
+          >
+            <Plus className="w-5 h-5" /> 新增進貨單
+          </button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -383,10 +417,29 @@ export default function PurchasingTab({
                   </div>
                   <div>
                     <label className="text-xs font-bold text-coffee-400 uppercase ml-1">廠商名稱</label>
-                    <input type="text" required list="vendor-list" value={formData.vendor} onChange={e => setFormData({ ...formData, vendor: e.target.value })} placeholder="例如: 好又多原料行" className="w-full mt-1 bg-coffee-50/50 border border-coffee-100 rounded-2xl px-5 py-3 outline-none focus:border-mint-brand" />
-                    <datalist id="vendor-list">
-                      {vendors.map(v => <option key={v.id} value={v.name} />)}
-                    </datalist>
+                    <div className="flex gap-2 mt-1">
+                      {isNewVendorMode || (!vendors.length && vendors !== null) ? (
+                        <div className="flex-1 flex gap-2">
+                          <input autoFocus type="text" required value={formData.vendor} onChange={e => setFormData({ ...formData, vendor: e.target.value })} placeholder="輸入新廠商名稱" className="w-full bg-coffee-50/50 border border-coffee-100 rounded-2xl px-5 py-3 outline-none focus:border-mint-brand" />
+                          {vendors.length > 0 && (
+                            <button type="button" onClick={() => { setIsNewVendorMode(false); setFormData({...formData, vendor: ''}); }} className="whitespace-nowrap px-4 bg-coffee-100 text-coffee-600 rounded-2xl font-bold flex-shrink-0 hover:bg-coffee-200 transition">取消</button>
+                          )}
+                        </div>
+                      ) : (
+                        <select required value={formData.vendor} onChange={e => {
+                          if (e.target.value === '__NEW__') {
+                            setIsNewVendorMode(true);
+                            setFormData({ ...formData, vendor: '' });
+                          } else {
+                            setFormData({ ...formData, vendor: e.target.value });
+                          }
+                        }} className="w-full bg-coffee-50/50 border border-coffee-100 rounded-2xl px-5 py-3 outline-none focus:border-mint-brand">
+                          <option value="" disabled>請選擇廠商...</option>
+                          {vendors.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
+                          <option value="__NEW__" className="font-bold text-mint-700 bg-mint-50">＋ 填寫新廠商名稱</option>
+                        </select>
+                      )}
+                    </div>
                   </div>
                 </div>
 
@@ -479,6 +532,97 @@ export default function PurchasingTab({
                 </div>
                 <button type="submit" className="w-full bg-coffee-800 text-white rounded-xl py-3 font-bold hover:bg-coffee-900 transition">新增</button>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isVendorDbOpen && (
+          <div className="fixed inset-0 z-[105] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsVendorDbOpen(false)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="glass-panel w-full max-w-4xl max-h-[90vh] flex flex-col bg-white border-0 shadow-2xl rounded-[32px] overflow-hidden relative z-10">
+              <div className="p-6 md:p-8 border-b border-coffee-50 bg-[#faf7f2]/50 flex justify-between items-center">
+                <div>
+                  <h3 className="text-xl md:text-2xl font-bold font-serif-brand text-coffee-800 flex items-center gap-2"><Users className="w-6 h-6 text-coffee-500" /> 廠商資料庫</h3>
+                  <p className="text-sm text-coffee-400 mt-1">管理配合的進貨廠商、聯絡資訊與備註</p>
+                </div>
+                <button onClick={() => setIsVendorDbOpen(false)} className="p-2 text-coffee-300 hover:text-coffee-600 bg-white rounded-full"><Plus className="w-6 h-6 rotate-45" /></button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col md:flex-row gap-8">
+                <div className="flex-1">
+                  <div className="flex justify-between items-center mb-4">
+                    <h4 className="font-bold text-coffee-800">廠商列表 ({vendors.length})</h4>
+                    <button onClick={() => setEditingVendor({ name: '' })} className="text-xs font-bold bg-coffee-100 text-coffee-700 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-coffee-200 transition">
+                      <Plus className="w-4 h-4" /> 新增廠商
+                    </button>
+                  </div>
+                  <div className="space-y-3">
+                    {vendors.map(v => (
+                       <div key={v.id} className="p-4 rounded-xl border border-coffee-100 bg-white hover:border-coffee-300 transition group flex flex-col gap-2">
+                         <div className="flex justify-between items-start">
+                           <div>
+                             <div className="font-bold text-coffee-800">{v.name}</div>
+                             {v.category && <span className="text-[10px] bg-coffee-50 text-coffee-500 px-2 py-0.5 rounded-full mt-1 inline-block">{v.category}</span>}
+                           </div>
+                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                             <button onClick={() => setEditingVendor(v)} className="p-1.5 text-coffee-400 hover:text-coffee-600 bg-coffee-50 rounded-md"><Pencil className="w-4 h-4" /></button>
+                             <button onClick={() => handleDeleteVendor(v)} className="p-1.5 text-coffee-400 hover:text-rose-600 bg-coffee-50 rounded-md"><Trash2 className="w-4 h-4" /></button>
+                           </div>
+                         </div>
+                         {(v.phone || v.email) && (
+                           <div className="flex gap-4 text-xs text-coffee-500 mt-1">
+                             {v.phone && <div className="flex items-center gap-1"><Phone className="w-3 h-3" /> {v.phone}</div>}
+                             {v.email && <div className="flex items-center gap-1"><Mail className="w-3 h-3" /> {v.email}</div>}
+                           </div>
+                         )}
+                         {v.notes && <div className="text-xs text-coffee-400 mt-1 pt-2 border-t border-coffee-50">{v.notes}</div>}
+                       </div>
+                    ))}
+                    {vendors.length === 0 && <div className="text-center py-10 text-sm text-coffee-400 font-bold bg-coffee-50/50 rounded-xl border border-dashed border-coffee-200">尚無廠商資料</div>}
+                  </div>
+                </div>
+
+                <div className="w-full md:w-[360px] flex-shrink-0">
+                  <div className="bg-[#faf7f2]/50 p-5 rounded-2xl border border-coffee-100 sticky top-0">
+                    <h4 className="font-bold text-coffee-800 mb-4">{editingVendor?.id ? '編輯廠商資料' : (editingVendor ? '新增廠商' : '點擊列表編輯，或新增廠商')}</h4>
+                    {editingVendor ? (
+                      <form onSubmit={handleSaveVendor} className="space-y-4">
+                        <div>
+                          <label className="text-xs font-bold text-coffee-400 block mb-1">廠商名稱 *</label>
+                          <input type="text" required value={editingVendor.name || ''} onChange={e => setEditingVendor({...editingVendor, name: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-500" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-coffee-400 block mb-1">聯絡電話</label>
+                          <input type="text" value={editingVendor.phone || ''} onChange={e => setEditingVendor({...editingVendor, phone: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-500" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-coffee-400 block mb-1">信箱 / Email</label>
+                          <input type="email" value={editingVendor.email || ''} onChange={e => setEditingVendor({...editingVendor, email: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-500" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-coffee-400 block mb-1">主要類別 (選填)</label>
+                          <input type="text" value={editingVendor.category || ''} onChange={e => setEditingVendor({...editingVendor, category: e.target.value})} placeholder="例如：包材、食材進口" className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-500" />
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-coffee-400 block mb-1">備註 / 匯款帳號</label>
+                          <textarea value={editingVendor.notes || ''} onChange={e => setEditingVendor({...editingVendor, notes: e.target.value})} rows={3} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-500 resize-none"></textarea>
+                        </div>
+                        <div className="flex gap-2 pt-2 border-t border-coffee-100">
+                          <button type="button" onClick={() => setEditingVendor(null)} className="flex-1 py-2 bg-white border border-coffee-200 text-coffee-600 rounded-xl font-bold hover:bg-coffee-50">取消</button>
+                          <button type="submit" className="flex-1 py-2 bg-coffee-800 text-white rounded-xl font-bold hover:bg-coffee-900 shadow-md">儲存</button>
+                        </div>
+                      </form>
+                    ) : (
+                      <div className="py-12 flex flex-col items-center justify-center text-coffee-300">
+                        <Store className="w-12 h-12 mb-3 opacity-20" />
+                        <span className="text-sm font-bold">請選擇或新增廠商</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
             </motion.div>
           </div>
         )}
