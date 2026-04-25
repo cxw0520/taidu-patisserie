@@ -23,7 +23,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
     name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0
   });
 
-  const [adjData, setAdjData] = useState({ actualQty: 0, reason: '', actualPurchaseQty: 0, actualBasicQty: 0 });
+  const [adjData, setAdjData] = useState({ actualQty: 0, reason: '', inputBig: 0, inputSmall: 0 });
 
   const totalInvValue = useMemo(() => {
     return materials.reduce((s, m) => s + (m.stock * m.avgCost), 0);
@@ -113,8 +113,8 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
             <form onSubmit={handleAddSubmit} className="glass-panel p-6 bg-white/60 mb-6 border-2 border-coffee-100 shadow-md rounded-[24px]">
               <h3 className="font-bold text-coffee-800 mb-4">新增材料資料卡</h3>
-              <div className="grid grid-cols-1 md:grid-cols-8 gap-4 items-end">
-                <div className="md:col-span-1">
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div>
                   <label className="text-[10px] font-bold text-coffee-400 block mb-1">類別</label>
                   <select value={newMaterial.category} onChange={e => setNewMaterial({...newMaterial, category: e.target.value})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300">
                     <option value="食材">食材</option>
@@ -123,23 +123,33 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                     <option value="其他">其他</option>
                   </select>
                 </div>
-                <div className="md:col-span-2">
+                <div>
                   <label className="text-[10px] font-bold text-coffee-400 block mb-1">材料名稱</label>
                   <input type="text" required value={newMaterial.name} onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" placeholder="例如: 麵粉" />
                 </div>
-                <div className="md:col-span-1">
-                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">計算單位</label>
-                  <input type="text" required value={newMaterial.unit} onChange={e => setNewMaterial({...newMaterial, unit: e.target.value})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" placeholder="例如: g" />
-                </div>
-                <div className="md:col-span-1">
-                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">目前庫存</label>
+                <div>
+                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">目前庫存 (選填)</label>
                   <input type="number" step="0.01" value={newMaterial.stock || ''} onChange={e => setNewMaterial({...newMaterial, stock: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" />
                 </div>
-                <div className="md:col-span-1">
+                <div>
                   <label className="text-[10px] font-bold text-coffee-400 block mb-1">最低庫存量</label>
                   <input type="number" required step="0.01" min="0" value={newMaterial.minAlert ?? 0} onChange={e => setNewMaterial({...newMaterial, minAlert: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" />
                 </div>
-                <div className="md:col-span-2 pb-0.5">
+                <div>
+                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">基本單位</label>
+                  <input type="text" required value={newMaterial.unit} onChange={e => setNewMaterial({...newMaterial, unit: e.target.value})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" placeholder="例如: g" />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">大單位 (選填，例如: 箱)</label>
+                  <input type="text" value={newMaterial.purchaseUnit || ''} onChange={e => setNewMaterial({...newMaterial, purchaseUnit: e.target.value})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" placeholder="例如: 箱" />
+                </div>
+                {newMaterial.purchaseUnit ? (
+                  <div>
+                    <label className="text-[10px] font-bold text-coffee-400 block mb-1">1 {newMaterial.purchaseUnit} = ? {newMaterial.unit}</label>
+                    <input type="number" required step="0.01" min="0.01" value={newMaterial.purchaseUnitRate || ''} onChange={e => setNewMaterial({...newMaterial, purchaseUnitRate: parseFloat(e.target.value) || undefined})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" placeholder="輸入換算比例" />
+                  </div>
+                ) : <div className="hidden md:block"></div>}
+                <div className="pb-0.5">
                   <button type="submit" className="w-full bg-coffee-800 text-white rounded-xl py-2 font-bold hover:bg-coffee-900 transition flex items-center justify-center gap-2"><Save className="w-4 h-4"/> 儲存</button>
                 </div>
               </div>
@@ -183,7 +193,21 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                     </td>
                     <td className="py-4 px-6 font-bold text-coffee-800 text-base">{m.name}</td>
                     <td className="py-4 px-6"><span className="text-xs font-bold text-coffee-500 bg-coffee-100 px-2 py-1 rounded-lg">{m.category}</span></td>
-                    <td className="py-4 px-6 text-right font-serif-brand font-bold text-lg text-coffee-900">{fmt(m.stock)} <span className="text-xs font-sans font-medium text-coffee-400">{m.unit}</span></td>
+                    <td className="py-4 px-6 text-right">
+                      {m.purchaseUnit && m.purchaseUnitRate ? (
+                        <div className="flex flex-col items-end">
+                          <span className="font-serif-brand font-bold text-lg text-coffee-900">
+                            {Math.floor(m.stock / m.purchaseUnitRate) > 0 ? `${fmt(Math.floor(m.stock / m.purchaseUnitRate))}` : ''}
+                            {Math.floor(m.stock / m.purchaseUnitRate) > 0 && <span className="text-xs font-sans font-medium text-coffee-400 ml-0.5 mr-1.5">{m.purchaseUnit}</span>}
+                            {m.stock % m.purchaseUnitRate > 0 ? `${fmt(m.stock % m.purchaseUnitRate)}` : (Math.floor(m.stock / m.purchaseUnitRate) === 0 ? '0' : '')}
+                            {(m.stock % m.purchaseUnitRate > 0 || Math.floor(m.stock / m.purchaseUnitRate) === 0) && <span className="text-xs font-sans font-medium text-coffee-400 ml-0.5">{m.unit}</span>}
+                          </span>
+                          <span className="text-[10px] text-coffee-300">總數 {fmt(m.stock)}{m.unit}</span>
+                        </div>
+                      ) : (
+                        <span className="font-serif-brand font-bold text-lg text-coffee-900">{fmt(m.stock)} <span className="text-xs font-sans font-medium text-coffee-400">{m.unit}</span></span>
+                      )}
+                    </td>
                     <td className="py-4 px-6 text-right">
                       <div className="flex flex-col items-end gap-1">
                         <span className="font-serif-brand font-bold text-coffee-500">${fmt(m.avgCost)}<span className="text-xs font-sans text-coffee-300">/{m.unit}</span></span>
@@ -247,8 +271,8 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                             setAdjData({ 
                               actualQty: m.stock, 
                               reason: '',
-                              actualPurchaseQty: 0,
-                              actualBasicQty: m.stock
+                              inputBig: m.purchaseUnitRate ? Math.floor(m.stock / m.purchaseUnitRate) : 0,
+                              inputSmall: m.purchaseUnitRate ? (m.stock % m.purchaseUnitRate) : m.stock
                             }); 
                           }}
                           className="px-4 py-1.5 bg-coffee-100 text-coffee-600 rounded-full text-xs font-bold hover:bg-coffee-200 transition-colors inline-flex items-center gap-1"
@@ -290,32 +314,43 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
               <form onSubmit={handleAdjSubmit} className="space-y-4">
                 <div className="p-4 bg-coffee-50 border border-coffee-100 rounded-2xl flex justify-between items-center">
                   <span className="text-xs font-bold text-coffee-400">系統紀錄餘額</span>
-                  <span className="font-serif-brand font-bold text-lg text-coffee-800">{fmt(adjModal.stock)} {adjModal.unit}</span>
+                  <span className="font-serif-brand font-bold text-lg text-coffee-800">
+                    {adjModal.purchaseUnit && adjModal.purchaseUnitRate ? (
+                      <>
+                        {Math.floor(adjModal.stock / adjModal.purchaseUnitRate) > 0 && <>{fmt(Math.floor(adjModal.stock / adjModal.purchaseUnitRate))} {adjModal.purchaseUnit} </>}
+                        {(adjModal.stock % adjModal.purchaseUnitRate > 0 || Math.floor(adjModal.stock / adjModal.purchaseUnitRate) === 0) && <>{fmt(adjModal.stock % adjModal.purchaseUnitRate)} {adjModal.unit}</>}
+                      </>
+                    ) : (
+                      <>{fmt(adjModal.stock)} {adjModal.unit}</>
+                    )}
+                  </span>
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-coffee-500 mb-1 block">實際盤點餘額</label>
-                  <div className="flex gap-2">
-                    {adjModal.purchaseUnit && adjModal.purchaseUnitRate ? (
-                      <div className="relative flex-1">
-                        <input type="number" step="0.01" min="0" value={adjData.actualPurchaseQty === 0 && adjData.actualBasicQty !== 0 ? '' : adjData.actualPurchaseQty} onChange={e => {
-                           const pQ = parseFloat(e.target.value) || 0;
-                           setAdjData(prev => ({...prev, actualPurchaseQty: pQ, actualQty: pQ * adjModal.purchaseUnitRate! + prev.actualBasicQty}));
-                        }} placeholder={`大單位 (${adjModal.purchaseUnit})`} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-3 font-serif-brand font-bold text-lg text-rose-brand outline-none focus:border-rose-brand focus:ring-2 focus:ring-rose-brand/20 pr-12 text-right" />
-                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">{adjModal.purchaseUnit}</span>
-                      </div>
-                    ) : null}
-                    <div className="relative flex-1">
-                      <input type="number" step="0.01" min="0" value={adjData.actualBasicQty === 0 && adjData.actualPurchaseQty !== 0 ? '' : adjData.actualBasicQty} onChange={e => {
-                         const bQ = parseFloat(e.target.value) || 0;
-                         setAdjData(prev => ({...prev, actualBasicQty: bQ, actualQty: bQ + (prev.actualPurchaseQty * (adjModal.purchaseUnitRate || 1))}));
-                      }} placeholder={`基本單位 (${adjModal.unit})`} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-3 font-serif-brand font-bold text-lg text-rose-brand outline-none focus:border-rose-brand focus:ring-2 focus:ring-rose-brand/20 pr-12 text-right" />
+                  <label className="text-xs font-bold text-coffee-500 mb-1 block">實際盤點</label>
+                  {adjModal.purchaseUnit && adjModal.purchaseUnitRate ? (
+                    <div className="flex items-center gap-2 bg-white border border-coffee-200 rounded-xl px-2 py-2">
+                       <input type="number" step="0.01" min="0" value={adjData.inputBig === 0 && adjData.inputSmall === 0 ? '' : adjData.inputBig} onChange={e => {
+                         const b = parseFloat(e.target.value) || 0;
+                         setAdjData(p => ({...p, inputBig: b, actualQty: b * adjModal.purchaseUnitRate! + p.inputSmall}));
+                       }} className="w-20 bg-transparent font-serif-brand font-bold text-lg text-rose-brand outline-none text-right" placeholder="0" />
+                       <span className="text-coffee-600 font-bold">{adjModal.purchaseUnit}</span>
+                       <span className="text-coffee-300">+</span>
+                       <input type="number" step="0.01" min="0" value={adjData.inputSmall === 0 && adjData.inputBig !== 0 ? '' : adjData.inputSmall} onChange={e => {
+                         const s = parseFloat(e.target.value) || 0;
+                         setAdjData(p => ({...p, inputSmall: s, actualQty: p.inputBig * adjModal.purchaseUnitRate! + s}));
+                       }} className="w-20 bg-transparent font-serif-brand font-bold text-lg text-rose-brand outline-none text-right" placeholder="0" />
+                       <span className="text-coffee-600 font-bold">{adjModal.unit}</span>
+                    </div>
+                  ) : (
+                    <div className="relative">
+                      <input type="number" step="0.01" required value={adjData.actualQty === 0 ? '' : adjData.actualQty} onChange={e => setAdjData({...adjData, actualQty: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-3 font-serif-brand font-bold text-xl text-rose-brand outline-none focus:border-rose-brand focus:ring-2 focus:ring-rose-brand/20 pr-12 text-right" />
                       <span className="absolute right-4 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">{adjModal.unit}</span>
                     </div>
-                  </div>
-                  {adjModal.purchaseUnit && adjModal.purchaseUnitRate ? (
-                     <div className="text-right mt-1 text-xs text-coffee-500 font-bold">總計: {fmt(adjData.actualQty)} {adjModal.unit}</div>
-                  ) : null}
+                  )}
+                  {adjModal.purchaseUnit && adjModal.purchaseUnitRate && (
+                     <div className="text-right mt-1 text-[10px] text-coffee-400 font-bold">總計 {fmt(adjData.actualQty)} {adjModal.unit}</div>
+                  )}
                 </div>
 
                 <div className="py-2 flex justify-between items-center">

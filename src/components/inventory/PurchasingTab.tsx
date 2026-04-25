@@ -464,17 +464,45 @@ export default function PurchasingTab({
                         </select>
                       </div>
                       <div className="md:col-span-3">
-                        <label className="text-[10px] font-bold text-coffee-300 uppercase block mb-1 text-right">數量 ({materialMap[line.materialId]?.purchaseUnit || materialMap[line.materialId]?.unit || '單位'})</label>
-                        <input type="number" step="0.01" required value={line.purchaseQty !== undefined ? (line.purchaseQty || '') : (line.qty || '')} onChange={e => {
-                          const pQty = parseFloat(e.target.value) || 0;
-                          const mat = materialMap[line.materialId];
-                          const rate = mat?.purchaseUnitRate || 1;
-                          updateLine(line.id, { 
-                            purchaseQty: pQty,
-                            purchaseUnit: mat?.purchaseUnit || mat?.unit || '',
-                            qty: pQty * rate
-                          });
-                        }} className="w-full bg-coffee-50 border border-coffee-50 rounded-xl px-4 py-2 text-sm font-bold text-right outline-none" />
+                        <label className="text-[10px] font-bold text-coffee-300 uppercase block mb-1 text-right">數量</label>
+                        <div className="relative">
+                          <input type="number" step="0.01" required value={line.purchaseQty !== undefined ? (line.purchaseQty || '') : (line.qty || '')} onChange={e => {
+                            const pQty = parseFloat(e.target.value) || 0;
+                            const mat = materialMap[line.materialId];
+                            const currentUnit = line.purchaseUnit || mat?.purchaseUnit || mat?.unit || '';
+                            const isPurchaseUnit = currentUnit === mat?.purchaseUnit;
+                            const rate = isPurchaseUnit ? (mat?.purchaseUnitRate || 1) : 1;
+                            updateLine(line.id, { 
+                              purchaseQty: pQty,
+                              purchaseUnit: currentUnit,
+                              qty: pQty * rate
+                            });
+                          }} className="w-full bg-coffee-50 border border-coffee-50 rounded-xl px-4 py-2 pr-12 text-sm font-bold text-right outline-none" />
+                          
+                          {materialMap[line.materialId]?.purchaseUnit && materialMap[line.materialId]?.purchaseUnitRate ? (
+                             <select className="absolute right-0 top-0 bottom-0 bg-transparent text-coffee-500 font-bold text-xs px-2 outline-none cursor-pointer appearance-none text-center hover:bg-black/5 transition"
+                               value={line.purchaseUnit || materialMap[line.materialId]?.purchaseUnit}
+                               onChange={e => {
+                                 const newUnit = e.target.value;
+                                 const pQty = line.purchaseQty !== undefined ? line.purchaseQty : line.qty;
+                                 const mat = materialMap[line.materialId];
+                                 const isPurchaseUnit = newUnit === mat?.purchaseUnit;
+                                 const rate = isPurchaseUnit ? (mat?.purchaseUnitRate || 1) : 1;
+                                 updateLine(line.id, {
+                                   purchaseUnit: newUnit,
+                                   qty: pQty * rate
+                                 })
+                               }}
+                             >
+                               <option value={materialMap[line.materialId]?.purchaseUnit!}>{materialMap[line.materialId]?.purchaseUnit}</option>
+                               <option value={materialMap[line.materialId]?.unit!}>{materialMap[line.materialId]?.unit}</option>
+                             </select>
+                          ) : (
+                             <span className="absolute right-4 top-1/2 -translate-y-1/2 text-coffee-400 font-bold text-xs pointer-events-none">
+                               {materialMap[line.materialId]?.unit || '單位'}
+                             </span>
+                          )}
+                        </div>
                       </div>
                       <div className="md:col-span-3">
                         <label className="text-[10px] font-bold text-coffee-300 uppercase block mb-1 text-right">總金額</label>
@@ -539,13 +567,25 @@ export default function PurchasingTab({
                   <input type="text" required value={newMaterial.name} onChange={e => setNewMaterial({ ...newMaterial, name: e.target.value })} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" />
                 </div>
                 <div>
-                  <label className="text-xs font-bold text-coffee-400 block mb-1">計算單位</label>
-                  <input type="text" required value={newMaterial.unit} onChange={e => setNewMaterial({ ...newMaterial, unit: e.target.value })} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: g" />
-                </div>
-                <div>
                   <label className="text-xs font-bold text-coffee-400 block mb-1">目前庫存 (選填)</label>
                   <input type="number" step="0.01" value={newMaterial.stock || ''} onChange={e => setNewMaterial({ ...newMaterial, stock: parseFloat(e.target.value) || 0 })} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" />
                 </div>
+                <div className="flex gap-3">
+                  <div className="flex-1">
+                    <label className="text-xs font-bold text-coffee-400 block mb-1">基本單位</label>
+                    <input type="text" required value={newMaterial.unit} onChange={e => setNewMaterial({ ...newMaterial, unit: e.target.value })} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: g" />
+                  </div>
+                  <div className="flex-1">
+                    <label className="text-xs font-bold text-coffee-400 block mb-1">大單位 (選填)</label>
+                    <input type="text" value={newMaterial.purchaseUnit || ''} onChange={e => setNewMaterial({ ...newMaterial, purchaseUnit: e.target.value })} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: 箱" />
+                  </div>
+                </div>
+                {newMaterial.purchaseUnit ? (
+                  <div>
+                    <label className="text-xs font-bold text-coffee-400 block mb-1">1 {newMaterial.purchaseUnit} = ? {newMaterial.unit}</label>
+                    <input type="number" required step="0.01" min="0.01" value={newMaterial.purchaseUnitRate || ''} onChange={e => setNewMaterial({ ...newMaterial, purchaseUnitRate: parseFloat(e.target.value) || undefined })} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="輸入換算比例" />
+                  </div>
+                ) : null}
                 <button type="submit" className="w-full bg-coffee-800 text-white rounded-xl py-3 font-bold hover:bg-coffee-900 transition">新增</button>
               </form>
             </motion.div>
