@@ -102,7 +102,13 @@ export default function DailyView({
   settings: Settings,
   shopId: string 
 }) {
-  const [subTab, setSubTab] = useState<'dashboard' | 'cash_register' | 'import' | 'settings'>('dashboard');
+  const [subTab, setSubTab] = useState<'dashboard' | 'cash_register' | 'import' | 'settings'>(() => {
+    return (localStorage.getItem('daily_sub_tab') as any) || 'dashboard';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('daily_sub_tab', subTab);
+  }, [subTab]);
   const [isMobileSubTabOpen, setIsMobileSubTabOpen] = useState(false);
   const [dailyData, setDailyData] = useState<DailyReport | null>(null);
   const [loadedDateKey, setLoadedDateKey] = useState('');
