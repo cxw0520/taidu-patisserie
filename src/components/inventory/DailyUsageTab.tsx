@@ -86,10 +86,10 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
       id: uid(),
       type: itemType,
       itemId: selectedItemId,
-      qty: qty,
+      qty: qty as number,
       unitCost,
       totalCost,
-      recipeYield
+      ...(recipeYield !== undefined ? { recipeYield } : {})
     };
 
     const updatedItems = [...record.items, newItem];

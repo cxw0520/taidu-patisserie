@@ -106,7 +106,7 @@ export default function PurchasingTab({
   const addLine = () => {
     setFormData(prev => ({
       ...prev,
-      lines: [...(prev.lines || []), { id: uid(), materialId: '', qty: 0, amount: 0 }]
+      lines: [...(prev.lines || []), { id: uid(), materialId: '', qty: 0, amount: 0, purchaseQty: 0 }]
     }));
   };
 
@@ -365,7 +365,9 @@ export default function PurchasingTab({
                               return (
                                 <div key={line.id} className="text-xs">
                                   <span className="font-semibold">{mat?.name || '（已刪除材料）'}</span>
-                                  <span className="ml-2 text-coffee-500">{fmt(line.qty)} {mat?.unit || ''}</span>
+                                  <span className="ml-2 text-coffee-500">
+                                    {line.purchaseQty ? `${fmt(line.purchaseQty)} ${line.purchaseUnit}` : `${fmt(line.qty)} ${mat?.unit || ''}`}
+                                  </span>
                                   <span className="ml-2 text-rose-700">${fmt(line.amount)}</span>
                                 </div>
                               );
@@ -462,8 +464,17 @@ export default function PurchasingTab({
                         </select>
                       </div>
                       <div className="md:col-span-3">
-                        <label className="text-[10px] font-bold text-coffee-300 uppercase block mb-1 text-right">數量</label>
-                        <input type="number" step="0.01" required value={line.qty || ''} onChange={e => updateLine(line.id, { qty: parseFloat(e.target.value) || 0 })} className="w-full bg-coffee-50 border border-coffee-50 rounded-xl px-4 py-2 text-sm font-bold text-right outline-none" />
+                        <label className="text-[10px] font-bold text-coffee-300 uppercase block mb-1 text-right">數量 ({materialMap[line.materialId]?.purchaseUnit || materialMap[line.materialId]?.unit || '單位'})</label>
+                        <input type="number" step="0.01" required value={line.purchaseQty !== undefined ? (line.purchaseQty || '') : (line.qty || '')} onChange={e => {
+                          const pQty = parseFloat(e.target.value) || 0;
+                          const mat = materialMap[line.materialId];
+                          const rate = mat?.purchaseUnitRate || 1;
+                          updateLine(line.id, { 
+                            purchaseQty: pQty,
+                            purchaseUnit: mat?.purchaseUnit || mat?.unit || '',
+                            qty: pQty * rate
+                          });
+                        }} className="w-full bg-coffee-50 border border-coffee-50 rounded-xl px-4 py-2 text-sm font-bold text-right outline-none" />
                       </div>
                       <div className="md:col-span-3">
                         <label className="text-[10px] font-bold text-coffee-300 uppercase block mb-1 text-right">總金額</label>
@@ -473,7 +484,12 @@ export default function PurchasingTab({
                         <button type="button" onClick={() => removeLine(line.id)} className="w-full h-8 flex items-center justify-center text-coffee-200 hover:text-danger-brand"><Trash2 className="w-4 h-4" /></button>
                       </div>
                       <div className="md:col-span-12 text-right mt-1">
-                        <span className="text-[10px] text-coffee-400 font-bold">單價估算: <span className="text-mint-brand font-serif-brand font-bold">{line.qty > 0 ? `$${fmt(line.amount / line.qty)}` : '-'}</span> / {materialMap[line.materialId]?.unit || '單位'}</span>
+                        <span className="text-[10px] text-coffee-400 font-bold">
+                          單價估算: <span className="text-mint-brand font-serif-brand font-bold">
+                            {(line.purchaseQty ?? line.qty) > 0 ? `$${fmt(line.amount / (line.purchaseQty || line.qty))}` : '-'}
+                          </span> / {line.purchaseUnit || materialMap[line.materialId]?.unit || '單位'}
+                          {(line.purchaseQty && materialMap[line.materialId]?.purchaseUnitRate) ? ` (=${fmt(line.amount / line.qty)} / ${materialMap[line.materialId]?.unit})` : ''}
+                        </span>
                       </div>
                     </div>
                   ))}

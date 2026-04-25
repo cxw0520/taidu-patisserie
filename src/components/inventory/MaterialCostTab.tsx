@@ -7,8 +7,8 @@ import { Plus, Save, Trash2, Calculator } from 'lucide-react';
 
 export default function MaterialCostTab({ materials, shopId }: { materials: Material[], shopId: string }) {
   const [records, setRecords] = useState<MaterialCostRecord[]>([]);
-  const [formData, setFormData] = useState<Partial<MaterialCostRecord>>({
-    materialId: '', qty: 1, unit: '', price: 0
+  const [formData, setFormData] = useState<Partial<MaterialCostRecord> & { rate?: number }>({
+    materialId: '', qty: 1, unit: '', price: 0, rate: undefined
   });
 
   useEffect(() => {
@@ -46,22 +46,28 @@ export default function MaterialCostTab({ materials, shopId }: { materials: Mate
     const mat = materials.find(m => m.id === formData.materialId);
     if (mat) {
       let costPerStockUnit = unitCost;
+      let rate = formData.rate || mat.purchaseUnitRate;
+
       if (mat.unit !== formData.unit) {
-        if (mat.purchaseUnitRate) {
-          costPerStockUnit = unitCost / mat.purchaseUnitRate;
+        if (rate) {
+          costPerStockUnit = unitCost / rate;
         } else {
-          // Temporarily just set avgCost to unitCost, and StockTab will alert them to set rate.
+          // If no rate, temporary fallback
+          costPerStockUnit = unitCost;
         }
+      } else {
+        rate = 1;
       }
       
       await setDoc(doc(db, 'shops', shopId, 'materials', mat.id), {
         ...mat,
         purchaseUnit: formData.unit,
-        // avgCost: costPerStockUnit // User said "每單位成本從食材成本子分頁抓取資料", so this overrides
+        ...(rate && mat.unit !== formData.unit ? { purchaseUnitRate: rate } : {}),
+        avgCost: costPerStockUnit
       }, { merge: true });
     }
 
-    setFormData({ materialId: '', qty: 1, unit: '', price: 0 });
+    setFormData({ materialId: '', qty: 1, unit: '', price: 0, rate: undefined });
   };
 
   const handleDelete = async (id: string) => {
@@ -91,7 +97,7 @@ export default function MaterialCostTab({ materials, shopId }: { materials: Mate
               value={formData.materialId} 
               onChange={e => {
                 const mat = materials.find(m => m.id === e.target.value);
-                setFormData({...formData, materialId: e.target.value, unit: mat?.purchaseUnit || mat?.unit || ''});
+                setFormData({...formData, materialId: e.target.value, unit: mat?.purchaseUnit || mat?.unit || '', rate: mat?.purchaseUnitRate});
               }} 
               className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300"
             >
@@ -99,6 +105,12 @@ export default function MaterialCostTab({ materials, shopId }: { materials: Mate
               {materials.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
             </select>
           </div>
+          {materials.find(m => m.id === formData.materialId) && materials.find(m => m.id === formData.materialId)!.unit !== formData.unit ? (
+            <div className="md:col-span-1">
+              <label className="text-[10px] font-bold text-amber-600 block mb-1">單位換算 (1{formData.unit} = ?{materials.find(m => m.id === formData.materialId)!.unit})</label>
+              <input type="number" step="0.01" required min="0.01" value={formData.rate || ''} onChange={e => setFormData({...formData, rate: parseFloat(e.target.value) || undefined})} className="w-full bg-amber-50 border border-amber-200 rounded-xl px-4 py-2 outline-none focus:border-amber-400" />
+            </div>
+          ) : null}
           <div className="md:col-span-1">
             <label className="text-[10px] font-bold text-coffee-400 block mb-1">數量</label>
             <input type="number" step="0.01" required min="0.01" value={formData.qty || ''} onChange={e => setFormData({...formData, qty: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" />

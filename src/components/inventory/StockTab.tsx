@@ -23,7 +23,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
     name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0
   });
 
-  const [adjData, setAdjData] = useState({ actualQty: 0, reason: '' });
+  const [adjData, setAdjData] = useState({ actualQty: 0, reason: '', actualPurchaseQty: 0, actualBasicQty: 0 });
 
   const totalInvValue = useMemo(() => {
     return materials.reduce((s, m) => s + (m.stock * m.avgCost), 0);
@@ -242,7 +242,15 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                     <td className="py-4 px-6 text-center">
                       <div className="inline-flex gap-2">
                         <button
-                          onClick={() => { setAdjModal(m); setAdjData({ actualQty: m.stock, reason: '' }); }}
+                          onClick={() => { 
+                            setAdjModal(m); 
+                            setAdjData({ 
+                              actualQty: m.stock, 
+                              reason: '',
+                              actualPurchaseQty: 0,
+                              actualBasicQty: m.stock
+                            }); 
+                          }}
                           className="px-4 py-1.5 bg-coffee-100 text-coffee-600 rounded-full text-xs font-bold hover:bg-coffee-200 transition-colors inline-flex items-center gap-1"
                         >
                           <Target className="w-3 h-3" /> 庫存盤點
@@ -287,10 +295,27 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
 
                 <div>
                   <label className="text-xs font-bold text-coffee-500 mb-1 block">實際盤點餘額</label>
-                  <div className="relative">
-                    <input type="number" step="0.01" required value={adjData.actualQty || ''} onChange={e => setAdjData({...adjData, actualQty: parseFloat(e.target.value)})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-3 font-serif-brand font-bold text-xl text-rose-brand outline-none focus:border-rose-brand focus:ring-2 focus:ring-rose-brand/20 pr-12 text-right" />
-                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">{adjModal.unit}</span>
+                  <div className="flex gap-2">
+                    {adjModal.purchaseUnit && adjModal.purchaseUnitRate ? (
+                      <div className="relative flex-1">
+                        <input type="number" step="0.01" min="0" value={adjData.actualPurchaseQty === 0 && adjData.actualBasicQty !== 0 ? '' : adjData.actualPurchaseQty} onChange={e => {
+                           const pQ = parseFloat(e.target.value) || 0;
+                           setAdjData(prev => ({...prev, actualPurchaseQty: pQ, actualQty: pQ * adjModal.purchaseUnitRate! + prev.actualBasicQty}));
+                        }} placeholder={`大單位 (${adjModal.purchaseUnit})`} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-3 font-serif-brand font-bold text-lg text-rose-brand outline-none focus:border-rose-brand focus:ring-2 focus:ring-rose-brand/20 pr-12 text-right" />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">{adjModal.purchaseUnit}</span>
+                      </div>
+                    ) : null}
+                    <div className="relative flex-1">
+                      <input type="number" step="0.01" min="0" value={adjData.actualBasicQty === 0 && adjData.actualPurchaseQty !== 0 ? '' : adjData.actualBasicQty} onChange={e => {
+                         const bQ = parseFloat(e.target.value) || 0;
+                         setAdjData(prev => ({...prev, actualBasicQty: bQ, actualQty: bQ + (prev.actualPurchaseQty * (adjModal.purchaseUnitRate || 1))}));
+                      }} placeholder={`基本單位 (${adjModal.unit})`} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-3 font-serif-brand font-bold text-lg text-rose-brand outline-none focus:border-rose-brand focus:ring-2 focus:ring-rose-brand/20 pr-12 text-right" />
+                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">{adjModal.unit}</span>
+                    </div>
                   </div>
+                  {adjModal.purchaseUnit && adjModal.purchaseUnitRate ? (
+                     <div className="text-right mt-1 text-xs text-coffee-500 font-bold">總計: {fmt(adjData.actualQty)} {adjModal.unit}</div>
+                  ) : null}
                 </div>
 
                 <div className="py-2 flex justify-between items-center">

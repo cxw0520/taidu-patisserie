@@ -15,6 +15,8 @@ export interface PurchaseLine {
   materialId: string;
   qty: number;
   amount: number;
+  purchaseQty?: number;
+  purchaseUnit?: string;
 }
 
 export interface Purchase {
