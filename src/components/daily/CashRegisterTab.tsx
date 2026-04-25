@@ -177,12 +177,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
   const handleCloseShift = () => {
     const total = Object.entries(currencyForm).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
-    
-    // Calculate expected cash
     const cashSales = dailyData.orders
       .filter(o => o.status === '現結')
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-    
     const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
     const expected = shift.openingTotal + cashSales - totalExpenses;
     
@@ -202,9 +199,71 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     setIsEditing(false);
   };
 
+  const handleUpdateClosingCash = () => {
+    const total = Object.entries(currencyForm).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
+    const cashSales = dailyData.orders
+      .filter(o => o.status === '現結')
+      .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+    const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
+    const expected = shift.openingTotal + cashSales - totalExpenses;
+
+    const diffs: string[] = [];
+    Object.entries(currencyForm).forEach(([val, count]) => {
+      const old = shift.closingCash?.[val as keyof CurrencyBreakdown] || 0;
+      if (old !== count) diffs.push(`${val}元: ${old} -> ${count}`);
+    });
+
+    const timestamp = new Date().toLocaleString();
+    const log = `於 ${timestamp} 修正了[閉帳盤點]: ${diffs.join(', ')}`;
+
+    updateDaily({
+      cashRegister: {
+        ...shift,
+        closingCash: { ...currencyForm },
+        closingTotal: total,
+        expectedCash: expected,
+        overShort: total - expected,
+        editLogs: [...(shift.editLogs || []), log]
+      }
+    });
+    setCloseShiftModal(false);
+    setCurrencyForm(DEFAULT_CURRENCY);
+  };
+
+  const handleUpdateOpeningCash = () => {
+    const total = Object.entries(currencyForm).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
+    const cashSales = dailyData.orders
+      .filter(o => o.status === '現結')
+      .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+    const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
+    const expected = total + cashSales - totalExpenses;
+
+    const diffs: string[] = [];
+    Object.entries(currencyForm).forEach(([val, count]) => {
+      const old = shift.openingCash[val as keyof CurrencyBreakdown] || 0;
+      if (old !== count) diffs.push(`${val}元: ${old} -> ${count}`);
+    });
+
+    const timestamp = new Date().toLocaleString();
+    const log = `於 ${timestamp} 修正了[開帳盤點]: ${diffs.join(', ')}`;
+
+    updateDaily({
+      cashRegister: {
+        ...shift,
+        openingCash: { ...currencyForm },
+        openingTotal: total,
+        expectedCash: expected,
+        overShort: (shift.closingTotal || 0) - expected,
+        editLogs: [...(shift.editLogs || []), log]
+      }
+    });
+    setOpenShiftModal(false);
+    setCurrencyForm(DEFAULT_CURRENCY);
+  };
+
   const handleSaveEdits = () => {
     const timestamp = new Date().toLocaleString();
-    const newLog = `於 ${timestamp} 進行了修改: ${editMemo}`;
+    const newLog = `於 ${timestamp} 填寫備註: ${editMemo}`;
     updateDaily({
       cashRegister: {
         ...shift,
@@ -272,10 +331,18 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   }
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-250px)]">
+    <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-auto min-h-[calc(100vh-250px)]">
+      <style>{`
+        @media print {
+          body * { visibility: hidden; }
+          .print-section, .print-section * { visibility: visible; }
+          .print-section { position: absolute; left: 0; top: 0; width: 100%; padding: 0; margin: 0; }
+          .no-print { display: none !important; }
+        }
+      `}</style>
       {dailyData.cashRegister?.closeTime && !dailyData.cashRegister?.isOpen && !isEditing ? (
-        <div className="lg:col-span-12 space-y-8 animate-fade-in print:p-0">
-          <div className="flex justify-between items-center print:hidden">
+        <div className="lg:col-span-12 space-y-8 animate-fade-in print-section p-4">
+          <div className="flex justify-between items-center no-print">
             <h2 className="text-2xl font-serif-brand font-bold text-coffee-800">今日收銀結報</h2>
             <div className="flex gap-3">
               <button 
@@ -410,7 +477,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               </div>
             )}
 
-            <div className="flex justify-center print:hidden">
+            <div className="flex justify-center no-print">
               <button 
                 onClick={handleExportPDF}
                 className="px-10 py-4 bg-coffee-800 text-white rounded-[24px] font-bold shadow-xl hover:bg-coffee-900 transition-all flex items-center gap-2"
@@ -433,10 +500,26 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
               <div className="space-y-4">
                 <h4 className="font-bold text-coffee-700">幣值調整與支出管理</h4>
-                <div className="flex gap-4">
-                   <button onClick={() => setOpenShiftModal(true)} className="flex-1 py-3 bg-white border border-coffee-200 rounded-xl font-bold hover:bg-coffee-50">修改開帳盤點</button>
-                   <button onClick={() => setCloseShiftModal(true)} className="flex-1 py-3 bg-white border border-coffee-200 rounded-xl font-bold hover:bg-coffee-50">修改閉帳盤點</button>
-                   <button onClick={() => setExpenseModal(true)} className="flex-1 py-3 bg-white border border-coffee-200 rounded-xl font-bold hover:bg-coffee-50">修改支出紀錄</button>
+                <div className="flex flex-col gap-3">
+                   <button 
+                    onClick={() => {
+                      setCurrencyForm({ ...shift.openingCash });
+                      setOpenShiftModal(true);
+                    }} 
+                    className="w-full py-3 bg-white border border-coffee-200 rounded-xl font-bold hover:bg-coffee-50"
+                  >
+                    修改開帳盤點
+                  </button>
+                   <button 
+                    onClick={() => {
+                      setCurrencyForm({ ...(shift.closingCash || DEFAULT_CURRENCY) });
+                      setCloseShiftModal(true);
+                    }} 
+                    className="w-full py-3 bg-white border border-coffee-200 rounded-xl font-bold hover:bg-coffee-50"
+                  >
+                    修改閉帳盤點
+                  </button>
+                   <button onClick={() => setExpenseModal(true)} className="w-full py-3 bg-white border border-coffee-200 rounded-xl font-bold hover:bg-coffee-50">修改支出紀錄</button>
                 </div>
               </div>
               <div className="space-y-4">
@@ -793,12 +876,23 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
         )}
       </AnimatePresence>
 
-      {/* Close Shift Modal */}
+      {/* Open/Edit Opening Modal */}
+      {openShiftModal && (
+        <CurrencyModal 
+          title={shift.isOpen || shift.closeTime ? "修改開帳盤點" : "開帳現金設定"} 
+          onClose={() => setOpenShiftModal(false)}
+          onSubmit={shift.closeTime ? handleUpdateOpeningCash : handleOpenShift}
+          currency={currencyForm}
+          setCurrency={setCurrencyForm}
+        />
+      )}
+
+      {/* Close/Edit Closing Modal */}
       {closeShiftModal && (
         <CurrencyModal 
-          title="閉帳現金盤點" 
+          title={isEditing ? "修改閉帳盤點" : "閉帳現金盤點"} 
           onClose={() => setCloseShiftModal(false)}
-          onSubmit={handleCloseShift}
+          onSubmit={isEditing ? handleUpdateClosingCash : handleCloseShift}
           currency={currencyForm}
           setCurrency={setCurrencyForm}
           isClosing
