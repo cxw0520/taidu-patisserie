@@ -53,7 +53,13 @@ const DEFAULT_SETTINGS: Settings = {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost'>('journal');
+  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost'>(() => {
+    return (localStorage.getItem('app_active_tab') as any) || 'journal';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('app_active_tab', activeTab);
+  }, [activeTab]);
   const [currentDate, setCurrentDate] = useState(todayISO());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
