@@ -20,6 +20,8 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
+// @ts-ignore
+import html2pdf from 'html2pdf.js';
 
 interface CashRegisterTabProps {
   dailyData: DailyReport;
@@ -277,11 +279,30 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
   const handleExportPDF = () => {
     setIsExporting(true);
-    // Use a small timeout to let the UI update and the print dialog to open smoothly
-    setTimeout(() => {
-      window.print();
+    const element = document.getElementById('cash-report-section');
+    if (!element) {
       setIsExporting(false);
-    }, 300);
+      return;
+    }
+
+    const opt = {
+      margin: 0.5,
+      filename: `收銀結報_${dailyData.date || '未命名'}.pdf`,
+      image: { type: 'jpeg' as const, quality: 0.98 },
+      html2canvas: { 
+        scale: 2, 
+        useCORS: true,
+        letterRendering: true
+      },
+      jsPDF: { unit: 'in' as const, format: 'a4', orientation: 'portrait' as const }
+    };
+
+    html2pdf().set(opt).from(element).save().then(() => {
+      setIsExporting(false);
+    }).catch((err: any) => {
+      console.error('PDF Export Error:', err);
+      setIsExporting(false);
+    });
   };
 
   const allItems = [
@@ -350,7 +371,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
         }
       `}</style>
       {dailyData.cashRegister?.closeTime && !dailyData.cashRegister?.isOpen && !isEditing ? (
-        <div className="lg:col-span-12 space-y-8 animate-fade-in print-section p-4">
+        <div id="cash-report-section" className="lg:col-span-12 space-y-8 animate-fade-in print-section p-4 bg-white">
           <div className="flex justify-between items-center no-print">
             <h2 className="text-2xl font-serif-brand font-bold text-coffee-800">今日收銀結報</h2>
             <div className="flex gap-3">
