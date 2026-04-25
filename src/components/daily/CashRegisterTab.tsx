@@ -44,7 +44,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   const [openShiftModal, setOpenShiftModal] = useState(false);
   const [closeShiftModal, setCloseShiftModal] = useState(false);
   const [editQtyModal, setEditQtyModal] = useState<{index: number, qty: string} | null>(null);
-  const [finalCheckModal, setFinalCheckModal] = useState<{order: Order, change: number} | null>(null);
+  const [finalCheckModal, setFinalCheckModal] = useState<{order: Order, change: number, received: number} | null>(null);
 
   // Form states
   const [checkoutData, setCheckoutData] = useState({
@@ -156,7 +156,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
     setFinalCheckModal({
       order: newOrder,
-      change: checkoutData.paymentMethod === '現金' ? checkoutData.receivedAmt - actualAmt : 0
+      received: checkoutData.receivedAmt,
+      change: checkoutData.paymentMethod === '現結' ? checkoutData.receivedAmt - actualAmt : 0
     });
     
     setCart([]);
@@ -462,7 +463,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     <>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-coffee-400 font-bold">實收金額</span>
-                        <span className="font-mono font-bold text-coffee-600">${fmt(checkoutData.receivedAmt)}</span>
+                        <span className="font-mono font-bold text-coffee-600">${fmt(finalCheckModal.received)}</span>
                       </div>
                       <div className="flex justify-between items-center bg-mint-brand/5 p-4 rounded-2xl border border-mint-brand/10 mt-2">
                         <span className="text-mint-brand font-bold">找零金額</span>
