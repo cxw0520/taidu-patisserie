@@ -273,12 +273,15 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 h-[calc(100vh-250px)]">
-      {shift.closeTime && !shift.isOpen && !isEditing ? (
+      {dailyData.cashRegister?.closeTime && !dailyData.cashRegister?.isOpen && !isEditing ? (
         <div className="lg:col-span-12 space-y-8 animate-fade-in print:p-0">
           <div className="flex justify-between items-center print:hidden">
             <h2 className="text-2xl font-serif-brand font-bold text-coffee-800">今日收銀結報</h2>
             <div className="flex gap-3">
-              <button onClick={() => setIsEditing(true)} className="px-5 py-2 bg-coffee-100 text-coffee-600 rounded-xl font-bold hover:bg-coffee-200 flex items-center gap-2">
+              <button 
+                onClick={() => setIsEditing(true)} 
+                className="px-5 py-2 bg-coffee-100 text-coffee-600 rounded-xl font-bold hover:bg-coffee-200 flex items-center gap-2"
+              >
                 <Edit2 className="w-4 h-4" /> 編輯資料
               </button>
             </div>
