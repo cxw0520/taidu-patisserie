@@ -278,31 +278,39 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   };
 
   const handleExportPDF = () => {
-    setIsExporting(true);
     const element = document.getElementById('cash-report-section');
-    if (!element) {
-      setIsExporting(false);
-      return;
-    }
+    if (!element) return;
+    
+    setIsExporting(true);
 
-    const opt = {
-      margin: 0.5,
-      filename: `收銀結報_${dailyData.date || '未命名'}.pdf`,
-      image: { type: 'jpeg' as const, quality: 0.98 },
-      html2canvas: { 
-        scale: 2, 
-        useCORS: true,
-        letterRendering: true
-      },
-      jsPDF: { unit: 'in' as const, format: 'a4', orientation: 'portrait' as const }
-    };
+    // Give it a small timeout to ensure no pending renders
+    setTimeout(() => {
+      const opt = {
+        margin: [0.5, 0.5] as [number, number],
+        filename: `收銀結報_${dailyData.date || '今日'}.pdf`,
+        image: { type: 'jpeg' as const, quality: 0.98 },
+        html2canvas: { 
+          scale: 2, 
+          useCORS: true,
+          logging: false,
+          backgroundColor: '#ffffff'
+        },
+        jsPDF: { unit: 'in' as const, format: 'a4', orientation: 'portrait' as const }
+      };
 
-    html2pdf().set(opt).from(element).save().then(() => {
-      setIsExporting(false);
-    }).catch((err: any) => {
-      console.error('PDF Export Error:', err);
-      setIsExporting(false);
-    });
+      // Call html2pdf carefully
+      const exporter = html2pdf().set(opt).from(element);
+      
+      exporter.save().then(() => {
+        setIsExporting(false);
+      }).catch((err: any) => {
+        console.error('PDF Export Error:', err);
+        setIsExporting(false);
+        // Fallback to print if library fails
+        alert('檔案生成失敗，切換至列印模式儲存');
+        window.print();
+      });
+    }, 500);
   };
 
   const allItems = [
