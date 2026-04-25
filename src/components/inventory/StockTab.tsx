@@ -7,16 +7,11 @@ import { Plus, Target, CheckCircle2, AlertCircle, Save, Trash2, ArrowRightLeft, 
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 
-interface UnitConvModal {
-  material: Material;
-  purchaseUnit: string;
-}
-
 export default function StockTab({ materials, shopId }: { materials: Material[], shopId: string }) {
   const [isAddingMode, setIsAddingMode] = useState(false);
   const [adjModal, setAdjModal] = useState<Material | null>(null);
-  const [unitConvModal, setUnitConvModal] = useState<UnitConvModal | null>(null);
-  const [convRate, setConvRate] = useState<number | ''>('');
+  const [unitConvModal, setUnitConvModal] = useState<Material | null>(null);
+  const [convData, setConvData] = useState<{ purchaseUnit: string; midUnit: string; unit: string; purchaseUnitRate: number | ''; midUnitRate: number | '' }>({ purchaseUnit: '', midUnit: '', unit: '', purchaseUnitRate: '', midUnitRate: '' });
   const [editingMinAlert, setEditingMinAlert] = useState<{ id: string; value: string } | null>(null);
 
   const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
@@ -81,7 +76,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
     });
     await setDoc(doc(db, 'shops', shopId, 'inventoryAdj', adjRecord.id), adjRecord);
     setAdjModal(null);
-    setAdjData({ actualQty: 0, reason: '' });
+    setAdjData({ actualQty: 0, reason: '', inputBig: 0, inputMid: 0, inputSmall: 0 });
   };
 
   const handleDeleteMaterial = async (material: Material) => {
@@ -91,15 +86,21 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
   };
 
   const handleSaveConvRate = async () => {
-    if (!unitConvModal || convRate === '' || convRate <= 0) return alert('請填寫有效的換算比例');
-    const mat = unitConvModal.material;
-    await setDoc(doc(db, 'shops', shopId, 'materials', mat.id), {
-      ...mat,
-      purchaseUnit: unitConvModal.purchaseUnit,
-      purchaseUnitRate: convRate,
-    }, { merge: true });
-    setUnitConvModal(null);
-    setConvRate('');
+    if (!unitConvModal) return;
+    try {
+      const payload: Partial<Material> = {
+        purchaseUnit: convData.purchaseUnit || undefined,
+        midUnit: convData.midUnit || undefined,
+        unit: convData.unit || unitConvModal.unit,
+        purchaseUnitRate: convData.purchaseUnitRate !== '' ? Number(convData.purchaseUnitRate) : undefined,
+        midUnitRate: convData.midUnitRate !== '' ? Number(convData.midUnitRate) : undefined,
+      };
+      await setDoc(doc(db, 'shops', shopId, 'materials', unitConvModal.id), payload, { merge: true });
+      setUnitConvModal(null);
+    } catch (e) {
+      console.error(e);
+      alert('儲存失敗');
+    }
   };
 
   const handleSaveMinAlert = async (material: Material, newValue: string) => {
@@ -297,24 +298,22 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                     <td className="py-4 px-6 text-right">
                       <div className="flex flex-col items-end gap-1">
                         <span className="font-serif-brand font-bold text-coffee-500">${fmt(m.avgCost)}<span className="text-xs font-sans text-coffee-300">/{m.unit}</span></span>
-                        {hasMismatch && (
-                          <button
-                            onClick={() => { setUnitConvModal({ material: m, purchaseUnit: m.purchaseUnit! }); setConvRate(''); }}
-                            className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1 hover:bg-amber-100 transition-colors whitespace-nowrap"
-                          >
-                            <ArrowRightLeft className="w-3 h-3" />
-                            單位不同 ({m.purchaseUnit})，點擊設定換算
-                          </button>
-                        )}
-                        {m.purchaseUnit && m.purchaseUnit !== m.unit && m.purchaseUnitRate && (
-                          <button
-                            onClick={() => { setUnitConvModal({ material: m, purchaseUnit: m.purchaseUnit! }); setConvRate(m.purchaseUnitRate || ''); }}
-                            className="text-[10px] font-bold text-coffee-400 bg-coffee-50 border border-coffee-100 px-2 py-0.5 rounded-full flex items-center gap-1 hover:bg-coffee-100 transition-colors whitespace-nowrap"
-                          >
-                            <ArrowRightLeft className="w-3 h-3" />
-                            1 {m.purchaseUnit} = {m.purchaseUnitRate} {m.unit}
-                          </button>
-                        )}
+                        <button
+                          onClick={() => {
+                            setUnitConvModal(m);
+                            setConvData({
+                              purchaseUnit: m.purchaseUnit || '',
+                              midUnit: m.midUnit || '',
+                              unit: m.unit || '',
+                              purchaseUnitRate: m.purchaseUnitRate || '',
+                              midUnitRate: m.midUnitRate || ''
+                            });
+                          }}
+                          className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full flex items-center gap-1 transition-colors whitespace-nowrap mt-1", hasMismatch ? "text-amber-600 bg-amber-50 border border-amber-200 hover:bg-amber-100" : "text-coffee-400 bg-coffee-50 border border-coffee-100 hover:bg-coffee-100")}
+                        >
+                          <ArrowRightLeft className="w-3 h-3" />
+                          {hasMismatch ? `單位不一致，點擊設定` : `單位換算與設定`}
+                        </button>
                       </div>
                     </td>
                     {/* Editable min alert */}
@@ -491,51 +490,62 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="text-lg font-bold text-coffee-800 flex items-center gap-2">
-                    <ArrowRightLeft className="w-5 h-5 text-amber-500" /> 單位換算設定
+                    <ArrowRightLeft className="w-5 h-5 text-amber-500" /> 單位階層設定
                   </h3>
-                  <p className="text-sm text-coffee-400 mt-1">「{unitConvModal.material.name}」</p>
+                  <p className="text-sm text-coffee-400 mt-1">變更「{unitConvModal.name}」的換算</p>
                 </div>
                 <button onClick={() => setUnitConvModal(null)} className="p-1.5 rounded-full bg-coffee-100 text-coffee-500 hover:bg-coffee-200 transition">
                   <X className="w-4 h-4" />
                 </button>
               </div>
 
-              <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl space-y-1">
-                <p className="text-xs font-bold text-amber-700">⚠️ 單位不一致提醒</p>
-                <p className="text-xs text-amber-600">
-                  庫存單位為 <span className="font-bold">「{unitConvModal.material.unit}」</span>，
-                  但食材成本分頁的購買單位為 <span className="font-bold">「{unitConvModal.purchaseUnit}」</span>。
-                  請填寫換算比例以正確計算每單位庫存成本。
-                </p>
+              <div className="space-y-4">
+                 <div className="grid grid-cols-2 gap-4">
+                   <div>
+                     <label className="text-[10px] text-coffee-400 font-bold mb-1 block">1. 採購單位 (最大, 如: 箱)</label>
+                     <input type="text" value={convData.purchaseUnit} onChange={e => setConvData({...convData, purchaseUnit: e.target.value})} className="w-full bg-coffee-50 border border-coffee-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-coffee-400" />
+                   </div>
+                   <div>
+                     <label className="text-[10px] text-coffee-400 font-bold mb-1 block">換算比例 1 (往下層計算)</label>
+                     <div className="relative">
+                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-coffee-400 text-xs font-bold">1 =</span>
+                       <input type="number" step="0.01" value={convData.purchaseUnitRate === 0 ? '' : convData.purchaseUnitRate} onChange={e => setConvData({...convData, purchaseUnitRate: parseFloat(e.target.value) || ''})} className="w-full pl-10 bg-white border border-coffee-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-coffee-400 font-mono font-bold" />
+                     </div>
+                   </div>
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-4">
+                   <div>
+                     <label className="text-[10px] text-coffee-400 font-bold mb-1 block">2. 中單位 (第二層, 如: 罐)</label>
+                     <input type="text" value={convData.midUnit} onChange={e => setConvData({...convData, midUnit: e.target.value})} className="w-full bg-coffee-50 border border-coffee-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-coffee-400" />
+                   </div>
+                   <div>
+                     <label className="text-[10px] text-coffee-400 font-bold mb-1 block">換算比例 2 (到基本單位)</label>
+                     <div className="relative">
+                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-coffee-400 text-xs font-bold">1 =</span>
+                       <input type="number" step="0.01" value={convData.midUnitRate === 0 ? '' : convData.midUnitRate} onChange={e => setConvData({...convData, midUnitRate: parseFloat(e.target.value) || ''})} className="w-full pl-10 bg-white border border-coffee-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-coffee-400 font-mono font-bold" />
+                     </div>
+                   </div>
+                 </div>
+
+                 <div>
+                   <label className="text-[10px] text-coffee-400 font-bold mb-1 block">3. 基本單位 (最小計算層級, 如: g)</label>
+                   <input type="text" value={convData.unit} onChange={e => setConvData({...convData, unit: e.target.value})} className="w-full bg-coffee-50 border border-coffee-200 rounded-xl px-3 py-2 text-sm outline-none focus:border-coffee-400" />
+                 </div>
               </div>
 
-              <div>
-                <label className="text-xs font-bold text-coffee-500 block mb-2">換算比例</label>
-                <div className="flex items-center gap-3">
-                  <div className="flex-1 text-center">
-                    <div className="text-2xl font-serif-brand font-bold text-coffee-800">1</div>
-                    <div className="text-xs text-coffee-400 mt-0.5">{unitConvModal.purchaseUnit}</div>
-                  </div>
-                  <div className="text-coffee-400 font-bold">=</div>
-                  <div className="flex-1">
-                    <input
-                      type="number"
-                      step="0.001"
-                      min="0.001"
-                      placeholder="填入數量"
-                      value={convRate}
-                      onChange={e => setConvRate(parseFloat(e.target.value) || '')}
-                      className="w-full text-center text-2xl font-serif-brand font-bold text-coffee-800 border-b-2 border-coffee-300 focus:border-coffee-600 bg-transparent outline-none py-1"
-                    />
-                    <div className="text-xs text-coffee-400 mt-0.5 text-center">{unitConvModal.material.unit}</div>
-                  </div>
+              {/* Live preview */}
+              {(convData.purchaseUnit || convData.midUnit) && convData.unit && (
+                <div className="p-3 bg-mint-brand/10 border border-mint-brand/30 rounded-2xl text-xs font-bold text-mint-brand text-center leading-relaxed">
+                  {convData.purchaseUnit && convData.purchaseUnitRate !== '' && convData.midUnit && convData.midUnitRate !== '' ? (
+                    <>1 {convData.purchaseUnit} = {convData.purchaseUnitRate} {convData.midUnit} = {Number(convData.purchaseUnitRate) * Number(convData.midUnitRate)} {convData.unit}</>
+                  ) : convData.purchaseUnit && convData.purchaseUnitRate !== '' ? (
+                    <>1 {convData.purchaseUnit} = {convData.purchaseUnitRate} {convData.unit}</>
+                  ) : convData.midUnit && convData.midUnitRate !== '' ? (
+                    <>1 {convData.midUnit} = {convData.midUnitRate} {convData.unit}</>
+                  ) : null}
                 </div>
-                {convRate !== '' && convRate > 0 && (
-                  <p className="text-xs text-mint-brand font-bold mt-3 text-center bg-mint-brand/10 rounded-xl py-2">
-                    1 {unitConvModal.purchaseUnit} = {convRate} {unitConvModal.material.unit}
-                  </p>
-                )}
-              </div>
+              )}
 
               <div className="flex gap-3">
                 <button onClick={() => setUnitConvModal(null)} className="flex-1 py-3 bg-coffee-100 text-coffee-600 rounded-xl font-bold hover:bg-coffee-200 transition">取消</button>
