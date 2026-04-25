@@ -32,7 +32,11 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const id = uid();
-    await setDoc(doc(db, 'shops', shopId, 'materials', id), { ...newMaterial, id });
+    const payload = { ...newMaterial, id };
+    if (payload.purchaseUnit && payload.midUnit && payload.purchaseUnitRate && payload.midUnitRate) {
+       payload.purchaseUnitRate = payload.purchaseUnitRate * payload.midUnitRate;
+    }
+    await setDoc(doc(db, 'shops', shopId, 'materials', id), payload as Material);
     setIsAddingMode(false);
     setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0 });
   };
@@ -111,47 +115,104 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
       <AnimatePresence>
         {isAddingMode && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-            <form onSubmit={handleAddSubmit} className="glass-panel p-6 bg-white/60 mb-6 border-2 border-coffee-100 shadow-md rounded-[24px]">
-              <h3 className="font-bold text-coffee-800 mb-4">新增材料資料卡</h3>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
-                <div>
-                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">類別</label>
-                  <select value={newMaterial.category} onChange={e => setNewMaterial({...newMaterial, category: e.target.value})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300">
-                    <option value="食材">食材</option>
-                    <option value="包材">包材</option>
-                    <option value="裝飾品">裝飾品</option>
-                    <option value="其他">其他</option>
-                  </select>
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">材料名稱</label>
-                  <input type="text" required value={newMaterial.name} onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" placeholder="例如: 麵粉" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">目前庫存 (選填)</label>
-                  <input type="number" step="0.01" value={newMaterial.stock || ''} onChange={e => setNewMaterial({...newMaterial, stock: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">最低庫存量</label>
-                  <input type="number" required step="0.01" min="0" value={newMaterial.minAlert ?? 0} onChange={e => setNewMaterial({...newMaterial, minAlert: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">基本單位</label>
-                  <input type="text" required value={newMaterial.unit} onChange={e => setNewMaterial({...newMaterial, unit: e.target.value})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" placeholder="例如: g" />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-coffee-400 block mb-1">大單位 (選填，例如: 箱)</label>
-                  <input type="text" value={newMaterial.purchaseUnit || ''} onChange={e => setNewMaterial({...newMaterial, purchaseUnit: e.target.value})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" placeholder="例如: 箱" />
-                </div>
-                {newMaterial.purchaseUnit ? (
-                  <div>
-                    <label className="text-[10px] font-bold text-coffee-400 block mb-1">1 {newMaterial.purchaseUnit} = ? {newMaterial.unit}</label>
-                    <input type="number" required step="0.01" min="0.01" value={newMaterial.purchaseUnitRate || ''} onChange={e => setNewMaterial({...newMaterial, purchaseUnitRate: parseFloat(e.target.value) || undefined})} className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 outline-none focus:border-coffee-300" placeholder="輸入換算比例" />
+            <form onSubmit={handleAddSubmit} className="glass-panel relative bg-white/80 mb-6 border-2 border-coffee-100 shadow-md rounded-[24px] overflow-hidden">
+              <div className="bg-coffee-50/50 border-b border-coffee-100 p-4 md:px-6 flex justify-between items-center">
+                <h3 className="font-bold text-coffee-800 text-lg">新增材料資料卡</h3>
+                <button type="button" onClick={() => setIsAddingMode(false)} className="text-coffee-400 hover:text-coffee-600"><X className="w-5 h-5"/></button>
+              </div>
+              
+              <div className="p-4 md:p-6 space-y-6">
+                {/* 1. 基本資料 */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-bold text-coffee-600 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-coffee-400"></div>基本資訊</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-coffee-400 block mb-1">類別 *</label>
+                      <select value={newMaterial.category} onChange={e => setNewMaterial({...newMaterial, category: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400">
+                        <option value="食材">食材</option>
+                        <option value="包材">包材</option>
+                        <option value="裝飾品">裝飾品</option>
+                        <option value="其他">其他</option>
+                      </select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="text-[10px] font-bold text-coffee-400 block mb-1">材料名稱 *</label>
+                      <input type="text" required value={newMaterial.name} onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: 麵粉" />
+                    </div>
                   </div>
-                ) : <div className="hidden md:block"></div>}
-                <div className="pb-0.5">
-                  <button type="submit" className="w-full bg-coffee-800 text-white rounded-xl py-2 font-bold hover:bg-coffee-900 transition flex items-center justify-center gap-2"><Save className="w-4 h-4"/> 儲存</button>
                 </div>
+
+                {/* 2. 單位設定 */}
+                <div className="space-y-3 p-4 bg-coffee-50/30 rounded-2xl border border-coffee-50">
+                  <h4 className="text-sm font-bold text-coffee-600 flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-coffee-400"></div>
+                    單位換算設定 (由小到大填寫)
+                  </h4>
+                  
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Level 1 */}
+                    <div className="space-y-2 relative">
+                      <label className="text-[10px] font-bold text-coffee-600 bg-coffee-100 px-2 py-0.5 rounded-md inline-block">第一層：基本單位 *</label>
+                      <input type="text" required value={newMaterial.unit} onChange={e => setNewMaterial({...newMaterial, unit: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: g" />
+                    </div>
+
+                    {/* Level 2 */}
+                    <div className="space-y-2 relative">
+                      <label className="text-[10px] font-bold text-coffee-500 bg-coffee-50 px-2 py-0.5 rounded-md inline-block">第二層：中單位 (選填)</label>
+                      <input type="text" value={newMaterial.midUnit || ''} onChange={e => setNewMaterial({...newMaterial, midUnit: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: 罐" />
+                      {newMaterial.midUnit && (
+                        <div className="mt-2 text-xs font-bold text-coffee-500">
+                          1 {newMaterial.midUnit} = 
+                          <input type="number" step="0.001" min="0.001" required value={newMaterial.midUnitRate || ''} onChange={e => setNewMaterial({...newMaterial, midUnitRate: parseFloat(e.target.value) || undefined})} className="w-16 mx-2 border-b-2 border-coffee-300 outline-none text-center bg-transparent focus:border-coffee-600" placeholder="?" />
+                          {newMaterial.unit}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Level 3 */}
+                    <div className="space-y-2 relative">
+                      <label className="text-[10px] font-bold text-coffee-500 bg-coffee-50 px-2 py-0.5 rounded-md inline-block">第三層：大單位 (選填)</label>
+                      <input type="text" value={newMaterial.purchaseUnit || ''} onChange={e => setNewMaterial({...newMaterial, purchaseUnit: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: 箱" />
+                      {newMaterial.purchaseUnit && (
+                        <div className="mt-2 text-xs font-bold text-coffee-500 flex items-center">
+                          1 {newMaterial.purchaseUnit} = 
+                          <input type="number" step="0.001" min="0.001" required value={newMaterial.purchaseUnitRate || ''} onChange={e => setNewMaterial({...newMaterial, purchaseUnitRate: parseFloat(e.target.value) || undefined})} className="w-16 mx-2 border-b-2 border-coffee-300 outline-none text-center bg-transparent focus:border-coffee-600" placeholder="?" />
+                          {newMaterial.midUnit ? newMaterial.midUnit : newMaterial.unit}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  {newMaterial.purchaseUnit && newMaterial.midUnit && newMaterial.purchaseUnitRate && newMaterial.midUnitRate && (
+                    <div className="text-xs text-mint-brand font-bold bg-mint-brand/10 p-2 rounded-lg mt-2">
+                       ↳ 換算總結：1 {newMaterial.purchaseUnit} = {newMaterial.purchaseUnitRate * newMaterial.midUnitRate} {newMaterial.unit}
+                    </div>
+                  )}
+                </div>
+
+                {/* 3. 庫存與警示 */}
+                <div className="space-y-3">
+                  <h4 className="text-sm font-bold text-coffee-600 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-coffee-400"></div>庫存設定</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="text-[10px] font-bold text-coffee-400 block mb-1">目前庫存 (選填，直接輸入總數)</label>
+                      <div className="relative">
+                        <input type="number" step="0.01" value={newMaterial.stock || ''} onChange={e => setNewMaterial({...newMaterial, stock: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 pr-12 outline-none focus:border-coffee-400" />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-coffee-400 font-bold">{newMaterial.unit || '單位'}</span>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-[10px] font-bold text-amber-500 block mb-1">最低庫存提醒水位 (以最大單位計算) *</label>
+                      <div className="relative">
+                        <input type="number" required step="0.01" min="0" value={newMaterial.minAlert ?? 0} onChange={e => setNewMaterial({...newMaterial, minAlert: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-amber-200 rounded-xl px-4 py-2 pr-12 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20" />
+                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-amber-600 font-bold">{newMaterial.purchaseUnit || newMaterial.midUnit || newMaterial.unit || '單位'}</span>
+                      </div>
+                      <p className="text-[10px] text-coffee-300 mt-1">例如設定為 2，代表低於 2 {newMaterial.purchaseUnit || newMaterial.midUnit || newMaterial.unit} 時會顯示警告。</p>
+                    </div>
+                  </div>
+                </div>
+
+                <button type="submit" className="w-full bg-coffee-800 text-white rounded-2xl py-3 font-bold hover:bg-coffee-900 transition flex items-center justify-center gap-2 shadow-sm"><CheckCircle2 className="w-5 h-5"/> 建立完成並儲存</button>
               </div>
             </form>
           </motion.div>
@@ -175,8 +236,24 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
             </thead>
             <tbody className="divide-y divide-coffee-50">
               {[...materials].sort((a, b) => a.category.localeCompare(b.category) || a.name.localeCompare(b.name)).map(m => {
-                const isLow = m.stock <= m.minAlert;
+                const maxRate = m.purchaseUnitRate || m.midUnitRate || 1;
+                const maxUnit = m.purchaseUnit || m.midUnit || m.unit;
+                const isLow = m.stock <= m.minAlert * maxRate;
                 const hasMismatch = m.purchaseUnit && m.purchaseUnit !== m.unit && !m.purchaseUnitRate;
+
+                let printStock = Math.round(m.stock * 100) / 100;
+                const parts: {v: number, u: string}[] = [];
+                if (m.purchaseUnit && m.purchaseUnitRate) {
+                   const b = Math.floor(printStock / m.purchaseUnitRate);
+                   if (b > 0) { parts.push({ v: b, u: m.purchaseUnit }); printStock = Math.round((printStock - b * m.purchaseUnitRate) * 100) / 100; }
+                }
+                if (m.midUnit && m.midUnitRate) {
+                   const c = Math.floor(printStock / m.midUnitRate);
+                   if (c > 0) { parts.push({ v: c, u: m.midUnit }); printStock = Math.round((printStock - c * m.midUnitRate) * 100) / 100; }
+                }
+                if (printStock > 0 || parts.length === 0) {
+                   parts.push({ v: printStock, u: m.unit });
+                }
 
                 return (
                   <tr key={m.id} className="hover:bg-coffee-50/50 transition">
@@ -194,19 +271,19 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                     <td className="py-4 px-6 font-bold text-coffee-800 text-base">{m.name}</td>
                     <td className="py-4 px-6"><span className="text-xs font-bold text-coffee-500 bg-coffee-100 px-2 py-1 rounded-lg">{m.category}</span></td>
                     <td className="py-4 px-6 text-right">
-                      {m.purchaseUnit && m.purchaseUnitRate ? (
-                        <div className="flex flex-col items-end">
-                          <span className="font-serif-brand font-bold text-lg text-coffee-900">
-                            {Math.floor(m.stock / m.purchaseUnitRate) > 0 ? `${fmt(Math.floor(m.stock / m.purchaseUnitRate))}` : ''}
-                            {Math.floor(m.stock / m.purchaseUnitRate) > 0 && <span className="text-xs font-sans font-medium text-coffee-400 ml-0.5 mr-1.5">{m.purchaseUnit}</span>}
-                            {m.stock % m.purchaseUnitRate > 0 ? `${fmt(m.stock % m.purchaseUnitRate)}` : (Math.floor(m.stock / m.purchaseUnitRate) === 0 ? '0' : '')}
-                            {(m.stock % m.purchaseUnitRate > 0 || Math.floor(m.stock / m.purchaseUnitRate) === 0) && <span className="text-xs font-sans font-medium text-coffee-400 ml-0.5">{m.unit}</span>}
-                          </span>
+                      <div className="flex flex-col items-end">
+                        <span className="font-serif-brand font-bold text-lg text-coffee-900">
+                          {parts.map((p, i) => (
+                            <React.Fragment key={i}>
+                              {fmt(p.v)}
+                              <span className={cn("text-xs font-sans font-medium text-coffee-400 ml-0.5", i < parts.length - 1 ? "mr-1.5" : "")}>{p.u}</span>
+                            </React.Fragment>
+                          ))}
+                        </span>
+                        {(m.purchaseUnit || m.midUnit) && (
                           <span className="text-[10px] text-coffee-300">總數 {fmt(m.stock)}{m.unit}</span>
-                        </div>
-                      ) : (
-                        <span className="font-serif-brand font-bold text-lg text-coffee-900">{fmt(m.stock)} <span className="text-xs font-sans font-medium text-coffee-400">{m.unit}</span></span>
-                      )}
+                        )}
+                      </div>
                     </td>
                     <td className="py-4 px-6 text-right">
                       <div className="flex flex-col items-end gap-1">
@@ -249,7 +326,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                             autoFocus
                             className="w-20 text-center border-b-2 border-coffee-400 bg-transparent outline-none font-serif-brand font-bold text-coffee-800"
                           />
-                          <span className="text-xs text-coffee-400">{m.unit}</span>
+                          <span className="text-xs text-coffee-400">{maxUnit}</span>
                         </div>
                       ) : (
                         <button
@@ -257,7 +334,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                           className="group inline-flex items-center gap-1.5 font-serif-brand font-bold text-coffee-600 hover:text-coffee-800 transition"
                           title="點擊編輯最低庫存量"
                         >
-                          {fmt(m.minAlert)} <span className="text-xs font-sans font-medium text-coffee-400">{m.unit}</span>
+                          {fmt(m.minAlert)} <span className="text-xs font-sans font-medium text-coffee-400">{maxUnit}</span>
                           <Edit2 className="w-3 h-3 text-coffee-300 group-hover:text-coffee-500 transition opacity-0 group-hover:opacity-100" />
                         </button>
                       )}

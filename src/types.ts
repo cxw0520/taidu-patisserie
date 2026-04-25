@@ -8,6 +8,8 @@ export interface Material {
   avgCost: number;
   purchaseUnit?: string;
   purchaseUnitRate?: number;
+  midUnit?: string;
+  midUnitRate?: number;
 }
 
 export interface PurchaseLine {
