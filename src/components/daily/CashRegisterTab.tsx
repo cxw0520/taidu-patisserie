@@ -63,6 +63,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
   const [isEditing, setIsEditing] = useState(false);
   const [editMemo, setEditMemo] = useState('');
+  const [isExporting, setIsExporting] = useState(false);
 
   const [currencyForm, setCurrencyForm] = useState<CurrencyBreakdown>(DEFAULT_CURRENCY);
 
@@ -275,7 +276,12 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   };
 
   const handleExportPDF = () => {
-    window.print();
+    setIsExporting(true);
+    // Use a small timeout to let the UI update and the print dialog to open smoothly
+    setTimeout(() => {
+      window.print();
+      setIsExporting(false);
+    }, 300);
   };
 
   const allItems = [
@@ -336,8 +342,11 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
         @media print {
           body * { visibility: hidden; }
           .print-section, .print-section * { visibility: visible; }
-          .print-section { position: absolute; left: 0; top: 0; width: 100%; padding: 0; margin: 0; }
+          .print-section { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; margin: 0; background: white; }
           .no-print { display: none !important; }
+          .glass-panel { border: 1px solid #eee !important; box-shadow: none !important; background: white !important; }
+          .bg-coffee-50 { background-color: #f9f8f6 !important; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
         }
       `}</style>
       {dailyData.cashRegister?.closeTime && !dailyData.cashRegister?.isOpen && !isEditing ? (
@@ -480,9 +489,19 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             <div className="flex justify-center no-print">
               <button 
                 onClick={handleExportPDF}
-                className="px-10 py-4 bg-coffee-800 text-white rounded-[24px] font-bold shadow-xl hover:bg-coffee-900 transition-all flex items-center gap-2"
+                disabled={isExporting}
+                className="px-10 py-4 bg-coffee-800 text-white rounded-[24px] font-bold shadow-xl hover:bg-coffee-900 transition-all flex items-center gap-2 disabled:opacity-70"
               >
-                <FileText className="w-5 h-5" /> 匯出為 PDF 結報單
+                {isExporting ? (
+                  <>
+                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    結報單準備中...
+                  </>
+                ) : (
+                  <>
+                    <FileText className="w-5 h-5" /> 匯出為 PDF 結報單
+                  </>
+                )}
               </button>
             </div>
           </div>
