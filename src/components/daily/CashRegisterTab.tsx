@@ -343,13 +343,27 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           body * { visibility: hidden; }
           .print-section, .print-section * { 
             visibility: visible; 
-            font-family: sans-serif !important;
+            font-family: serif !important;
+            background: none !important;
+            border: none !important;
+            box-shadow: none !important;
+            color: black !important;
           }
-          .print-section { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; margin: 0; background: white; }
-          .no-print { display: none !important; }
-          .glass-panel { border: 1px solid #eee !important; box-shadow: none !important; background: white !important; }
-          .bg-coffee-50 { background-color: #f9f8f6 !important; }
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          .print-section { 
+            position: absolute; 
+            left: 0; 
+            top: 0; 
+            width: 100%; 
+            padding: 0; 
+            margin: 0; 
+          }
+          .no-print, svg { display: none !important; }
+          .glass-panel { padding: 0 !important; margin-bottom: 20px !important; }
+          h2 { font-size: 24pt; border-bottom: 1px solid black !important; margin-bottom: 20px; }
+          h4 { font-size: 16pt; margin-top: 20px; border-bottom: 0.5pt solid #eee !important; }
+          .bg-coffee-50, .bg-white, .bg-amber-50\\/50 { background: none !important; }
+          .text-2xl, .text-3xl { font-size: 18pt !important; }
+          .text-rose-brand, .text-mint-brand, .text-amber-600 { color: black !important; }
         }
       `}</style>
       {dailyData.cashRegister?.closeTime && !dailyData.cashRegister?.isOpen && !isEditing ? (
