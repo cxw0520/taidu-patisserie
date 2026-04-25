@@ -341,7 +341,10 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       <style>{`
         @media print {
           body * { visibility: hidden; }
-          .print-section, .print-section * { visibility: visible; }
+          .print-section, .print-section * { 
+            visibility: visible; 
+            font-family: sans-serif !important;
+          }
           .print-section { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; margin: 0; background: white; }
           .no-print { display: none !important; }
           .glass-panel { border: 1px solid #eee !important; box-shadow: none !important; background: white !important; }
