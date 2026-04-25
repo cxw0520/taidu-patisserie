@@ -143,6 +143,37 @@ export interface DailyReport {
   inventory: Record<string, InventoryItem>;
   losses: LossEntry[];
   packagingUsage: Record<string, number>;
+  cashRegister?: CashRegisterShift;
+}
+
+export interface CurrencyBreakdown {
+  "1000": number;
+  "500": number;
+  "100": number;
+  "50": number;
+  "10": number;
+  "5": number;
+  "1": number;
+}
+
+export interface CashExpense {
+  id: string;
+  amount: number;
+  reason: string;
+  time: string;
+}
+
+export interface CashRegisterShift {
+  isOpen: boolean;
+  openTime?: string;
+  closeTime?: string;
+  openingCash: CurrencyBreakdown;
+  openingTotal: number;
+  closingCash?: CurrencyBreakdown;
+  closingTotal?: number;
+  expenses: CashExpense[];
+  expectedCash?: number;
+  overShort?: number;
 }
 
 export interface CustomCategory {

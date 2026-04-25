@@ -28,11 +28,13 @@ import {
   Cookie,
   Package,
   Menu,
-  X
+  X,
+  Monitor
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
 import { cn } from '../lib/utils';
+import CashRegisterTab from './daily/CashRegisterTab';
 
 const normalizeDateKey = (v: string) => {
   const [y, m = '1', d = '1'] = v.split('-');
@@ -100,7 +102,7 @@ export default function DailyView({
   settings: Settings,
   shopId: string 
 }) {
-  const [subTab, setSubTab] = useState<'dashboard' | 'import' | 'settings'>('dashboard');
+  const [subTab, setSubTab] = useState<'dashboard' | 'cash_register' | 'import' | 'settings'>('dashboard');
   const [isMobileSubTabOpen, setIsMobileSubTabOpen] = useState(false);
   const [dailyData, setDailyData] = useState<DailyReport | null>(null);
   const [loadedDateKey, setLoadedDateKey] = useState('');
@@ -405,12 +407,13 @@ export default function DailyView({
               <div className="absolute z-20 mt-2 w-full bg-white border border-coffee-100 rounded-xl shadow-lg overflow-hidden">
                 {[
                   { id: 'dashboard', label: '銷售與戰情室', icon: LayoutDashboard },
+                  { id: 'cash_register', label: '收銀機', icon: Monitor },
                   { id: 'import', label: '訂單匯入', icon: FileUp },
                   { id: 'settings', label: '品項設定', icon: SettingsIcon },
                 ].map(t => (
                   <button
                     key={t.id}
-                    onClick={() => { setSubTab(t.id as 'dashboard' | 'import' | 'settings'); setIsMobileSubTabOpen(false); }}
+                    onClick={() => { setSubTab(t.id as 'dashboard' | 'cash_register' | 'import' | 'settings'); setIsMobileSubTabOpen(false); }}
                     className={cn(
                       "w-full px-4 py-3 text-left text-sm font-bold border-b border-coffee-50 last:border-b-0 flex items-center gap-2",
                       subTab === t.id ? "bg-coffee-50 text-coffee-700" : "text-coffee-500"
@@ -427,12 +430,13 @@ export default function DailyView({
           <div className="hidden md:flex bg-coffee-100/50 p-1 rounded-xl">
             {[
               { id: 'dashboard', label: '銷售與戰情室', icon: LayoutDashboard },
+              { id: 'cash_register', label: '收銀機', icon: Monitor },
               { id: 'import', label: '訂單匯入', icon: FileUp },
               { id: 'settings', label: '品項設定', icon: SettingsIcon },
             ].map(t => (
               <button
                 key={t.id}
-                onClick={() => setSubTab(t.id as 'dashboard' | 'import' | 'settings')}
+                onClick={() => setSubTab(t.id as 'dashboard' | 'cash_register' | 'import' | 'settings')}
                 className={cn(
                   "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
                   subTab === t.id ? "bg-white text-coffee-700 shadow-sm" : "text-coffee-400 hover:text-coffee-600"
@@ -454,6 +458,16 @@ export default function DailyView({
           {syncingInv ? '扣減中...' : '扣除今日庫存'}
         </button>
       </div>
+
+      {subTab === 'cash_register' && (
+        <CashRegisterTab 
+          dailyData={dailyData} 
+          settings={settings} 
+          updateDaily={updateDaily} 
+          shopId={shopId} 
+          metrics={metrics}
+        />
+      )}
 
       {subTab === 'dashboard' && (
         <div className="flex flex-col gap-8">
