@@ -23,7 +23,28 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
     name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0
   });
 
-  const [adjData, setAdjData] = useState({ actualQty: 0, reason: '', inputBig: 0, inputSmall: 0 });
+  const [adjData, setAdjData] = useState({ actualQty: 0, reason: '', inputBig: 0, inputMid: 0, inputSmall: 0 });
+
+  const getParts = (m: Material, stockAmt: number): {v: number, u: string}[] => {
+    let printStock = Math.round(stockAmt * 100) / 100;
+    const parts: {v: number, u: string}[] = [];
+    if (m.purchaseUnit && m.purchaseUnitRate) {
+       const b = Math.floor(printStock / m.purchaseUnitRate);
+       if (b > 0) { parts.push({ v: b, u: m.purchaseUnit }); printStock = Math.round((printStock - b * m.purchaseUnitRate) * 100) / 100; }
+    }
+    if (m.midUnit && m.midUnitRate) {
+       const c = Math.floor(printStock / m.midUnitRate);
+       if (c > 0) { parts.push({ v: c, u: m.midUnit }); printStock = Math.round((printStock - c * m.midUnitRate) * 100) / 100; }
+    }
+    if (printStock > 0 || parts.length === 0) {
+       parts.push({ v: printStock, u: m.unit });
+    }
+    return parts;
+  };
+
+  const formatStock = (m: Material, stockAmt: number) => {
+    return getParts(m, stockAmt).map(p => `${fmt(p.v)} ${p.u}`).join(' ');
+  };
 
   const totalInvValue = useMemo(() => {
     return materials.reduce((s, m) => s + (m.stock * m.avgCost), 0);
@@ -241,19 +262,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                 const isLow = m.stock <= m.minAlert * maxRate;
                 const hasMismatch = m.purchaseUnit && m.purchaseUnit !== m.unit && !m.purchaseUnitRate;
 
-                let printStock = Math.round(m.stock * 100) / 100;
-                const parts: {v: number, u: string}[] = [];
-                if (m.purchaseUnit && m.purchaseUnitRate) {
-                   const b = Math.floor(printStock / m.purchaseUnitRate);
-                   if (b > 0) { parts.push({ v: b, u: m.purchaseUnit }); printStock = Math.round((printStock - b * m.purchaseUnitRate) * 100) / 100; }
-                }
-                if (m.midUnit && m.midUnitRate) {
-                   const c = Math.floor(printStock / m.midUnitRate);
-                   if (c > 0) { parts.push({ v: c, u: m.midUnit }); printStock = Math.round((printStock - c * m.midUnitRate) * 100) / 100; }
-                }
-                if (printStock > 0 || parts.length === 0) {
-                   parts.push({ v: printStock, u: m.unit });
-                }
+                const currParts = getParts(m, m.stock);
 
                 return (
                   <tr key={m.id} className="hover:bg-coffee-50/50 transition">
@@ -273,10 +282,10 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                     <td className="py-4 px-6 text-right">
                       <div className="flex flex-col items-end">
                         <span className="font-serif-brand font-bold text-lg text-coffee-900">
-                          {parts.map((p, i) => (
+                          {currParts.map((p, i) => (
                             <React.Fragment key={i}>
                               {fmt(p.v)}
-                              <span className={cn("text-xs font-sans font-medium text-coffee-400 ml-0.5", i < parts.length - 1 ? "mr-1.5" : "")}>{p.u}</span>
+                              <span className={cn("text-xs font-sans font-medium text-coffee-400 ml-0.5", i < currParts.length - 1 ? "mr-1.5" : "")}>{p.u}</span>
                             </React.Fragment>
                           ))}
                         </span>
@@ -344,13 +353,27 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                       <div className="inline-flex gap-2">
                         <button
                           onClick={() => { 
+                            let initialBig = 0;
+                            let initialMid = 0;
+                            let initialSmall = Math.round(m.stock * 100) / 100;
+
+                            if (m.purchaseUnit && m.purchaseUnitRate) {
+                              initialBig = Math.floor(initialSmall / m.purchaseUnitRate);
+                              initialSmall = Math.round((initialSmall - initialBig * m.purchaseUnitRate) * 100) / 100;
+                            }
+                            if (m.midUnit && m.midUnitRate) {
+                              initialMid = Math.floor(initialSmall / m.midUnitRate);
+                              initialSmall = Math.round((initialSmall - initialMid * m.midUnitRate) * 100) / 100;
+                            }
+
                             setAdjModal(m); 
                             setAdjData({ 
                               actualQty: m.stock, 
                               reason: '',
-                              inputBig: m.purchaseUnitRate ? Math.floor(m.stock / m.purchaseUnitRate) : 0,
-                              inputSmall: m.purchaseUnitRate ? (m.stock % m.purchaseUnitRate) : m.stock
-                            }); 
+                              inputBig: initialBig,
+                              inputMid: initialMid,
+                              inputSmall: initialSmall
+                            });  
                           }}
                           className="px-4 py-1.5 bg-coffee-100 text-coffee-600 rounded-full text-xs font-bold hover:bg-coffee-200 transition-colors inline-flex items-center gap-1"
                         >
@@ -392,42 +415,49 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                 <div className="p-4 bg-coffee-50 border border-coffee-100 rounded-2xl flex justify-between items-center">
                   <span className="text-xs font-bold text-coffee-400">系統紀錄餘額</span>
                   <span className="font-serif-brand font-bold text-lg text-coffee-800">
-                    {adjModal.purchaseUnit && adjModal.purchaseUnitRate ? (
-                      <>
-                        {Math.floor(adjModal.stock / adjModal.purchaseUnitRate) > 0 && <>{fmt(Math.floor(adjModal.stock / adjModal.purchaseUnitRate))} {adjModal.purchaseUnit} </>}
-                        {(adjModal.stock % adjModal.purchaseUnitRate > 0 || Math.floor(adjModal.stock / adjModal.purchaseUnitRate) === 0) && <>{fmt(adjModal.stock % adjModal.purchaseUnitRate)} {adjModal.unit}</>}
-                      </>
-                    ) : (
-                      <>{fmt(adjModal.stock)} {adjModal.unit}</>
-                    )}
+                    {formatStock(adjModal, adjModal.stock)}
                   </span>
                 </div>
 
                 <div>
-                  <label className="text-xs font-bold text-coffee-500 mb-1 block">實際盤點</label>
-                  {adjModal.purchaseUnit && adjModal.purchaseUnitRate ? (
-                    <div className="flex items-center gap-2 bg-white border border-coffee-200 rounded-xl px-2 py-2">
-                       <input type="number" step="0.01" min="0" value={adjData.inputBig === 0 && adjData.inputSmall === 0 ? '' : adjData.inputBig} onChange={e => {
-                         const b = parseFloat(e.target.value) || 0;
-                         setAdjData(p => ({...p, inputBig: b, actualQty: b * adjModal.purchaseUnitRate! + p.inputSmall}));
-                       }} className="w-20 bg-transparent font-serif-brand font-bold text-lg text-rose-brand outline-none text-right" placeholder="0" />
-                       <span className="text-coffee-600 font-bold">{adjModal.purchaseUnit}</span>
-                       <span className="text-coffee-300">+</span>
-                       <input type="number" step="0.01" min="0" value={adjData.inputSmall === 0 && adjData.inputBig !== 0 ? '' : adjData.inputSmall} onChange={e => {
-                         const s = parseFloat(e.target.value) || 0;
-                         setAdjData(p => ({...p, inputSmall: s, actualQty: p.inputBig * adjModal.purchaseUnitRate! + s}));
-                       }} className="w-20 bg-transparent font-serif-brand font-bold text-lg text-rose-brand outline-none text-right" placeholder="0" />
-                       <span className="text-coffee-600 font-bold">{adjModal.unit}</span>
+                  <label className="text-xs font-bold text-coffee-500 mb-1 block">實際盤點輸入</label>
+                  <div className="flex flex-wrap items-center gap-2 bg-white border border-coffee-200 rounded-xl px-3 py-2">
+                    {adjModal.purchaseUnit && adjModal.purchaseUnitRate && (
+                      <div className="flex items-center gap-1">
+                        <input type="number" step="0.01" min="0" value={adjData.inputBig === 0 ? '' : adjData.inputBig} onChange={e => {
+                          const b = parseFloat(e.target.value) || 0;
+                          const newActualQty = b * adjModal.purchaseUnitRate! + adjData.inputMid * (adjModal.midUnitRate || 0) + adjData.inputSmall;
+                          setAdjData(p => ({...p, inputBig: b, actualQty: Math.round(newActualQty * 100) / 100}));
+                        }} className="w-16 bg-transparent font-serif-brand font-bold text-lg text-rose-brand outline-none text-right" placeholder="0" />
+                        <span className="text-coffee-600 font-bold">{adjModal.purchaseUnit}</span>
+                        <span className="text-coffee-300 mx-1">+</span>
+                      </div>
+                    )}
+                    {adjModal.midUnit && adjModal.midUnitRate && (
+                      <div className="flex items-center gap-1">
+                        <input type="number" step="0.01" min="0" value={adjData.inputMid === 0 ? '' : adjData.inputMid} onChange={e => {
+                          const mValue = parseFloat(e.target.value) || 0;
+                          const newActualQty = adjData.inputBig * (adjModal.purchaseUnitRate || 0) + mValue * adjModal.midUnitRate! + adjData.inputSmall;
+                          setAdjData(p => ({...p, inputMid: mValue, actualQty: Math.round(newActualQty * 100) / 100}));
+                        }} className="w-16 bg-transparent font-serif-brand font-bold text-lg text-rose-brand outline-none text-right" placeholder="0" />
+                        <span className="text-coffee-600 font-bold">{adjModal.midUnit}</span>
+                        <span className="text-coffee-300 mx-1">+</span>
+                      </div>
+                    )}
+                    <div className="flex items-center gap-1">
+                      <input type="number" step="0.01" min="0" value={adjData.inputSmall === 0 && adjData.actualQty !== 0 ? '' : adjData.inputSmall} onChange={e => {
+                        const s = parseFloat(e.target.value) || 0;
+                        const newActualQty = adjData.inputBig * (adjModal.purchaseUnitRate || 0) + adjData.inputMid * (adjModal.midUnitRate || 0) + s;
+                        setAdjData(p => ({...p, inputSmall: s, actualQty: Math.round(newActualQty * 100) / 100}));
+                      }} className="w-16 bg-transparent font-serif-brand font-bold text-lg text-rose-brand outline-none text-right" placeholder="0" />
+                      <span className="text-coffee-600 font-bold">{adjModal.unit}</span>
                     </div>
-                  ) : (
-                    <div className="relative">
-                      <input type="number" step="0.01" required value={adjData.actualQty === 0 ? '' : adjData.actualQty} onChange={e => setAdjData({...adjData, actualQty: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-3 font-serif-brand font-bold text-xl text-rose-brand outline-none focus:border-rose-brand focus:ring-2 focus:ring-rose-brand/20 pr-12 text-right" />
-                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">{adjModal.unit}</span>
-                    </div>
-                  )}
-                  {adjModal.purchaseUnit && adjModal.purchaseUnitRate && (
-                     <div className="text-right mt-1 text-[10px] text-coffee-400 font-bold">總計 {fmt(adjData.actualQty)} {adjModal.unit}</div>
-                  )}
+                  </div>
+                  
+                  <div className="text-right mt-2 text-xs text-coffee-500 font-bold">
+                    = 總計 {fmt(adjData.actualQty)} {adjModal.unit}
+                    <span className="text-mint-brand ml-2">({formatStock(adjModal, adjData.actualQty)})</span>
+                  </div>
                 </div>
 
                 <div className="py-2 flex justify-between items-center">
