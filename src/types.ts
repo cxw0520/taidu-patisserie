@@ -174,6 +174,7 @@ export interface CashRegisterShift {
   expenses: CashExpense[];
   expectedCash?: number;
   overShort?: number;
+  editLogs?: string[];
 }
 
 export interface CustomCategory {
