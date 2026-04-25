@@ -283,7 +283,11 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     
     setIsExporting(true);
 
-    // Give it a small timeout to ensure no pending renders
+    // Some versions of html2pdf require .default in ESM
+    const html2pdfLib = (html2pdf as any).default || html2pdf;
+
+    // Use a cloned element for better capture stability if needed
+    // but first let's see if the function call was the issue
     setTimeout(() => {
       const opt = {
         margin: [0.5, 0.5] as [number, number],
@@ -293,23 +297,26 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           scale: 2, 
           useCORS: true,
           logging: false,
-          backgroundColor: '#ffffff'
+          backgroundColor: '#ffffff',
+          scrollY: 0,
+          windowWidth: document.documentElement.offsetWidth
         },
         jsPDF: { unit: 'in' as const, format: 'a4', orientation: 'portrait' as const }
       };
 
-      // Call html2pdf carefully
-      const exporter = html2pdf().set(opt).from(element);
-      
-      exporter.save().then(() => {
+      try {
+        html2pdfLib().set(opt).from(element).save().then(() => {
+          setIsExporting(false);
+        }).catch((err: any) => {
+          console.error('PDF Library Async Error:', err);
+          throw err;
+        });
+      } catch (err) {
+        console.error('PDF Export Critical Error:', err);
         setIsExporting(false);
-      }).catch((err: any) => {
-        console.error('PDF Export Error:', err);
-        setIsExporting(false);
-        // Fallback to print if library fails
-        alert('檔案生成失敗，切換至列印模式儲存');
+        alert('匯出遇到問題，已自動開啟列印視窗，請選擇「另存為 PDF」');
         window.print();
-      });
+      }
     }, 500);
   };
 
