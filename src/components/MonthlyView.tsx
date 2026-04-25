@@ -3,7 +3,7 @@ import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
 import { fmt, parseNum, monthISO, uid, normalizeFlavorName } from '../lib/utils';
 import { DailyReport, Settings, Order, Material } from '../types';
-import { Wallet, PieChart as ChartIcon, TrendingUp, ReceiptText, Users, Home, Lightbulb, Wrench, Info, Megaphone, Trash2, Plus, X } from 'lucide-react';
+import { Wallet, PieChart as ChartIcon, TrendingUp, ReceiptText, Users, Home, Lightbulb, Wrench, Info, Megaphone, Trash2, Plus, X, Truck } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -28,6 +28,7 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
   const [monthData, setMonthData] = useState<DailyReport[]>([]);
   const [fixedCosts, setFixedCosts] = useState<{ id: string, label: string, amount: number }[]>([]);
   const [costOverrides, setCostOverrides] = useState<Record<string, number>>({});
+  const [monthlyLogisticsVal, setMonthlyLogisticsVal] = useState<number>(0);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [activeTab, setActiveTab] = useState<'finance' | 'product'>('finance');
@@ -68,6 +69,11 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
           setCostOverrides(data.costOverrides);
         } else {
           setCostOverrides({});
+        }
+        if (data.monthlyLogisticsVal !== undefined) {
+          setMonthlyLogisticsVal(data.monthlyLogisticsVal);
+        } else {
+          setMonthlyLogisticsVal(0);
         }
       } else {
         // Try fetching the most recent month to carry over custom fixed cost definitions
@@ -214,6 +220,8 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
           setFixedCosts={setFixedCosts}
           costOverrides={costOverrides}
           setCostOverrides={setCostOverrides}
+          monthlyLogisticsVal={monthlyLogisticsVal}
+          setMonthlyLogisticsVal={setMonthlyLogisticsVal}
           getRecipeCost={getRecipeCost}
           materials={materials}
           recipes={recipes}
@@ -424,8 +432,9 @@ function ARReconciliationModal({ monthData, settings, shopId, onClose, selectedB
   );
 }
 
-function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, getRecipeCost, materials, recipes, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
+function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
   const [showFoodCostModal, setShowFoodCostModal] = useState(false);
+  const [showPRModal, setShowPRModal] = useState(false);
   const stats = useMemo(() => {
     let salesTotal = 0;
     let discTotal = 0;
@@ -559,7 +568,8 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       return { name, qty, unitCost, totalCost };
     });
 
-    const totalVariableCost = ingredCost + pkgCostTotal + logSpent + lossCost;
+    const totalLogisticsCost = logSpent + monthlyLogisticsVal;
+    const totalVariableCost = ingredCost + pkgCostTotal + totalLogisticsCost + lossCost;
 
     const prMarketingCost = prIngredCost + prShip;
     const totalFixedCostsInput = fixedCosts.reduce((acc: number, cur: any) => acc + parseNum(cur.amount), 0);
@@ -570,15 +580,15 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     return {
       salesTotal, discTotal, prTotal, netRevenue,
       remit, cash, ar,
-      itemSales, ingredCost, itemCostBreakdown,
+      itemSales, ingredCost, itemCostBreakdown, itemPR,
       pkgDetails, pkgCostTotal,
-      logSpent, lossCost,
+      logSpent, lossCost, totalLogisticsCost,
       totalVariableCost,
       prIngredCost, prShip, prMarketingCost,
       totalFixedCostsInput, totalMarketingAndFixed,
       netProfit
     };
-  }, [monthData, settings, getRecipeCost, materials, fixedCosts, costOverrides]);
+  }, [monthData, settings, getRecipeCost, materials, fixedCosts, costOverrides, monthlyLogisticsVal]);
 
   const updateFixedCostAmount = async (id: string, amount: number) => {
     const next = fixedCosts.map((c: any) => c.id === id ? { ...c, amount } : c);
@@ -749,9 +759,33 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
               )}
             </div>
 
-            <div className="flex justify-between items-center p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
-              <span className="text-coffee-800 font-bold">物流成本</span>
-              <span className="font-mono font-bold text-rose-brand">${fmt(stats.logSpent)}</span>
+            <div className="flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
+              <div className="flex justify-between items-center">
+                <span className="text-coffee-800 font-bold">物流成本</span>
+                <span className="font-mono font-bold text-rose-brand">${fmt(stats.totalLogisticsCost)}</span>
+              </div>
+              <div className="mt-2 flex flex-col gap-2 border-t border-coffee-100 pt-2 text-sm">
+                <div className="flex justify-between items-center text-coffee-600">
+                   <span className="font-bold flex items-center gap-1"><Truck className="w-3 h-3"/>物流月結金額</span>
+                   <div className="flex items-center gap-1">
+                     <span className="text-xs font-mono">$</span>
+                     <input 
+                       type="number"
+                       value={monthlyLogisticsVal || ''}
+                       onChange={async e => {
+                          const val = parseNum(e.target.value);
+                          setMonthlyLogisticsVal(val);
+                          await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { monthlyLogisticsVal: val }, { merge: true });
+                       }}
+                       className="w-20 text-right bg-white border border-coffee-200 rounded px-1 py-0.5 outline-none font-mono font-bold text-coffee-800 focus:border-coffee-500"
+                     />
+                   </div>
+                </div>
+                <div className="flex justify-between items-center text-coffee-600">
+                   <span className="font-bold text-xs pl-4">日報表運費實支</span>
+                   <span className="font-mono font-bold">${fmt(stats.logSpent)}</span>
+                </div>
+              </div>
             </div>
 
             <div className="flex justify-between items-center p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
@@ -800,13 +834,13 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
             </div>
           
           <div className="space-y-3 flex-1 flex flex-col">
-            <div className="flex justify-between items-center p-3 bg-indigo-50/50 rounded-xl border border-indigo-100">
+            <button onClick={() => setShowPRModal(true)} className="flex justify-between items-center p-3 bg-indigo-50/50 hover:bg-indigo-50 transition rounded-xl border border-indigo-100 group text-left cursor-pointer active:scale-[0.98]">
               <div className="flex flex-col">
-                <span className="text-indigo-900 font-bold text-sm">行銷費用-公關品</span>
-                <span className="text-[10px] text-indigo-400">公關品成本 + 寄出運費</span>
+                <span className="text-indigo-900 font-bold text-sm flex items-center gap-1">行銷費用-公關品 <Info className="w-3 h-3 text-indigo-400 group-hover:text-indigo-600"/></span>
+                <span className="text-[10px] text-indigo-400">公關品耗材成本 + 寄出運費</span>
               </div>
               <span className="font-mono font-bold text-indigo-600">${fmt(stats.prMarketingCost)}</span>
-            </div>
+            </button>
             
             <div className="flex-1 overflow-y-auto space-y-2 pr-2" style={{ maxHeight: '250px' }}>
               {fixedCosts.map((cost: any) => (
@@ -927,6 +961,69 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                  <div className="flex justify-between items-center">
                    <span className="text-lg font-bold text-coffee-800">總計</span>
                    <span className="text-2xl font-mono font-bold text-rose-brand">${fmt(stats.ingredCost)}</span>
+                 </div>
+               </div>
+             </motion.div>
+           </div>
+        )}
+        {showPRModal && (
+           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+             <motion.div 
+               initial={{ opacity: 0, scale: 0.95 }}
+               animate={{ opacity: 1, scale: 1 }}
+               exit={{ opacity: 0, scale: 0.95 }}
+               className="w-full max-w-lg bg-white rounded-2xl shadow-xl flex flex-col overflow-hidden max-h-[80vh]"
+             >
+               <div className="flex justify-between items-center p-4 border-b border-indigo-100 bg-indigo-50/50">
+                 <h3 className="font-bold text-indigo-900 flex items-center gap-2">
+                   <Info className="w-5 h-5 text-indigo-600" /> 
+                   公關品費用明細
+                 </h3>
+                 <button onClick={() => setShowPRModal(false)} className="p-1 hover:bg-indigo-200 rounded-lg text-indigo-500 transition">
+                   <X className="w-5 h-5" />
+                 </button>
+               </div>
+               
+               <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                 <div className="space-y-2">
+                   <h4 className="text-sm font-bold text-indigo-800 border-b border-indigo-100 pb-1">公關品口味成本清單</h4>
+                   {Object.entries(stats.itemPR).length > 0 ? (
+                     <table className="w-full text-sm text-left">
+                       <thead className="text-indigo-400 text-xs uppercase font-bold">
+                         <tr><th>口味名稱</th><th className="text-right">數量</th><th className="text-right">小計</th></tr>
+                       </thead>
+                       <tbody className="divide-y divide-indigo-50/50">
+                         {Object.entries(stats.itemPR).filter(([_, q]) => (q as number) > 0).map(([flavor, qty]) => {
+                           const cost = getRecipeCost(flavor) || 0;
+                           return (
+                             <tr key={flavor} className="text-indigo-800">
+                               <td className="py-2">{flavor}</td>
+                               <td className="py-2 text-right font-mono font-bold">{qty as number}</td>
+                               <td className="py-2 text-right font-mono font-bold text-indigo-600">${fmt((qty as number) * cost)}</td>
+                             </tr>
+                           );
+                         })}
+                       </tbody>
+                     </table>
+                   ) : (
+                     <div className="text-xs text-indigo-400 py-2 italic">本月無公關品送出</div>
+                   )}
+                 </div>
+               </div>
+               
+               <div className="p-4 border-t border-indigo-100 bg-indigo-50/30 flex flex-col gap-2 shadow-inner">
+                 <div className="flex justify-between items-center text-sm">
+                   <span className="font-bold text-indigo-800">公關品硬體成本</span>
+                   <span className="font-mono font-bold text-indigo-600">${fmt(stats.prIngredCost)}</span>
+                 </div>
+                 <div className="flex justify-between items-center text-sm">
+                   <span className="font-bold text-indigo-800">送出運費總額</span>
+                   <span className="font-mono font-bold text-indigo-600">${fmt(stats.prShip)}</span>
+                 </div>
+                 <div className="h-px bg-indigo-200 my-1"></div>
+                 <div className="flex justify-between items-center">
+                   <span className="text-lg font-bold text-indigo-900">總計</span>
+                   <span className="text-2xl font-mono font-bold text-indigo-700">${fmt(stats.prMarketingCost)}</span>
                  </div>
                </div>
              </motion.div>

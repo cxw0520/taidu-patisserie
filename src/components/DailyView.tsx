@@ -753,7 +753,6 @@ export default function DailyView({
                 <Truck className="w-5 h-5 text-amber-500" /> 物流分析與包材
               </h3>
               <div className="space-y-3 text-sm mb-6">
-                <div className="flex justify-between items-center"><span className="text-coffee-600">運費實收 (明細)</span><span className="font-bold font-mono">${fmt(metrics?.ship || 0)}</span></div>
                 <div className="flex justify-between items-center"><span className="text-coffee-600">公關品運費 (不計入)</span><span className="font-bold font-mono text-danger-brand">${fmt(metrics?.prShip || 0)}</span></div>
                 <div className="flex justify-between items-center">
                   <span className="text-coffee-600">運費實支 (支出)</span>
@@ -763,12 +762,6 @@ export default function DailyView({
                     onChange={e => updateDaily({ ar: { ...(dailyData?.ar || { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 }), logSpent: parseNum(e.target.value) } })}
                     className="w-24 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono outline-none focus:border-coffee-400"
                   />
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-coffee-600">物流服務額</span>
-                  <span className={cn("font-bold font-mono", ((metrics?.ship || 0) - (dailyData?.ar?.logSpent || 0)) < 0 ? 'text-danger-brand' : 'text-mint-brand')}>
-                    ${fmt((metrics?.ship || 0) - (dailyData?.ar?.logSpent || 0))}
-                  </span>
                 </div>
               </div>
 
