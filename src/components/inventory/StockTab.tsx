@@ -95,6 +95,11 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
         purchaseUnitRate: convData.purchaseUnitRate !== '' ? Number(convData.purchaseUnitRate) : undefined,
         midUnitRate: convData.midUnitRate !== '' ? Number(convData.midUnitRate) : undefined,
       };
+      // When all 3 levels exist, purchaseUnitRate is entered as mid-units (e.g. 1箱=10罐).
+      // We need to convert it to base units (e.g. 1箱=5000g) for consistent calculations.
+      if (payload.purchaseUnit && payload.midUnit && payload.purchaseUnitRate && payload.midUnitRate) {
+        payload.purchaseUnitRate = payload.purchaseUnitRate * payload.midUnitRate;
+      }
       await setDoc(doc(db, 'shops', shopId, 'materials', unitConvModal.id), payload, { merge: true });
       setUnitConvModal(null);
     } catch (e) {
@@ -301,11 +306,17 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                         <button
                           onClick={() => {
                             setUnitConvModal(m);
+                            // When 3-level units exist, purchaseUnitRate in DB is already
+                            // multiplied by midUnitRate (e.g. 5000g). Reverse it for display
+                            // so user sees intuitive value (e.g. 10 罐).
+                            const displayPurchaseRate = (m.purchaseUnitRate && m.midUnit && m.midUnitRate)
+                              ? m.purchaseUnitRate / m.midUnitRate
+                              : (m.purchaseUnitRate || '');
                             setConvData({
                               purchaseUnit: m.purchaseUnit || '',
                               midUnit: m.midUnit || '',
                               unit: m.unit || '',
-                              purchaseUnitRate: m.purchaseUnitRate || '',
+                              purchaseUnitRate: displayPurchaseRate,
                               midUnitRate: m.midUnitRate || ''
                             });
                           }}
