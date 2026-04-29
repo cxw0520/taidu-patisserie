@@ -13,6 +13,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
   const [unitConvModal, setUnitConvModal] = useState<Material | null>(null);
   const [convData, setConvData] = useState<{ purchaseUnit: string; midUnit: string; unit: string; purchaseUnitRate: number | ''; midUnitRate: number | '' }>({ purchaseUnit: '', midUnit: '', unit: '', purchaseUnitRate: '', midUnitRate: '' });
   const [editingMinAlert, setEditingMinAlert] = useState<{ id: string; value: string } | null>(null);
+  const [editingAvgCost, setEditingAvgCost] = useState<{ id: string; value: string } | null>(null);
 
   const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
     name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0
@@ -116,6 +117,16 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
       minAlert: parsed,
     });
     setEditingMinAlert(null);
+  };
+
+  const handleSaveAvgCost = async (material: Material, newValue: string) => {
+    const parsed = parseFloat(newValue);
+    if (!isFinite(parsed) || parsed < 0) return;
+    await setDoc(doc(db, 'shops', shopId, 'materials', material.id), {
+      ...material,
+      avgCost: parsed,
+    });
+    setEditingAvgCost(null);
   };
 
   return (
@@ -302,7 +313,35 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                     </td>
                     <td className="py-4 px-6 text-right">
                       <div className="flex flex-col items-end gap-1">
-                        <span className="font-serif-brand font-bold text-coffee-500">${fmt(m.avgCost)}<span className="text-xs font-sans text-coffee-300">/{m.unit}</span></span>
+                        {editingAvgCost?.id === m.id ? (
+                          <div className="flex items-center gap-1">
+                            <span className="text-coffee-400 text-xs font-bold">$</span>
+                            <input
+                              type="number"
+                              step="0.0001"
+                              min="0"
+                              value={editingAvgCost.value}
+                              onChange={e => setEditingAvgCost({ id: m.id, value: e.target.value })}
+                              onBlur={() => handleSaveAvgCost(m, editingAvgCost.value)}
+                              onKeyDown={e => {
+                                if (e.key === 'Enter') handleSaveAvgCost(m, editingAvgCost.value);
+                                if (e.key === 'Escape') setEditingAvgCost(null);
+                              }}
+                              autoFocus
+                              className="w-24 text-right border-b-2 border-rose-brand bg-transparent outline-none font-serif-brand font-bold text-coffee-800"
+                            />
+                            <span className="text-xs text-coffee-400">/{m.unit}</span>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => setEditingAvgCost({ id: m.id, value: String(m.avgCost) })}
+                            className="group font-serif-brand font-bold text-coffee-500 hover:text-coffee-800 transition flex items-center gap-1"
+                            title="點擊手動修正單位成本"
+                          >
+                            ${fmt(m.avgCost)}<span className="text-xs font-sans text-coffee-300">/{m.unit}</span>
+                            <Edit2 className="w-3 h-3 text-coffee-300 group-hover:text-rose-brand transition opacity-0 group-hover:opacity-100" />
+                          </button>
+                        )}
                         <button
                           onClick={() => {
                             setUnitConvModal(m);
