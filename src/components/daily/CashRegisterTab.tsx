@@ -47,6 +47,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   const [closeShiftModal, setCloseShiftModal] = useState(false);
   const [editQtyModal, setEditQtyModal] = useState<{index: number, qty: string} | null>(null);
   const [finalCheckModal, setFinalCheckModal] = useState<{order: Order, change: number, received: number} | null>(null);
+  // Keypad state for checkout modal
+  const [receivedInput, setReceivedInput] = useState('');
 
   // Form states
   const [checkoutData, setCheckoutData] = useState({
@@ -169,6 +171,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     
     setCart([]);
     setCheckoutModal(false);
+    setReceivedInput('');
     setCheckoutData({
       buyer: '現客',
       discAmt: 0,
@@ -692,7 +695,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
         {checkoutModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setCheckoutModal(false)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel w-full max-w-md bg-white border-0 shadow-2xl rounded-3xl relative z-10 p-8 space-y-6">
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel w-full max-w-md bg-white border-0 shadow-2xl rounded-3xl relative z-10 p-8 space-y-6 overflow-y-auto max-h-[90vh]">
               <div className="flex justify-between items-center">
                 <h3 className="text-xl font-bold text-coffee-800">結帳收款</h3>
                 <button onClick={() => setCheckoutModal(false)} className="p-2 hover:bg-coffee-50 rounded-full"><X className="w-5 h-5 text-coffee-400" /></button>
@@ -755,21 +758,28 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                 </div>
 
                 {checkoutData.paymentMethod === '現結' && (
-                  <div>
-                    <label className="text-xs font-bold text-coffee-400 mb-1 block">實收金額</label>
-                    <input 
-                      type="number" 
-                      value={checkoutData.receivedAmt || ''} 
-                      placeholder="輸入顧客支付金額"
-                      onChange={e => setCheckoutData({...checkoutData, receivedAmt: Number(e.target.value)})}
-                      className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-4 text-xl font-bold text-mint-brand shadow-inner outline-none focus:border-mint-brand font-mono text-center"
-                    />
+                  <div className="space-y-3">
+                    <label className="text-xs font-bold text-coffee-400 block">實收金額</label>
+                    {/* Read-only display — prevents native mobile keyboard */}
+                    <div
+                      className="w-full bg-white border-2 border-mint-brand/40 rounded-xl px-4 py-3 text-2xl font-bold text-mint-brand shadow-inner font-mono text-center select-none min-h-[56px] flex items-center justify-center"
+                    >
+                      {receivedInput || <span className="text-coffee-200 text-base font-bold">請使用下方鍵盤輸入</span>}
+                    </div>
                     {checkoutData.receivedAmt > 0 && (
-                      <div className="text-center mt-2 text-sm font-bold">
+                      <div className="text-center text-sm font-bold">
                         <span className="text-coffee-400">應找零：</span>
                         <span className="text-mint-brand font-mono">${fmt(checkoutData.receivedAmt - (totalCartAmt - checkoutData.discAmt))}</span>
                       </div>
                     )}
+                    <NumericKeypad
+                      value={receivedInput}
+                      onChange={(val) => {
+                        setReceivedInput(val);
+                        setCheckoutData({...checkoutData, receivedAmt: Number(val) || 0});
+                      }}
+                      dueAmount={totalCartAmt - checkoutData.discAmt}
+                    />
                   </div>
                 )}
               </div>
@@ -937,6 +947,76 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           metricsCash={metrics?.cash || 0}
         />
       )}
+    </div>
+  );
+}
+
+/* ── On-screen Numeric Keypad ── */
+function NumericKeypad({
+  value,
+  onChange,
+  dueAmount,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  dueAmount: number;
+}) {
+  const press = (digit: string) => {
+    if (digit === 'C') { onChange(''); return; }
+    if (digit === '⌫') { onChange(value.slice(0, -1)); return; }
+    // Prevent leading zeros
+    const next = value === '0' ? digit : value + digit;
+    onChange(next);
+  };
+
+  const quickFill = (amt: number) => onChange(String(amt));
+
+  const dueStr = String(Math.ceil(dueAmount));
+  // Round-up quick amounts
+  const quickAmts = Array.from(new Set([
+    dueAmount,
+    Math.ceil(dueAmount / 100) * 100,
+    Math.ceil(dueAmount / 500) * 500,
+    Math.ceil(dueAmount / 1000) * 1000,
+  ])).filter((v, i, a) => a.indexOf(v) === i && v >= dueAmount).sort((a, b) => a - b).slice(0, 4);
+
+  const keys = ['7','8','9','4','5','6','1','2','3','0','⌫','C'];
+
+  return (
+    <div className="space-y-2">
+      {/* Quick-fill buttons */}
+      <div className="grid grid-cols-4 gap-1.5">
+        {quickAmts.map(amt => (
+          <button
+            key={amt}
+            type="button"
+            onClick={() => quickFill(amt)}
+            className="py-2 bg-mint-brand/10 border border-mint-brand/20 text-mint-brand text-xs font-bold rounded-xl hover:bg-mint-brand/20 active:scale-95 transition-all"
+          >
+            ${fmt(amt)}
+          </button>
+        ))}
+      </div>
+      {/* Digit grid */}
+      <div className="grid grid-cols-3 gap-2">
+        {keys.map(k => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => press(k)}
+            className={cn(
+              "py-4 rounded-2xl font-bold text-lg transition-all active:scale-95 select-none",
+              k === 'C'
+                ? 'bg-rose-50 text-rose-500 hover:bg-rose-100'
+                : k === '⌫'
+                ? 'bg-coffee-50 text-coffee-500 hover:bg-coffee-100'
+                : 'bg-coffee-50 text-coffee-800 hover:bg-coffee-100 shadow-sm'
+            )}
+          >
+            {k}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
