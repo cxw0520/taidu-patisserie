@@ -619,7 +619,10 @@ export default function DailyView({
                         </select>
                       </td>
                       {/* 配送方式 */}
-                      <td className="px-2 py-2 min-w-[120px]">
+                      <td className="px-2 py-2 min-w-[80px]">
+                        {(order.source === 'pos' || order.note?.includes('收銀機交易')) ? (
+                          <span className="text-[10px] font-bold text-coffee-300 bg-coffee-50 px-2 py-0.5 rounded-full">現場</span>
+                        ) : (
                         <div className="flex flex-col gap-1.5 items-center">
                           {/* 宅配/自取 toggle */}
                           <div className="flex rounded-lg overflow-hidden border border-coffee-100 text-[10px] font-bold">
@@ -676,6 +679,7 @@ export default function DailyView({
                             </div>
                           )}
                         </div>
+                        )}
                       </td>
                       {/* 電話 */}
                       <td className="px-2 py-3">

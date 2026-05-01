@@ -71,6 +71,7 @@ export interface Order {
   email?: string;
   isPickedUp?: boolean;
   isReconciled?: boolean;
+  source?: 'pos' | 'manual' | 'import';
   arCollectedCash?: number;
   arCollectedRemit?: number;
 }

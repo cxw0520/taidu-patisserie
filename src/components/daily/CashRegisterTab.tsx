@@ -153,7 +153,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       discAmt: checkoutData.discAmt,
       actualAmt: actualAmt,
       status: checkoutData.paymentMethod,
-      note: `收銀機交易 - ${checkoutData.paymentMethod}`
+      note: `收銀機交易 - ${checkoutData.paymentMethod}`,
+      source: 'pos'
     };
 
     updateDaily({
