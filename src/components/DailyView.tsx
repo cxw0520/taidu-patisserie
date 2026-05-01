@@ -955,9 +955,10 @@ export default function DailyView({
                 </h3>
                 <button 
                   onClick={() => {
-                         const flavors = Array.from(new Set([
-                           ...settings.singleItems.filter(i=>i.active && !i.name.includes('綜合')).map(i=>i.name)
-                         ]));
+                    // Match the same flavor list as 產能庫存推算
+                    const activeNames = (settings.singleItems || []).filter(i => i.active && !i.name.includes('綜合')).map(i => normalizeFlavorName(i.name));
+                    const soldNames = Object.keys(metrics?.inventoryOut || {}).filter(k => (metrics?.inventoryOut[k] || 0) > 0 && !k.includes('綜合'));
+                    const flavors = Array.from(new Set([...activeNames, ...soldNames]));
                     updateDaily({
                       losses: [...dailyData.losses, { id: uid(), flavor: flavors[0] || '', qty: 0, type: '技術', notes: '' }]
                     })
@@ -980,10 +981,12 @@ export default function DailyView({
                   </thead>
                   <tbody className="divide-y divide-coffee-50">
                   {(dailyData?.losses || []).map((loss, idx) => {
-                      const allFlavors = Array.from(new Set([
-                        ...(settings.singleItems || []).filter(i=>i.active && !i.name.includes('綜合')).map(i=>normalizeFlavorName(i.name)),
-                        ...(settings.customCategories || []).flatMap(c => (c.items || []).filter(i=>i.active).map(i=>normalizeFlavorName(i.name)))
-                      ]));
+                      // Same source as 產能庫存推算: active singleItems + anything sold/inventoried today
+                      const activeNames = (settings.singleItems || []).filter(i => i.active && !i.name.includes('綜合')).map(i => normalizeFlavorName(i.name));
+                      const soldNames = Object.keys(metrics?.inventoryOut || {}).filter(k => (metrics?.inventoryOut[k] || 0) > 0 && !k.includes('綜合'));
+                      const allFlavors = Array.from(new Set([...activeNames, ...soldNames]));
+                      // Also include current value if it's not in the list (e.g. old data)
+                      if (loss.flavor && !allFlavors.includes(loss.flavor)) allFlavors.push(loss.flavor);
                       return (
                         <tr key={loss.id}>
                           <td className="p-2">
