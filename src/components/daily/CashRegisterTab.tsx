@@ -695,83 +695,100 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
         {checkoutModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setCheckoutModal(false)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel w-full max-w-md bg-white border-0 shadow-2xl rounded-3xl relative z-10 p-8 space-y-6 overflow-y-auto max-h-[90vh]">
-              <div className="flex justify-between items-center">
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className={cn("glass-panel w-full bg-white border-0 shadow-2xl rounded-3xl relative z-10 overflow-hidden max-h-[90vh] flex flex-col", checkoutData.paymentMethod === '現結' ? "max-w-2xl" : "max-w-md")}>
+              {/* Header */}
+              <div className="flex justify-between items-center px-8 pt-7 pb-5 border-b border-coffee-50">
                 <h3 className="text-xl font-bold text-coffee-800">結帳收款</h3>
                 <button onClick={() => setCheckoutModal(false)} className="p-2 hover:bg-coffee-50 rounded-full"><X className="w-5 h-5 text-coffee-400" /></button>
               </div>
 
-              <div className="space-y-4">
-                <div className="flex items-center gap-4">
-                  <div className="flex-1">
-                    <label className="text-xs font-bold text-coffee-400 mb-1 block">購買人</label>
-                    <input 
-                      type="text" 
-                      value={checkoutData.buyer} 
-                      onChange={e => setCheckoutData({...checkoutData, buyer: e.target.value})}
-                      className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand"
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <label className="text-xs font-bold text-coffee-400 mb-1 block">折讓金額</label>
-                    <input 
-                      type="number" 
-                      value={checkoutData.discAmt || ''} 
-                      placeholder="0"
-                      onChange={e => setCheckoutData({...checkoutData, discAmt: Number(e.target.value)})}
-                      className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-rose-brand outline-none focus:border-rose-brand font-mono"
-                    />
-                  </div>
-                </div>
+              {/* Body */}
+              <div className={cn("flex-1 overflow-y-auto p-8 pt-6 gap-6", checkoutData.paymentMethod === '現結' ? "grid grid-cols-2 items-start" : "flex flex-col space-y-4")}>
 
-                <div className="grid grid-cols-3 gap-2">
-                  {['現結', '匯款', '未結帳款'].map(m => (
-                    <button
-                      key={m}
-                      onClick={() => setCheckoutData({...checkoutData, paymentMethod: m as any})}
-                      className={cn(
-                        "py-2 rounded-xl text-xs font-bold border transition-all",
-                        checkoutData.paymentMethod === m 
-                          ? "bg-rose-brand border-rose-brand text-white shadow-md shadow-rose-100" 
-                          : "bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300"
-                      )}
-                    >
-                      {m}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="p-4 bg-coffee-50 rounded-2xl space-y-2">
-                  <div className="flex justify-between text-sm font-bold text-coffee-500">
-                    <span>商品小計</span>
-                    <span className="font-mono">${fmt(totalCartAmt)}</span>
-                  </div>
-                  <div className="flex justify-between text-sm font-bold text-rose-brand">
-                    <span>折讓金額</span>
-                    <span className="font-mono">-${fmt(checkoutData.discAmt)}</span>
-                  </div>
-                  <div className="h-px bg-coffee-100 my-2" />
-                  <div className="flex justify-between items-center">
-                    <span className="text-lg font-bold text-coffee-800">應收總金額</span>
-                    <span className="text-2xl font-serif-brand font-bold text-rose-brand">${fmt(totalCartAmt - checkoutData.discAmt)}</span>
-                  </div>
-                </div>
-
-                {checkoutData.paymentMethod === '現結' && (
-                  <div className="space-y-3">
-                    <label className="text-xs font-bold text-coffee-400 block">實收金額</label>
-                    {/* Read-only display — prevents native mobile keyboard */}
-                    <div
-                      className="w-full bg-white border-2 border-mint-brand/40 rounded-xl px-4 py-3 text-2xl font-bold text-mint-brand shadow-inner font-mono text-center select-none min-h-[56px] flex items-center justify-center"
-                    >
-                      {receivedInput || <span className="text-coffee-200 text-base font-bold">請使用下方鍵盤輸入</span>}
+                {/* ── Left: form fields ── */}
+                <div className="space-y-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                      <label className="text-xs font-bold text-coffee-400 mb-1 block">購買人</label>
+                      <input
+                        type="text"
+                        value={checkoutData.buyer}
+                        onChange={e => setCheckoutData({...checkoutData, buyer: e.target.value})}
+                        className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand"
+                      />
                     </div>
-                    {checkoutData.receivedAmt > 0 && (
-                      <div className="text-center text-sm font-bold">
-                        <span className="text-coffee-400">應找零：</span>
-                        <span className="text-mint-brand font-mono">${fmt(checkoutData.receivedAmt - (totalCartAmt - checkoutData.discAmt))}</span>
+                    <div className="flex-1">
+                      <label className="text-xs font-bold text-coffee-400 mb-1 block">折讓金額</label>
+                      <input
+                        type="number"
+                        value={checkoutData.discAmt || ''}
+                        placeholder="0"
+                        onChange={e => setCheckoutData({...checkoutData, discAmt: Number(e.target.value)})}
+                        className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-rose-brand outline-none focus:border-rose-brand font-mono"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    {['現結', '匯款', '未結帳款'].map(m => (
+                      <button
+                        key={m}
+                        onClick={() => setCheckoutData({...checkoutData, paymentMethod: m as any})}
+                        className={cn(
+                          "py-2 rounded-xl text-xs font-bold border transition-all",
+                          checkoutData.paymentMethod === m
+                            ? "bg-rose-brand border-rose-brand text-white shadow-md shadow-rose-100"
+                            : "bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300"
+                        )}
+                      >
+                        {m}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="p-4 bg-coffee-50 rounded-2xl space-y-2">
+                    <div className="flex justify-between text-sm font-bold text-coffee-500">
+                      <span>商品小計</span><span className="font-mono">${fmt(totalCartAmt)}</span>
+                    </div>
+                    <div className="flex justify-between text-sm font-bold text-rose-brand">
+                      <span>折讓金額</span><span className="font-mono">-${fmt(checkoutData.discAmt)}</span>
+                    </div>
+                    <div className="h-px bg-coffee-100 my-2" />
+                    <div className="flex justify-between items-center">
+                      <span className="text-lg font-bold text-coffee-800">應收總金額</span>
+                      <span className="text-2xl font-serif-brand font-bold text-rose-brand">${fmt(totalCartAmt - checkoutData.discAmt)}</span>
+                    </div>
+                  </div>
+
+                  {/* 實收 / 找零 — only shown when 現結 */}
+                  {checkoutData.paymentMethod === '現結' && (
+                    <div className="space-y-2">
+                      <label className="text-xs font-bold text-coffee-400 block">實收金額</label>
+                      <div className="w-full bg-white border-2 border-mint-brand/40 rounded-xl px-3 py-3 text-3xl font-bold text-mint-brand shadow-inner font-mono text-center select-none min-h-[64px] flex items-center justify-center">
+                        {receivedInput || <span className="text-coffee-200 text-base font-bold">— 請輸入 —</span>}
                       </div>
-                    )}
+                      {checkoutData.receivedAmt > 0 && (
+                        <div className="p-3 bg-mint-brand/5 border border-mint-brand/10 rounded-xl flex justify-between items-center">
+                          <span className="text-xs text-coffee-400 font-bold">應找零</span>
+                          <span className="text-xl font-serif-brand font-bold text-mint-brand">
+                            ${fmt(checkoutData.receivedAmt - (totalCartAmt - checkoutData.discAmt))}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleCheckout}
+                    className="w-full py-4 bg-coffee-800 text-white rounded-2xl font-bold shadow-xl hover:bg-coffee-900 transition-all active:scale-95 flex items-center justify-center gap-2"
+                  >
+                    確認結帳與列入銷售明細 <CheckCircle2 className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* ── Right: numeric keypad (現結 only) ── */}
+                {checkoutData.paymentMethod === '現結' && (
+                  <div className="flex flex-col justify-start pt-1">
                     <NumericKeypad
                       value={receivedInput}
                       onChange={(val) => {
@@ -782,15 +799,6 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     />
                   </div>
                 )}
-              </div>
-
-              <div className="pt-4">
-                <button 
-                  onClick={handleCheckout}
-                  className="w-full py-4 bg-coffee-800 text-white rounded-2xl font-bold shadow-xl hover:bg-coffee-900 transition-all active:scale-95 flex items-center justify-center gap-2"
-                >
-                  確認結帳與列入銷售明細 <CheckCircle2 className="w-5 h-5" />
-                </button>
               </div>
             </motion.div>
           </div>
