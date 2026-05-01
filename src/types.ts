@@ -63,13 +63,14 @@ export interface Order {
   actualAmt: number;
   status: '匯款' | '現結' | '未結帳款' | '公關品' | '已收帳款';
   note: string;
-  deliveryMethod?: string;
+  deliveryMethod?: '宅配' | '自取';
   pickupDate?: string;
   recipientName?: string;
   recipientPhone?: string;
   shipDate?: string;
   email?: string;
-  isReconciled?: boolean; // tracking reconciliation
+  isPickedUp?: boolean;
+  isReconciled?: boolean;
   arCollectedCash?: number;
   arCollectedRemit?: number;
 }

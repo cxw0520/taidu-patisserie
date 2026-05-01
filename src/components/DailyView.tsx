@@ -29,7 +29,9 @@ import {
   Package,
   Menu,
   X,
-  Monitor
+  Monitor,
+  MapPin,
+  Phone
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -509,53 +511,56 @@ export default function DailyView({
                      <th colSpan={settings.singleItems.filter(i => i.active).length} className="px-2 py-4 border-b border-[#f0ede8] bg-[#a2d2ff]/30 border-r border-[#83c5be]/30">單顆</th>
                    )}
                     <th colSpan={4} className="px-2 py-4 border-b border-[#f0ede8] bg-[#e2ece9]/30">金額結算</th>
-                    <th className="px-3 py-4 border-b border-[#f0ede8]">收款狀態</th>
-                    <th className="px-3 py-4 border-b border-[#f0ede8]">備註</th>
+                    <th className="px-3 py-4 border-b border-[#f0ede8]">收款</th>
+                    <th className="px-3 py-4 border-b border-[#f0ede8]">配送</th>
+                    <th className="px-3 py-4 border-b border-[#f0ede8]">電話</th>
+                    <th className="px-3 py-4 border-b border-[#f0ede8]">備注</th>
                     <th className="px-3 py-4 border-b border-[#f0ede8] text-right sticky right-0 z-20 bg-[#faf7f2]/90 backdrop-blur-md">操作</th>
                   </tr>
                   <tr className="text-coffee-400 font-bold uppercase tracking-wider text-[10px]">
                     <th className="px-3 py-3 border-b border-[#f0ede8] sticky left-0 z-20 bg-[#faf7f2]/90 backdrop-blur-md">姓名</th>
                     {(settings.giftItems || []).filter(i => i.active).map(i => <th key={i.id} className="px-2 py-3 border-b border-[#ffb3c1]/30 bg-[#ffcbf2]/20">{normalizeFlavorName(i.name)}</th>)}
                     {(settings.singleItems || []).filter(i => i.active).map(i => <th key={i.id} className="px-2 py-3 border-b border-[#83c5be]/30 bg-[#a2d2ff]/20">{normalizeFlavorName(i.name)}</th>)}
-                    <th className="px-2 py-3 border-b border-[#f0ede8] bg-[#e2ece9]/20">商品金額</th>
+                    <th className="px-2 py-3 border-b border-[#f0ede8] bg-[#e2ece9]/20">商品</th>
                     <th className="px-2 py-3 border-b border-[#f0ede8] bg-[#e2ece9]/20">運費</th>
                     <th className="px-2 py-3 border-b border-[#f0ede8] bg-[#e2ece9]/20">折讓</th>
-                    <th className="px-2 py-3 border-b border-[#f0ede8] bg-[#e2ece9]/20">應收金額</th>
+                    <th className="px-2 py-3 border-b border-[#f0ede8] bg-[#e2ece9]/20">應收</th>
                     <th className="px-3 py-3 border-b border-[#f0ede8]">狀態</th>
-                    <th className="px-3 py-3 border-b border-[#f0ede8]">金流說明</th>
+                    <th className="px-3 py-3 border-b border-[#f0ede8]">宅/取</th>
+                    <th className="px-3 py-3 border-b border-[#f0ede8]">電話</th>
+                    <th className="px-3 py-3 border-b border-[#f0ede8]">文字備注</th>
                     <th className="px-3 py-3 text-right border-b border-[#f0ede8] sticky right-0 z-20 bg-[#faf7f2]/90 backdrop-blur-md">刪除</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f0ede8]">
-                  {dailyData.orders.map((order, idx) => (
+                  {dailyData.orders.map((order, idx) => {
+                    const isDelivery = order.deliveryMethod === '宅配';
+                    const isPickup = order.deliveryMethod === '自取';
+                    const copyRecipient = () => {
+                      const text = `${order.recipientName || order.buyer} / ${order.recipientPhone || order.phone} / ${order.address}`;
+                      navigator.clipboard.writeText(text);
+                    };
+                    return (
                     <tr key={order.id} className="group hover:bg-coffee-50/50 transition-colors">
                       <td className="px-3 py-3 sticky left-0 z-10 bg-white/90 backdrop-blur-sm group-hover:bg-[#faf7f2]/90 border-r border-[#f0ede8]">
-                        <input 
+                        <input
                           className="w-20 md:w-28 bg-transparent font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
                           placeholder="姓名"
                           value={order.buyer}
-                          onChange={(e) => {
-                            const orders = [...dailyData.orders];
-                            orders[idx].buyer = e.target.value;
-                            updateDaily({ orders });
-                          }}
+                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].buyer = e.target.value; updateDaily({ orders }); }}
                         />
                       </td>
                       {(settings.giftItems || []).filter(i => i.active).map(i => (
                         <td key={i.id} className="px-2 py-3 bg-[#ffcbf2]/5">
-                          <input 
-                            type="number"
+                          <input type="number"
                             className="w-12 bg-transparent text-center font-bold text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
-                            value={order.items?.[i.id] || ''}
-                            placeholder="0"
+                            value={order.items?.[i.id] || ''} placeholder="0"
                             onChange={(e) => {
                               const orders = [...dailyData.orders];
                               if (!orders[idx].items) orders[idx].items = {};
                               orders[idx].items[i.id] = parseNum(e.target.value);
                               let pAmt = 0;
-                              [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => {
-                                pAmt += (orders[idx].items?.[item.id] || 0) * item.price;
-                              });
+                              [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => { pAmt += (orders[idx].items?.[item.id] || 0) * item.price; });
                               orders[idx].prodAmt = pAmt;
                               orders[idx].actualAmt = pAmt + (orders[idx].shipAmt || 0) - (orders[idx].discAmt || 0);
                               updateDaily({ orders });
@@ -565,19 +570,15 @@ export default function DailyView({
                       ))}
                       {(settings.singleItems || []).filter(i => i.active).map(i => (
                         <td key={i.id} className="px-2 py-3 bg-[#a2d2ff]/5">
-                          <input 
-                            type="number"
+                          <input type="number"
                             className="w-12 bg-transparent text-center font-bold text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
-                            value={order.items?.[i.id] || ''}
-                            placeholder="0"
+                            value={order.items?.[i.id] || ''} placeholder="0"
                             onChange={(e) => {
                               const orders = [...dailyData.orders];
                               if (!orders[idx].items) orders[idx].items = {};
                               orders[idx].items[i.id] = parseNum(e.target.value);
                               let pAmt = 0;
-                              [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => {
-                                pAmt += (orders[idx].items?.[item.id] || 0) * item.price;
-                              });
+                              [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => { pAmt += (orders[idx].items?.[item.id] || 0) * item.price; });
                               orders[idx].prodAmt = pAmt;
                               orders[idx].actualAmt = pAmt + (orders[idx].shipAmt || 0) - (orders[idx].discAmt || 0);
                               updateDaily({ orders });
@@ -585,88 +586,129 @@ export default function DailyView({
                           />
                         </td>
                       ))}
-                      <td className="px-2 py-3 font-mono font-bold text-gray-500 bg-[#e2ece9]/5">
-                        ${fmt(order.prodAmt)}
-                      </td>
+                      <td className="px-2 py-3 font-mono font-bold text-gray-500 bg-[#e2ece9]/5">${fmt(order.prodAmt)}</td>
                       <td className="px-2 py-3 bg-[#e2ece9]/5">
-                        <input 
-                          type="number"
-                          className="w-16 bg-transparent text-center font-mono font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
-                          value={order.shipAmt || ''}
-                          placeholder="0"
-                          onChange={(e) => {
-                            const orders = [...dailyData.orders];
-                            orders[idx].shipAmt = parseNum(e.target.value);
-                            orders[idx].actualAmt = orders[idx].prodAmt + orders[idx].shipAmt - orders[idx].discAmt;
-                            updateDaily({ orders });
-                          }}
+                        <input type="number"
+                          className="w-14 bg-transparent text-center font-mono font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
+                          value={order.shipAmt || ''} placeholder="0"
+                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].shipAmt = parseNum(e.target.value); orders[idx].actualAmt = orders[idx].prodAmt + orders[idx].shipAmt - orders[idx].discAmt; updateDaily({ orders }); }}
                         />
                       </td>
                       <td className="px-2 py-3 bg-[#e2ece9]/5">
-                        <input 
-                          type="number"
-                          className="w-16 bg-transparent text-center font-mono font-bold text-rose-brand outline-none border-b border-transparent focus:border-rose-brand"
-                          value={order.discAmt || ''}
-                          placeholder="0"
-                          onChange={(e) => {
-                            const orders = [...dailyData.orders];
-                            orders[idx].discAmt = parseNum(e.target.value);
-                            orders[idx].actualAmt = orders[idx].prodAmt + orders[idx].shipAmt - orders[idx].discAmt;
-                            updateDaily({ orders });
-                          }}
+                        <input type="number"
+                          className="w-14 bg-transparent text-center font-mono font-bold text-rose-brand outline-none border-b border-transparent focus:border-rose-brand"
+                          value={order.discAmt || ''} placeholder="0"
+                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].discAmt = parseNum(e.target.value); orders[idx].actualAmt = orders[idx].prodAmt + orders[idx].shipAmt - orders[idx].discAmt; updateDaily({ orders }); }}
                         />
                       </td>
-                      <td className="px-2 py-3 font-mono font-bold text-mint-brand bg-[#e2ece9]/10">
-                        ${fmt(order.actualAmt)}
-                      </td>
+                      <td className="px-2 py-3 font-mono font-bold text-mint-brand bg-[#e2ece9]/10">${fmt(order.actualAmt)}</td>
+                      {/* 收款狀態 */}
                       <td className="px-3 py-3">
-                        <select 
-                          value={order.status}
-                          onChange={(e) => {
-                            const orders = [...dailyData.orders];
-                            orders[idx].status = e.target.value as any;
-                            updateDaily({ orders });
-                          }}
-                          className={cn(
-                            "text-xs font-bold px-3 py-1.5 rounded-lg outline-none",
+                        <select value={order.status}
+                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].status = e.target.value as any; updateDaily({ orders }); }}
+                          className={cn("text-xs font-bold px-2 py-1.5 rounded-lg outline-none",
                             order.status === '匯款' && "bg-blue-50 text-blue-600",
                             order.status === '現結' && "bg-green-50 text-green-600",
                             order.status === '未結帳款' && "bg-danger-brand/10 text-danger-brand",
                             order.status === '公關品' && "bg-purple-50 text-purple-600"
-                          )}
-                        >
+                          )}>
                           <option value="匯款">匯款</option>
                           <option value="現結">現結</option>
                           <option value="未結帳款">未結</option>
                           <option value="公關品">公關</option>
                         </select>
                       </td>
-                      <td className="px-3 py-3">
-                        <input 
-                          type="text"
-                          className="w-32 bg-transparent text-sm text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
-                          placeholder="地址/電話/說明"
-                          value={order.note || ''}
-                          onChange={(e) => {
-                            const orders = [...dailyData.orders];
-                            orders[idx].note = e.target.value;
-                            updateDaily({ orders });
-                          }}
+                      {/* 配送方式 */}
+                      <td className="px-2 py-2 min-w-[120px]">
+                        <div className="flex flex-col gap-1.5 items-center">
+                          {/* 宅配/自取 toggle */}
+                          <div className="flex rounded-lg overflow-hidden border border-coffee-100 text-[10px] font-bold">
+                            <button
+                              onClick={() => { const orders = [...dailyData.orders]; orders[idx].deliveryMethod = '宅配'; updateDaily({ orders }); }}
+                              className={cn("px-2 py-1 transition-colors flex items-center gap-0.5", isDelivery ? "bg-blue-500 text-white" : "bg-white text-coffee-400 hover:bg-coffee-50")}
+                            ><Truck className="w-3 h-3"/>宅</button>
+                            <button
+                              onClick={() => { const orders = [...dailyData.orders]; orders[idx].deliveryMethod = '自取'; updateDaily({ orders }); }}
+                              className={cn("px-2 py-1 transition-colors flex items-center gap-0.5", isPickup ? "bg-mint-brand text-white" : "bg-white text-coffee-400 hover:bg-coffee-50")}
+                            ><MapPin className="w-3 h-3"/>取</button>
+                          </div>
+                          {/* 自取：已取/未取 toggle */}
+                          {isPickup && (
+                            <button
+                              onClick={() => { const orders = [...dailyData.orders]; orders[idx].isPickedUp = !orders[idx].isPickedUp; updateDaily({ orders }); }}
+                              className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors w-full text-center",
+                                order.isPickedUp ? "bg-mint-brand text-white" : "bg-amber-50 text-amber-600 border border-amber-200"
+                              )}
+                            >{order.isPickedUp ? '✓ 已取貨' : '未取貨'}</button>
+                          )}
+                          {/* 宅配：收件人資訊 + 複製 */}
+                          {isDelivery && (
+                            <div className="w-full text-left space-y-0.5">
+                              <div className="flex items-center gap-1">
+                                <input
+                                  className="text-[10px] w-full bg-transparent text-coffee-700 font-bold outline-none border-b border-transparent focus:border-blue-300 placeholder-coffee-200"
+                                  placeholder="收件人姓名"
+                                  value={order.recipientName || ''}
+                                  onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].recipientName = e.target.value; updateDaily({ orders }); }}
+                                />
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  className="text-[10px] w-full bg-transparent text-coffee-600 outline-none border-b border-transparent focus:border-blue-300 placeholder-coffee-200"
+                                  placeholder="收件人電話"
+                                  value={order.recipientPhone || ''}
+                                  onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].recipientPhone = e.target.value; updateDaily({ orders }); }}
+                                />
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <input
+                                  className="text-[10px] w-full bg-transparent text-coffee-600 outline-none border-b border-transparent focus:border-blue-300 placeholder-coffee-200"
+                                  placeholder="地址"
+                                  value={order.address || ''}
+                                  onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].address = e.target.value; updateDaily({ orders }); }}
+                                />
+                                <button
+                                  onClick={copyRecipient}
+                                  title="複製收件資訊"
+                                  className="flex-shrink-0 p-0.5 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded transition"
+                                ><Copy className="w-3 h-3"/></button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                      {/* 電話 */}
+                      <td className="px-2 py-3">
+                        <input type="text"
+                          className="w-24 bg-transparent text-xs text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
+                          placeholder="電話"
+                          value={order.phone || ''}
+                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].phone = e.target.value; updateDaily({ orders }); }}
                         />
                       </td>
+                      {/* 文字備注 */}
+                      <td className="px-2 py-3">
+                        <input type="text"
+                          className="w-28 bg-transparent text-xs text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
+                          placeholder="備注說明"
+                          value={order.note || ''}
+                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].note = e.target.value; updateDaily({ orders }); }}
+                        />
+                      </td>
+                      {/* 刪除（含確認） */}
                       <td className="px-3 py-3 text-right sticky right-0 z-10 bg-white/90 backdrop-blur-sm group-hover:bg-[#faf7f2]/90 border-l border-[#f0ede8]">
-                        <button 
+                        <button
                           onClick={() => {
-                            const orders = dailyData.orders.filter(o => o.id !== order.id);
-                            updateDaily({ orders });
+                            if (window.confirm(`確定要刪除「${order.buyer || '此筆'}」的訂單嗎？`)) {
+                              updateDaily({ orders: dailyData.orders.filter(o => o.id !== order.id) });
+                            }
                           }}
                           className="p-2 text-coffee-300 hover:text-danger-brand hover:bg-danger-brand/5 rounded-lg transition-all"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        ><Trash2 className="w-4 h-4" /></button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -1563,11 +1605,12 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
       });
 
       if (Object.keys(items).length > 0) {
-        parsed.push({
-          date: d,
-          buyer, phone, addr, recipientName, recipientPhone, items, prodAmt
-        });
-      }
+          parsed.push({
+            date: d,
+            buyer, phone, addr, recipientName, recipientPhone, items, prodAmt,
+            method: method || ''
+          });
+        }
     });
 
     if (parsed.length === 0) {
@@ -1599,7 +1642,17 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
 
       for (const [date, orders] of Object.entries(byDate)) {
         const dateKey = normalizeDateKey(date);
-        const appended = orders.map(po => ({
+        const appended = orders.map(po => {
+          // Determine delivery method from CSV
+          let deliveryMethod: '宅配' | '自取' | undefined;
+          if (po.method) {
+            const m = String(po.method);
+            if (m.includes('宅') || m.includes('配送') || m.includes('寄送')) deliveryMethod = '宅配';
+            else if (m.includes('店') || m.includes('取') || m.includes('自取')) deliveryMethod = '自取';
+          } else if (po.addr) {
+            deliveryMethod = '宅配'; // has address → likely delivery
+          }
+          return ({
           id: uid(),
           buyer: po.buyer,
           items: po.items,
@@ -1608,12 +1661,14 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
           discAmt: 0,
           actualAmt: po.prodAmt,
           status: '匯款' as const,
-          note: `${po.phone} | ${po.addr}`.trim(),
+          note: '',
           phone: po.phone,
           address: po.addr,
           recipientName: po.recipientName,
-          recipientPhone: po.recipientPhone
-        }));
+          recipientPhone: po.recipientPhone,
+          deliveryMethod,
+        });
+        });
 
         const ref = doc(db, 'shops', shopId, 'daily', dateKey);
         const snap = await getDoc(ref);
