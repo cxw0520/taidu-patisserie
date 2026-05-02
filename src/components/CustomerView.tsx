@@ -1,19 +1,33 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { db } from '../lib/firebase';
 import {
-  collection, doc, onSnapshot, setDoc, deleteDoc, query, orderBy, getDoc
+  collection, doc, onSnapshot, setDoc, deleteDoc, query, orderBy, getDoc, getDocs
 } from 'firebase/firestore';
 import { uid, fmt, cn } from '../lib/utils';
 import { Customer, CustomerPurchase, Settings } from '../types';
 import {
   Users, Plus, Search, Trash2, ChevronDown, ChevronRight,
-  Phone, Mail, StickyNote, ShoppingBag, X, Edit2, Check, Star, User
+  Phone, Mail, StickyNote, ShoppingBag, X, Edit2, Check, Star, User, Database
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 const normalizePhone = (p: string) => p.replace(/\D/g, '');
 const normalizeEmail = (e: string) => e.trim().toLowerCase();
+
+export function parseNameAndGender(rawName: string): { name: string, gender: '先生' | '小姐' | '不選擇' } {
+  if (!rawName) return { name: '', gender: '不選擇' };
+  const trimmed = rawName.trim();
+  if (trimmed.endsWith('先生') && trimmed.length >= 2) {
+    const n = trimmed.slice(0, -2).trim();
+    return { name: n || '先生', gender: '先生' };
+  }
+  if (trimmed.endsWith('小姐') && trimmed.length >= 2) {
+    const n = trimmed.slice(0, -2).trim();
+    return { name: n || '小姐', gender: '小姐' };
+  }
+  return { name: trimmed, gender: '不選擇' };
+}
 
 /** Find potential duplicate customers by name/phone/email */
 export function findDuplicates(customers: Customer[], name: string, phone: string, email?: string): Customer[] {
@@ -36,6 +50,7 @@ export async function upsertCustomerFromOrder(
 ): Promise<void> {
   const { orderId, date, buyer, phone, email, prodAmt, actualAmt, items, status } = orderInfo;
   const purchase: CustomerPurchase = { orderId, date, prodAmt, actualAmt, items, status };
+  const { name: parsedName, gender: parsedGender } = parseNameAndGender(buyer);
 
   // check if this order is already linked to a customer
   const alreadyLinked = allCustomers.find(c => c.purchases.some(p => p.orderId === orderId));
@@ -62,9 +77,10 @@ export async function upsertCustomerFromOrder(
           const newPurchases = [...existing.purchases, purchase];
           const updated: Customer = {
             ...existing,
-            name: buyer || existing.name,
+            name: existing.name !== '未知' && existing.name ? existing.name : parsedName,
             phone: phone || existing.phone,
             email: email || existing.email,
+            gender: existing.gender === '不選擇' && parsedGender !== '不選擇' ? parsedGender : existing.gender,
             purchases: newPurchases,
             totalPurchaseCount: newPurchases.length,
             totalPurchaseAmt: newPurchases.reduce((s, p) => s + p.actualAmt, 0),
@@ -75,7 +91,7 @@ export async function upsertCustomerFromOrder(
           // create new
           const newId = uid();
           const newCustomer: Customer = {
-            id: newId, name: buyer, phone, email, gender: '不選擇', createdAt: new Date().toISOString(),
+            id: newId, name: parsedName, phone, email, gender: parsedGender, createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(), purchases: [purchase],
             totalPurchaseCount: 1, totalPurchaseAmt: actualAmt,
           };
@@ -87,7 +103,7 @@ export async function upsertCustomerFromOrder(
   } else {
     const newId = uid();
     const newCustomer: Customer = {
-      id: newId, name: buyer, phone, email: email || '', gender: '不選擇', createdAt: new Date().toISOString(),
+      id: newId, name: parsedName, phone, email: email || '', gender: parsedGender, createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(), purchases: [purchase],
       totalPurchaseCount: 1, totalPurchaseAmt: actualAmt,
     };
@@ -104,6 +120,88 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
   const [editModal, setEditModal] = useState<Customer | null>(null);
   const [addModal, setAddModal] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [migrating, setMigrating] = useState(false);
+
+  const handleMigrate = async () => {
+    if (!window.confirm('確定要執行自動轉移嗎？這會讀取所有日報表的歷史訂單，為「有填寫電話或姓名」的訂購人自動建立或更新顧客資料。')) return;
+    setMigrating(true);
+    try {
+      const dailySnap = await getDocs(collection(db, 'shops', shopId, 'daily'));
+      const allCustomers = [...customers];
+      
+      let addedCount = 0;
+      let updatedCount = 0;
+      const updates = new Map<string, Customer>();
+
+      for (const dSnap of dailySnap.docs) {
+        const data = dSnap.data();
+        const dateKey = data.date || dSnap.id;
+        const orders = data.orders || [];
+
+        for (const o of orders) {
+          if (!o.buyer && !o.phone) continue;
+          
+          const { name, gender } = parseNameAndGender(o.buyer || '未知');
+          const phone = o.phone || '';
+          const email = o.email || '';
+          
+          const np = normalizePhone(phone);
+          let matched = null;
+          if (np) matched = allCustomers.find(c => normalizePhone(c.phone) === np);
+          if (!matched && name && name !== '未知') {
+             matched = allCustomers.find(c => c.name === name);
+          }
+
+          const purchase: CustomerPurchase = {
+            orderId: o.id || uid(),
+            date: dateKey,
+            prodAmt: o.prodAmt || 0,
+            actualAmt: o.actualAmt || 0,
+            items: o.items || {},
+            status: o.status || '匯款'
+          };
+
+          if (matched) {
+             const hasOrder = matched.purchases.some(p => p.orderId === purchase.orderId);
+             if (!hasOrder) {
+               matched.purchases.push(purchase);
+               matched.totalPurchaseCount = matched.purchases.length;
+               matched.totalPurchaseAmt = matched.purchases.reduce((s,p) => s + p.actualAmt, 0);
+               if (gender !== '不選擇' && matched.gender === '不選擇') matched.gender = gender;
+               if (!matched.phone && phone) matched.phone = phone;
+               if (!matched.email && email) matched.email = email;
+               
+               updates.set(matched.id, matched);
+               // Also update the in-memory array so subsequent orders find the updated version
+               const idx = allCustomers.findIndex(c => c.id === matched!.id);
+               if (idx !== -1) allCustomers[idx] = matched;
+             }
+          } else {
+             const newId = uid();
+             const newC: Customer = {
+               id: newId, name, phone, email, gender, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+               purchases: [purchase], totalPurchaseCount: 1, totalPurchaseAmt: purchase.actualAmt, note: ''
+             };
+             allCustomers.push(newC);
+             updates.set(newId, newC);
+             addedCount++;
+          }
+        }
+      }
+      
+      const promises = Array.from(updates.values()).map(c => setDoc(doc(db, 'shops', shopId, 'customers', c.id), c));
+      for (let i = 0; i < promises.length; i += 50) {
+        await Promise.all(promises.slice(i, i + 50));
+      }
+
+      alert(`轉移完成！共新增 ${addedCount} 筆新顧客，並更新 ${updates.size - addedCount} 筆顧客購買紀錄。`);
+    } catch (err: any) {
+      console.error(err);
+      alert('轉移失敗：' + err.message);
+    } finally {
+      setMigrating(false);
+    }
+  };
 
   // load customers realtime
   useEffect(() => {
@@ -150,7 +248,7 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
           <Users className="w-6 h-6 text-rose-brand" /> 顧客資料管理
           <span className="text-sm font-normal text-coffee-400 ml-2">共 {customers.length} 位顧客</span>
         </h2>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Search */}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-coffee-300" />
@@ -159,14 +257,22 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
               value={searchQ}
               onChange={e => setSearchQ(e.target.value)}
               placeholder="搜尋姓名、電話、Email…"
-              className="pl-9 pr-4 py-2 bg-white border border-coffee-100 rounded-xl text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand w-56"
+              className="pl-9 pr-4 py-2 bg-white border border-coffee-100 rounded-xl text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand w-48 sm:w-56"
             />
           </div>
+          <button
+            onClick={handleMigrate}
+            disabled={migrating}
+            className="bg-white border border-coffee-200 text-coffee-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-coffee-50 transition shadow-sm disabled:opacity-50"
+          >
+            {migrating ? <span className="w-4 h-4 border-2 border-coffee-600 border-t-transparent rounded-full animate-spin" /> : <Database className="w-4 h-4" />}
+            <span className="hidden sm:inline">{migrating ? '轉移中...' : '匯入歷史紀錄'}</span>
+          </button>
           <button
             onClick={() => setAddModal(true)}
             className="bg-coffee-700 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-coffee-800 transition shadow-md"
           >
-            <Plus className="w-4 h-4" /> 新增顧客
+            <Plus className="w-4 h-4" /> <span className="hidden sm:inline">新增顧客</span>
           </button>
         </div>
       </div>
