@@ -165,7 +165,11 @@ export default function DailyView({
               if (prevResolved.snap.exists()) {
                 const prev = prevResolved.snap.data() as DailyReport;
                 const prevAr = { ...defaultAr(), ...(prev.ar || {}) };
-                accumFromPrev = Math.max(0, prevAr.accum + calcDayUnpaid(prev.orders || []) - prevAr.collect);
+                if (d === 1) {
+                  accumFromPrev = 0; // 每個月 1 號不帶入上個月的未結帳款
+                } else {
+                  accumFromPrev = Math.max(0, prevAr.accum + calcDayUnpaid(prev.orders || []) - prevAr.collect);
+                }
               }
             } catch (err) {
               console.error('載入前一天日報失敗:', err);
