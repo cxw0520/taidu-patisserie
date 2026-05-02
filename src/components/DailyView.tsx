@@ -31,7 +31,10 @@ import {
   X,
   Monitor,
   MapPin,
-  Phone
+  Phone,
+  Search,
+  ChevronDown,
+  ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
@@ -107,6 +110,8 @@ export default function DailyView({
   const [subTab, setSubTab] = useState<'dashboard' | 'cash_register' | 'import' | 'settings'>(() => {
     return (localStorage.getItem('daily_sub_tab') as any) || 'dashboard';
   });
+  const [addOrderModal, setAddOrderModal] = useState(false);
+  const [phoneSearchModal, setPhoneSearchModal] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('daily_sub_tab', subTab);
@@ -485,23 +490,26 @@ export default function DailyView({
               <h3 className="section-title">
                 <LayoutDashboard className="w-5 h-5 inline-block mr-2 mb-1" /> 銷售明細
               </h3>
-              <button 
-                onClick={() => {
-                  const newOrder: Order = {
-                    id: uid(), buyer: '', phone: '', address: '', items: {},
-                    prodAmt: 0, shipAmt: 0, discAmt: 0, actualAmt: 0, status: '匯款', note: ''
-                  };
-                  updateDaily({ orders: [...dailyData.orders, newOrder] });
-                }}
-                className="bg-coffee-600 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-coffee-700 transition-colors shadow-md"
-              >
-                <Plus className="w-4 h-4" /> 新增訂單
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setPhoneSearchModal(true)}
+                  className="bg-white border border-coffee-200 text-coffee-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-coffee-50 transition-colors shadow-sm"
+                >
+                  <Search className="w-4 h-4" /> 搜尋訂單
+                </button>
+                <button
+                  onClick={() => setAddOrderModal(true)}
+                  className="bg-coffee-600 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-coffee-700 transition-colors shadow-md"
+                >
+                  <Plus className="w-4 h-4" /> 新增訂單
+                </button>
+              </div>
             </div>
 
-            <div className="rounded-2xl overflow-x-auto border border-coffee-50 bg-white/50">
+            {/* max-h + overflow-y-auto enables sticky thead inside a scrollable container */}
+            <div className="rounded-2xl border border-coffee-50 bg-white/50" style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '520px' }}>
               <table className="w-full text-xs md:text-sm text-center border-collapse">
-                <thead className="bg-[#faf7f2]">
+                <thead className="bg-[#faf7f2] sticky top-0 z-30">
                   <tr className="text-coffee-400 font-bold uppercase tracking-wider">
                     <th className="px-3 py-4 text-left border-b border-[#f0ede8] sticky left-0 z-20 bg-[#faf7f2]/90 backdrop-blur-md">購買人</th>
                     {settings.giftItems.filter(i => i.active).length > 0 && (
@@ -717,6 +725,32 @@ export default function DailyView({
               </table>
             </div>
           </div>
+
+          {/* ── Add Order Modal ── */}
+          <AnimatePresence>
+            {addOrderModal && (
+              <AddOrderModal
+                settings={settings}
+                onClose={() => setAddOrderModal(false)}
+                onAdd={(order) => { updateDaily({ orders: [...dailyData.orders, order] }); setAddOrderModal(false); }}
+              />
+            )}
+          </AnimatePresence>
+
+          {/* ── Phone Search Modal ── */}
+          <AnimatePresence>
+            {phoneSearchModal && (
+              <PhoneSearchModal
+                orders={dailyData.orders}
+                settings={settings}
+                onClose={() => setPhoneSearchModal(false)}
+                onUpdateOrder={(updated) => {
+                  const orders = dailyData.orders.map(o => o.id === updated.id ? updated : o);
+                  updateDaily({ orders });
+                }}
+              />
+            )}
+          </AnimatePresence>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             {/* 金流總結 */}
@@ -1915,6 +1949,257 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════
+   AddOrderModal — new order form modal
+══════════════════════════════════════════ */
+function AddOrderModal({ settings, onClose, onAdd }: {
+  settings: Settings;
+  onClose: () => void;
+  onAdd: (order: Order) => void;
+}) {
+  const [form, setForm] = useState<Order>({
+    id: uid(), buyer: '', phone: '', address: '', items: {},
+    prodAmt: 0, shipAmt: 0, discAmt: 0, actualAmt: 0, status: '匯款', note: ''
+  });
+
+  const allItems = useMemo(() => [
+    ...(settings.giftItems || []).filter(i => i.active),
+    ...(settings.singleItems || []).filter(i => i.active),
+    ...(settings.customCategories || []).flatMap(c => (c.items || []).filter(i => i.active)),
+  ], [settings]);
+
+  const recalc = (items: Record<string, number>, ship: number, disc: number) => {
+    const prod = allItems.reduce((s, i) => s + (items[i.id] || 0) * i.price, 0);
+    return { prodAmt: prod, actualAmt: prod + ship - disc };
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel w-full max-w-lg bg-white border-0 shadow-2xl rounded-3xl relative z-10 overflow-hidden max-h-[90vh] flex flex-col">
+        <div className="flex justify-between items-center px-8 pt-7 pb-5 border-b border-coffee-50">
+          <h3 className="text-xl font-bold text-coffee-800 flex items-center gap-2"><Plus className="w-5 h-5 text-rose-brand" /> 新增訂單</h3>
+          <button onClick={onClose} className="p-2 hover:bg-coffee-50 rounded-full"><X className="w-5 h-5 text-coffee-400" /></button>
+        </div>
+        <div className="flex-1 overflow-y-auto p-8 space-y-5">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-bold text-coffee-400 mb-1 block">購買人姓名</label>
+              <input type="text" value={form.buyer} onChange={e => setForm({ ...form, buyer: e.target.value })} placeholder="姓名" className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand" />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-coffee-400 mb-1 block">電話</label>
+              <input type="text" value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="09xx-xxx-xxx" className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand" />
+            </div>
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {(['匯款', '現結', '未結帳款', '公關品'] as const).map(s => (
+              <button key={s} onClick={() => setForm({ ...form, status: s })} className={cn("py-2 rounded-xl text-xs font-bold border transition-all", form.status === s ? "bg-rose-brand border-rose-brand text-white" : "bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300")}>{s}</button>
+            ))}
+          </div>
+          <div>
+            <label className="text-xs font-bold text-coffee-400 mb-2 block">訂購品項</label>
+            <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+              {allItems.map(item => (
+                <div key={item.id} className="flex justify-between items-center bg-coffee-50 rounded-xl px-4 py-2.5">
+                  <div>
+                    <div className="text-sm font-bold text-coffee-700">{item.name}</div>
+                    <div className="text-xs text-coffee-400 font-mono">${fmt(item.price)}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => { const q = Math.max(0, (form.items?.[item.id] || 0) - 1); const items = { ...form.items, [item.id]: q }; setForm({ ...form, items, ...recalc(items, form.shipAmt, form.discAmt) }); }} className="w-7 h-7 bg-white border border-coffee-200 rounded-lg font-bold text-coffee-500 hover:bg-coffee-100 flex items-center justify-center">−</button>
+                    <span className="w-8 text-center font-bold font-mono text-coffee-800">{form.items?.[item.id] || 0}</span>
+                    <button onClick={() => { const q = (form.items?.[item.id] || 0) + 1; const items = { ...form.items, [item.id]: q }; setForm({ ...form, items, ...recalc(items, form.shipAmt, form.discAmt) }); }} className="w-7 h-7 bg-rose-brand/10 border border-rose-brand/20 rounded-lg font-bold text-rose-brand hover:bg-rose-brand/20 flex items-center justify-center">+</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs font-bold text-coffee-400 mb-1 block">運費</label>
+              <input type="number" value={form.shipAmt || ''} placeholder="0" onChange={e => { const ship = Number(e.target.value) || 0; setForm({ ...form, shipAmt: ship, ...recalc(form.items || {}, ship, form.discAmt) }); }} className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold outline-none focus:border-coffee-400 font-mono" />
+            </div>
+            <div>
+              <label className="text-xs font-bold text-coffee-400 mb-1 block">折讓</label>
+              <input type="number" value={form.discAmt || ''} placeholder="0" onChange={e => { const disc = Number(e.target.value) || 0; setForm({ ...form, discAmt: disc, ...recalc(form.items || {}, form.shipAmt, disc) }); }} className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-rose-brand outline-none focus:border-rose-brand font-mono" />
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-coffee-400 mb-1 block">備注</label>
+            <input type="text" value={form.note || ''} onChange={e => setForm({ ...form, note: e.target.value })} placeholder="備注說明（選填）" className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-coffee-400" />
+          </div>
+          <div className="p-4 bg-coffee-50 rounded-2xl flex justify-between items-center">
+            <span className="font-bold text-coffee-700">應收總金額</span>
+            <span className="text-2xl font-bold font-mono text-rose-brand">${fmt(form.actualAmt)}</span>
+          </div>
+        </div>
+        <div className="px-8 pb-8 pt-4 border-t border-coffee-50">
+          <button onClick={() => onAdd({ ...form, id: uid() })} className="w-full py-4 bg-coffee-800 text-white rounded-2xl font-bold shadow-xl hover:bg-coffee-900 transition-all active:scale-95 flex items-center justify-center gap-2">
+            確認新增訂單 <Plus className="w-5 h-5" />
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+/* ══════════════════════════════════════════
+   PhoneSearchModal — fixed-size floating search panel
+══════════════════════════════════════════ */
+function PhoneSearchModal({ orders, settings, onClose, onUpdateOrder }: {
+  orders: Order[];
+  settings: Settings;
+  onClose: () => void;
+  onUpdateOrder: (updated: Order) => void;
+}) {
+  const [phone, setPhone] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const allItems = useMemo(() => [
+    ...(settings.giftItems || []),
+    ...(settings.singleItems || []),
+    ...(settings.customCategories || []).flatMap(c => c.items || []),
+  ], [settings]);
+
+  const results = useMemo(() => {
+    if (!phone) return [];
+    const q = phone.replace(/\D/g, '');
+    return orders.filter(o => (o.phone || '').replace(/\D/g, '').includes(q));
+  }, [phone, orders]);
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center sm:justify-end p-4 sm:pr-8 pointer-events-none">
+      <motion.div
+        initial={{ x: 80, opacity: 0 }}
+        animate={{ x: 0, opacity: 1 }}
+        exit={{ x: 80, opacity: 0 }}
+        className="pointer-events-auto w-full sm:w-96 bg-white rounded-3xl shadow-2xl border border-coffee-100 flex flex-col"
+        style={{ height: '560px' }}
+      >
+        {/* Header */}
+        <div className="flex justify-between items-center px-6 pt-6 pb-4 border-b border-coffee-50 flex-shrink-0">
+          <h4 className="font-bold text-coffee-800 flex items-center gap-2">
+            <Search className="w-4 h-4 text-rose-brand" /> 訂單快速搜尋
+          </h4>
+          <button onClick={onClose} className="p-1.5 hover:bg-coffee-50 rounded-full"><X className="w-4 h-4 text-coffee-400" /></button>
+        </div>
+        {/* Search input */}
+        <div className="px-6 py-4 flex-shrink-0">
+          <div className="relative">
+            <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-coffee-300" />
+            <input
+              autoFocus
+              type="tel"
+              inputMode="numeric"
+              value={phone}
+              onChange={e => { setPhone(e.target.value); setExpandedId(null); }}
+              placeholder="輸入電話號碼搜尋..."
+              className="w-full bg-coffee-50 border border-coffee-100 rounded-xl pl-10 pr-4 py-3 font-bold text-coffee-700 outline-none focus:border-rose-brand text-sm"
+            />
+          </div>
+          <div className="mt-2 text-xs text-coffee-400 font-bold">
+            {phone ? `找到 ${results.length} 筆符合結果` : '輸入手機號碼（任意位數）即時搜尋'}
+          </div>
+        </div>
+        {/* Results — scrollable */}
+        <div className="flex-1 overflow-y-auto px-6 pb-6 space-y-3">
+          {!phone && (
+            <div className="flex flex-col items-center justify-center h-40 text-coffee-200">
+              <Search className="w-10 h-10 mb-2" />
+              <p className="text-sm font-bold">輸入號碼開始搜尋</p>
+            </div>
+          )}
+          {phone && results.length === 0 && (
+            <div className="flex flex-col items-center justify-center h-40 text-coffee-200">
+              <Phone className="w-10 h-10 mb-2" />
+              <p className="text-sm font-bold">無符合的訂單</p>
+            </div>
+          )}
+          {results.map(order => {
+            const isExpanded = expandedId === order.id;
+            const orderedItems = allItems.filter(i => (order.items?.[i.id] || 0) > 0);
+            const isPickup = order.deliveryMethod === '自取';
+            return (
+              <div key={order.id} className="border border-coffee-100 rounded-2xl overflow-hidden bg-white shadow-sm">
+                <button
+                  onClick={() => setExpandedId(isExpanded ? null : order.id)}
+                  className="w-full px-4 py-3 text-left flex items-center justify-between hover:bg-coffee-50 transition-colors"
+                >
+                  <div>
+                    <div className="font-bold text-coffee-800 text-sm">{order.buyer || '（無姓名）'}</div>
+                    <div className="text-xs text-coffee-400 font-mono mt-0.5 flex items-center gap-2">
+                      <Phone className="w-3 h-3" />{order.phone || '—'}
+                      <span className={cn("px-2 py-0.5 rounded-full text-[10px] font-bold",
+                        order.status === '匯款' && 'bg-blue-50 text-blue-600',
+                        order.status === '現結' && 'bg-green-50 text-green-600',
+                        order.status === '未結帳款' && 'bg-red-50 text-red-500',
+                        order.status === '公關品' && 'bg-purple-50 text-purple-600',
+                      )}>{order.status}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold font-mono text-rose-brand text-sm">${fmt(order.actualAmt)}</span>
+                    {isExpanded ? <ChevronDown className="w-4 h-4 text-coffee-400" /> : <ChevronRight className="w-4 h-4 text-coffee-400" />}
+                  </div>
+                </button>
+                {isExpanded && (
+                  <div className="border-t border-coffee-50 px-4 py-4 space-y-3 bg-coffee-50/30">
+                    <div className="space-y-1.5">
+                      {orderedItems.length === 0
+                        ? <p className="text-xs text-coffee-300 font-bold text-center py-2">無品項資料</p>
+                        : orderedItems.map(item => (
+                          <div key={item.id} className="flex justify-between text-xs font-bold">
+                            <span className="text-coffee-600">{item.name}</span>
+                            <span className="font-mono text-coffee-800">× {order.items![item.id]}</span>
+                          </div>
+                        ))
+                      }
+                    </div>
+                    <div className="text-xs space-y-1 pt-2 border-t border-coffee-100">
+                      <div className="flex justify-between text-coffee-500"><span>商品</span><span className="font-mono">${fmt(order.prodAmt)}</span></div>
+                      {order.shipAmt > 0 && <div className="flex justify-between text-coffee-500"><span>運費</span><span className="font-mono">${fmt(order.shipAmt)}</span></div>}
+                      {order.discAmt > 0 && <div className="flex justify-between text-rose-brand"><span>折讓</span><span className="font-mono">-${fmt(order.discAmt)}</span></div>}
+                      <div className="flex justify-between font-bold text-coffee-800 pt-1 border-t border-coffee-100"><span>應收</span><span className="font-mono text-mint-brand">${fmt(order.actualAmt)}</span></div>
+                    </div>
+                    {!order.source?.includes('pos') && !order.note?.includes('收銀機') && (
+                      <div className="pt-2 border-t border-coffee-100">
+                        <div className="text-xs font-bold text-coffee-400 mb-2">取貨狀態</div>
+                        <div className="flex gap-2">
+                          {(['宅配', '自取'] as const).map(m => (
+                            <button
+                              key={m}
+                              onClick={() => onUpdateOrder({ ...order, deliveryMethod: m })}
+                              className={cn("flex-1 py-1.5 rounded-xl text-xs font-bold border transition-all",
+                                order.deliveryMethod === m
+                                  ? (m === '宅配' ? 'bg-blue-500 text-white border-blue-500' : 'bg-mint-brand text-white border-mint-brand')
+                                  : 'bg-white border-coffee-100 text-coffee-400'
+                              )}
+                            >{m === '宅配' ? '🚚 宅配' : '📍 自取'}</button>
+                          ))}
+                        </div>
+                        {isPickup && (
+                          <button
+                            onClick={() => onUpdateOrder({ ...order, isPickedUp: !order.isPickedUp })}
+                            className={cn("mt-2 w-full py-2 rounded-xl text-xs font-bold transition-all border",
+                              order.isPickedUp ? 'bg-mint-brand text-white border-mint-brand' : 'bg-amber-50 text-amber-600 border-amber-200'
+                            )}
+                          >{order.isPickedUp ? '✓ 已取貨' : '尚未取貨 — 點此標記已取'}</button>
+                        )}
+                      </div>
+                    )}
+                    {order.note && <p className="text-xs text-coffee-400 font-bold bg-coffee-50 rounded-lg px-3 py-2">📝 {order.note}</p>}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </motion.div>
     </div>
   );
 }

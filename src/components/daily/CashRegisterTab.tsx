@@ -702,7 +702,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                 <button onClick={() => setCheckoutModal(false)} className="p-2 hover:bg-coffee-50 rounded-full"><X className="w-5 h-5 text-coffee-400" /></button>
               </div>
 
-              {/* Body */}
+              {/* Body — two columns when 現結 */}
               <div className={cn("flex-1 overflow-y-auto p-8 pt-6 gap-6", checkoutData.paymentMethod === '現結' ? "grid grid-cols-2 items-start" : "flex flex-col space-y-4")}>
 
                 {/* ── Left: form fields ── */}
@@ -760,30 +760,25 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     </div>
                   </div>
 
-                  {/* 實收 / 找零 — only shown when 現結 */}
+                  {/* 實收 / 找零 — only when 現結 */}
                   {checkoutData.paymentMethod === '現結' && (
                     <div className="space-y-2">
                       <label className="text-xs font-bold text-coffee-400 block">實收金額</label>
                       <div className="w-full bg-white border-2 border-mint-brand/40 rounded-xl px-3 py-3 text-3xl font-bold text-mint-brand shadow-inner font-mono text-center select-none min-h-[64px] flex items-center justify-center">
                         {receivedInput || <span className="text-coffee-200 text-base font-bold">— 請輸入 —</span>}
                       </div>
-                      {checkoutData.receivedAmt > 0 && (
-                        <div className="p-3 bg-mint-brand/5 border border-mint-brand/10 rounded-xl flex justify-between items-center">
-                          <span className="text-xs text-coffee-400 font-bold">應找零</span>
-                          <span className="text-xl font-serif-brand font-bold text-mint-brand">
-                            ${fmt(checkoutData.receivedAmt - (totalCartAmt - checkoutData.discAmt))}
-                          </span>
-                        </div>
-                      )}
+                      {/* Always rendered to prevent layout shift; invisible when no input */}
+                      <div className={cn(
+                        "p-3 bg-mint-brand/5 border border-mint-brand/10 rounded-xl flex justify-between items-center transition-all",
+                        checkoutData.receivedAmt > 0 ? "opacity-100" : "opacity-0 pointer-events-none"
+                      )}>
+                        <span className="text-xs text-coffee-400 font-bold">應找零</span>
+                        <span className="text-xl font-serif-brand font-bold text-mint-brand">
+                          ${fmt(Math.max(0, checkoutData.receivedAmt - (totalCartAmt - checkoutData.discAmt)))}
+                        </span>
+                      </div>
                     </div>
                   )}
-
-                  <button
-                    onClick={handleCheckout}
-                    className="w-full py-4 bg-coffee-800 text-white rounded-2xl font-bold shadow-xl hover:bg-coffee-900 transition-all active:scale-95 flex items-center justify-center gap-2"
-                  >
-                    確認結帳與列入銷售明細 <CheckCircle2 className="w-5 h-5" />
-                  </button>
                 </div>
 
                 {/* ── Right: numeric keypad (現結 only) ── */}
@@ -799,6 +794,16 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     />
                   </div>
                 )}
+              </div>
+
+              {/* Footer: confirm button spans full width below both columns */}
+              <div className="px-8 pb-8 pt-4 border-t border-coffee-50">
+                <button
+                  onClick={handleCheckout}
+                  className="w-full py-4 bg-coffee-800 text-white rounded-2xl font-bold shadow-xl hover:bg-coffee-900 transition-all active:scale-95 flex items-center justify-center gap-2"
+                >
+                  確認結帳與列入銷售明細 <CheckCircle2 className="w-5 h-5" />
+                </button>
               </div>
             </motion.div>
           </div>
