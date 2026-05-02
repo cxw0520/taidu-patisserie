@@ -253,3 +253,26 @@ export interface Recipe {
   items: RecipeItem[];
   tags: string[];
 }
+
+export interface CustomerPurchase {
+  orderId: string;
+  date: string;
+  prodAmt: number;
+  actualAmt: number;
+  items: Record<string, number>;
+  status: string;
+}
+
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  gender?: '先生' | '小姐' | '不選擇';
+  note?: string;
+  createdAt: string;
+  updatedAt: string;
+  purchases: CustomerPurchase[];
+  totalPurchaseCount: number;
+  totalPurchaseAmt: number;
+}

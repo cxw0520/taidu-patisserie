@@ -14,7 +14,8 @@ import {
   Calendar,
   Layers,
   FileSpreadsheet,
-  Package
+  Package,
+  Users
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from './lib/firebase';
@@ -30,6 +31,7 @@ import DailyView from './components/DailyView';
 import MonthlyView from './components/MonthlyView';
 import CostView from './components/CostView';
 import InventoryView from './components/InventoryView';
+import CustomerView from './components/CustomerView';
 
 const DEFAULT_SETTINGS: Settings = {
   giftItems: [
@@ -53,7 +55,7 @@ const DEFAULT_SETTINGS: Settings = {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost'>(() => {
+  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers'>(() => {
     return (localStorage.getItem('app_active_tab') as any) || 'journal';
   });
 
@@ -143,6 +145,7 @@ export default function App() {
   const tabs = [
     { id: 'journal', label: '日記簿', icon: ClipboardList },
     { id: 'daily', label: '日報表', icon: Calendar },
+    { id: 'customers', label: '顧客資料', icon: Users },
     { id: 'inventory', label: '進貨與庫存', icon: Package },
     { id: 'monthly', label: '月報表', icon: CalendarDays },
     { id: 'cost', label: '成本分析', icon: BarChart3 },
@@ -277,6 +280,7 @@ export default function App() {
           >
             {activeTab === 'journal' && <JournalView selectedYear={selectedYear} shopId={shopId} />}
             {activeTab === 'daily' && <DailyView currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
+            {activeTab === 'customers' && <CustomerView shopId={shopId} settings={settings} />}
             {activeTab === 'inventory' && <InventoryView selectedYear={selectedYear} shopId={shopId} />}
             {activeTab === 'monthly' && <MonthlyView settings={settings} shopId={shopId} />}
             {activeTab === 'cost' && <CostView settings={settings} shopId={shopId} />}

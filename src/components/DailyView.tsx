@@ -40,6 +40,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import Papa from 'papaparse';
 import { cn } from '../lib/utils';
 import CashRegisterTab from './daily/CashRegisterTab';
+import { upsertCustomerFromOrder, MergeConflictModal } from './CustomerView';
+import { Customer } from '../types';
 
 const normalizeDateKey = (v: string) => {
   const [y, m = '1', d = '1'] = v.split('-');
@@ -112,6 +114,16 @@ export default function DailyView({
   });
   const [addOrderModal, setAddOrderModal] = useState(false);
   const [phoneSearchModal, setPhoneSearchModal] = useState(false);
+  const [customers, setCustomers] = useState<Customer[]>([]);
+  const [mergeConflict, setMergeConflict] = useState<{ candidates: Customer[]; resolve: (action: 'merge'|'new', id?: string) => void } | null>(null);
+
+  // load customers realtime
+  useEffect(() => {
+    if (!shopId) return;
+    const q = query(collection(db, 'shops', shopId, 'customers'), limit(200));
+    const unsub = onSnapshot(q, snap => setCustomers(snap.docs.map(d => d.data() as Customer)));
+    return unsub;
+  }, [shopId]);
 
   useEffect(() => {
     localStorage.setItem('daily_sub_tab', subTab);
@@ -735,6 +747,8 @@ export default function DailyView({
             {addOrderModal && (
               <AddOrderModal
                 settings={settings}
+                shopId={shopId}
+                customers={customers}
                 onClose={() => setAddOrderModal(false)}
                 onAdd={(order) => { updateDaily({ orders: [...dailyData.orders, order] }); setAddOrderModal(false); }}
               />
@@ -752,6 +766,16 @@ export default function DailyView({
                   const orders = dailyData.orders.map(o => o.id === updated.id ? updated : o);
                   updateDaily({ orders });
                 }}
+              />
+            )}
+          </AnimatePresence>
+
+          {/* ── Merge Conflict Modal ── */}
+          <AnimatePresence>
+            {mergeConflict && (
+              <MergeConflictModal
+                candidates={mergeConflict.candidates}
+                onDecide={(action, id) => { mergeConflict.resolve(action, id); setMergeConflict(null); }}
               />
             )}
           </AnimatePresence>
@@ -1149,7 +1173,15 @@ export default function DailyView({
       )}
 
       {subTab === 'import' && (
-        <ImportTab settings={settings} shopId={shopId} currentDate={currentDate} dailyData={dailyData} updateDaily={updateDaily} />
+        <ImportTab
+          settings={settings}
+          shopId={shopId}
+          currentDate={currentDate}
+          dailyData={dailyData}
+          updateDaily={updateDaily}
+          customers={customers}
+          onConflict={(cands, resolve) => setMergeConflict({ candidates: cands, resolve })}
+        />
       )}
 
       {subTab === 'settings' && (
@@ -1472,7 +1504,12 @@ function SettingsTab({
   );
 }
 
-function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { settings: Settings; shopId: string; currentDate: string; dailyData: DailyReport; updateDaily: (patch: Partial<DailyReport>) => void }) {
+function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily, customers, onConflict }: {
+  settings: Settings; shopId: string; currentDate: string; dailyData: DailyReport;
+  updateDaily: (patch: Partial<DailyReport>) => void;
+  customers: import('../types').Customer[];
+  onConflict: (candidates: import('../types').Customer[], resolve: (action: 'merge'|'new', targetId?: string) => void) => void;
+}) {
   const [importText, setImportText] = useState('');
   const [parsedOrders, setParsedOrders] = useState<any[]>([]);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -1734,6 +1771,43 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
 
       await batch.commit();
 
+      // ── Sync to customer database ──────────────────────────────
+      const allAppended: Array<{ order: Order; date: string }> = [];
+      for (const [date, orders] of Object.entries(byDate)) {
+        const dateKey = normalizeDateKey(date);
+        const appended = orders.map(po => ({
+          id: po._orderId || uid(), buyer: po.buyer, phone: po.phone || '',
+          items: po.items, prodAmt: po.prodAmt, actualAmt: po.prodAmt, status: '匯款' as const,
+          shipAmt: 0, discAmt: 0, note: '', address: po.addr || '',
+          recipientName: po.recipientName || '', recipientPhone: po.recipientPhone || '',
+        } as Order));
+        appended.forEach(order => allAppended.push({ order, date: dateKey }));
+      }
+      // rebuild full appended list with correct ids from earlier
+      // We use parsedOrders to get buyer/phone/email for customer upsert
+      const latestCustomers: import('../types').Customer[] = [...customers];
+      for (const po of parsedOrders) {
+        const dateKey = normalizeDateKey(po.date || currentDate);
+        // find the order we just committed (match by buyer+phone+date)
+        await upsertCustomerFromOrder(
+          shopId,
+          latestCustomers,
+          {
+            orderId: uid(), // we don't have the exact id here but dedup is by phone/name
+            date: dateKey,
+            buyer: po.buyer || '',
+            phone: po.phone || '',
+            email: po.email || '',
+            prodAmt: po.prodAmt || 0,
+            actualAmt: po.prodAmt || 0,
+            items: po.items || {},
+            status: '匯款',
+          },
+          onConflict
+        );
+      }
+      // ──────────────────────────────────────────────────────────
+
       if (currentDateOrdersToAppend.length > 0) {
         updateDaily({ orders: [...dailyData.orders, ...currentDateOrdersToAppend] });
       }
@@ -1960,8 +2034,10 @@ function ImportTab({ settings, shopId, currentDate, dailyData, updateDaily }: { 
 /* ══════════════════════════════════════════
    AddOrderModal — new order form modal
 ══════════════════════════════════════════ */
-function AddOrderModal({ settings, onClose, onAdd }: {
+function AddOrderModal({ settings, shopId, customers, onClose, onAdd }: {
   settings: Settings;
+  shopId: string;
+  customers: Customer[];
   onClose: () => void;
   onAdd: (order: Order) => void;
 }) {
@@ -1969,6 +2045,8 @@ function AddOrderModal({ settings, onClose, onAdd }: {
     id: uid(), buyer: '', phone: '', address: '', items: {},
     prodAmt: 0, shipAmt: 0, discAmt: 0, actualAmt: 0, status: '匯款', note: ''
   });
+  const [phoneInput, setPhoneInput] = useState('');
+  const [showSuggestions, setShowSuggestions] = useState(false);
 
   const allItems = useMemo(() => [
     ...(settings.giftItems || []).filter(i => i.active),
@@ -1979,6 +2057,19 @@ function AddOrderModal({ settings, onClose, onAdd }: {
   const recalc = (items: Record<string, number>, ship: number, disc: number) => {
     const prod = allItems.reduce((s, i) => s + (items[i.id] || 0) * i.price, 0);
     return { prodAmt: prod, actualAmt: prod + ship - disc };
+  };
+
+  // Live customer suggestions filtered by phone digits typed so far
+  const suggestions = useMemo(() => {
+    const q = phoneInput.replace(/\D/g, '');
+    if (!q) return [];
+    return customers.filter(c => (c.phone || '').replace(/\D/g, '').includes(q)).slice(0, 6);
+  }, [phoneInput, customers]);
+
+  const fillFromCustomer = (c: Customer) => {
+    setPhoneInput(c.phone);
+    setForm(prev => ({ ...prev, buyer: c.name, phone: c.phone }));
+    setShowSuggestions(false);
   };
 
   return (
@@ -1995,9 +2086,53 @@ function AddOrderModal({ settings, onClose, onAdd }: {
               <label className="text-xs font-bold text-coffee-400 mb-1 block">購買人姓名</label>
               <input type="text" value={form.buyer} onChange={e => setForm({ ...form, buyer: e.target.value })} placeholder="姓名" className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand" />
             </div>
-            <div>
-              <label className="text-xs font-bold text-coffee-400 mb-1 block">電話</label>
-              <input type="text" value={form.phone || ''} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="09xx-xxx-xxx" className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand" />
+            {/* Phone + customer autocomplete */}
+            <div className="relative">
+              <label className="text-xs font-bold text-coffee-400 mb-1 block">電話（可搜尋既有顧客）</label>
+              <div className="relative">
+                <Phone className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-coffee-300 pointer-events-none" />
+                <input
+                  type="tel"
+                  value={phoneInput}
+                  onChange={e => {
+                    const v = e.target.value;
+                    setPhoneInput(v);
+                    setForm(prev => ({ ...prev, phone: v }));
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => phoneInput && setShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 180)}
+                  placeholder="09xx-xxx-xxx"
+                  className="w-full bg-coffee-50 border border-coffee-100 rounded-xl pl-9 pr-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand"
+                />
+              </div>
+              <AnimatePresence>
+                {showSuggestions && suggestions.length > 0 && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    className="absolute left-0 right-0 top-full mt-1 bg-white border border-coffee-100 rounded-2xl shadow-xl z-50 overflow-hidden"
+                  >
+                    {suggestions.map(c => (
+                      <button
+                        key={c.id}
+                        onMouseDown={() => fillFromCustomer(c)}
+                        className="w-full px-4 py-3 text-left hover:bg-rose-brand/5 transition-colors border-b border-coffee-50 last:border-0"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-bold text-coffee-800 text-sm">{c.name} {c.gender && c.gender !== '不選擇' ? c.gender : ''}</span>
+                            <span className="ml-2 text-xs text-coffee-400 font-mono">{c.phone}</span>
+                          </div>
+                          <span className="text-[10px] bg-coffee-50 text-coffee-400 font-bold px-2 py-0.5 rounded-full">購買 {c.totalPurchaseCount} 次</span>
+                        </div>
+                        {c.email && <div className="text-[10px] text-coffee-400 mt-0.5">{c.email}</div>}
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           </div>
           <div className="grid grid-cols-4 gap-2">
@@ -2052,9 +2187,6 @@ function AddOrderModal({ settings, onClose, onAdd }: {
   );
 }
 
-/* ══════════════════════════════════════════
-   PhoneSearchModal — fixed-size floating search panel
-══════════════════════════════════════════ */
 function PhoneSearchModal({ orders, settings, onClose, onUpdateOrder }: {
   orders: Order[];
   settings: Settings;
