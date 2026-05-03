@@ -171,7 +171,32 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
     });
 
     await batch.commit();
+    await batch.commit();
   };
+
+  const aggregatedMaterials = useMemo(() => {
+    if (!record) return {};
+    const result: Record<string, { qty: number; cost: number }> = {};
+    record.items.forEach(item => {
+      if (item.type === 'material') {
+        const mat = materials.find(m => m.id === item.itemId);
+        const cost = mat ? mat.avgCost * item.qty : 0;
+        if (!result[item.itemId]) result[item.itemId] = { qty: 0, cost: 0 };
+        result[item.itemId].qty += item.qty;
+        result[item.itemId].cost += cost;
+      } else {
+        const mats = getMaterialsForRecipe(item.itemId, item.qty);
+        Object.entries(mats).forEach(([matId, qty]) => {
+          const mat = materials.find(m => m.id === matId);
+          const cost = mat ? mat.avgCost * qty : 0;
+          if (!result[matId]) result[matId] = { qty: 0, cost: 0 };
+          result[matId].qty += qty;
+          result[matId].cost += cost;
+        });
+      }
+    });
+    return result;
+  }, [record, recipes, materials]);
 
   return (
     <div className="space-y-6 animate-fade-in pb-20">
@@ -274,7 +299,7 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
           <div className="glass-panel p-6 bg-white border border-coffee-50 shadow-sm rounded-[24px]">
             <div className="flex justify-between items-end mb-6 pb-4 border-b border-coffee-50">
               <h3 className="font-bold text-coffee-800 flex items-center gap-2">
-                <PieChart className="w-5 h-5 text-coffee-400" /> 今日消耗清單
+                📝 今日登錄認列區
               </h3>
               <div className="text-right">
                 <div className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest">今日總消耗價值</div>
@@ -325,6 +350,40 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
                     <PieChart className="w-8 h-8" />
                   </div>
                   <p className="text-coffee-400 font-bold text-sm">今日尚無消耗紀錄</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="glass-panel p-6 bg-[#fcf9f2] border border-coffee-100 shadow-sm rounded-[24px]">
+            <div className="flex justify-between items-end mb-6 pb-4 border-b border-coffee-50">
+              <h3 className="font-bold text-coffee-800 flex items-center gap-2">
+                📊 所有使用的食材量加總區
+              </h3>
+              <div className="text-[10px] font-bold text-coffee-400">
+                自動將配方轉換為底層食材加總
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+              {Object.entries(aggregatedMaterials as Record<string, {qty: number; cost: number}>).map(([matId, data]) => {
+                const mat = materials.find(m => m.id === matId);
+                if (!mat) return null;
+                return (
+                  <div key={matId} className="bg-white p-3 border border-coffee-100 rounded-xl shadow-sm flex flex-col justify-between">
+                    <div className="font-bold text-coffee-800 text-sm mb-2">{mat.name}</div>
+                    <div className="flex justify-between items-end">
+                      <div className="text-xs text-coffee-400">總用量</div>
+                      <div className="font-serif-brand font-bold text-coffee-700">
+                        {fmt(data.qty)} <span className="text-xs font-sans text-coffee-400">{mat.unit}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+              {Object.keys(aggregatedMaterials).length === 0 && (
+                <div className="col-span-full text-center py-6 text-coffee-300 font-bold text-sm">
+                  尚無食材消耗數據
                 </div>
               )}
             </div>
