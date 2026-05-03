@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, query, doc, setDoc, onSnapshot } from 'firebase/firestore';
+import { collection, query, doc, setDoc, onSnapshot, writeBatch } from 'firebase/firestore';
 import { Material, Recipe, DailyUsageRec, DailyUsageItem } from '../../types';
 import { fmt, uid, todayISO } from '../../lib/utils';
 import { Calendar, Plus, Trash2, PieChart } from 'lucide-react';
@@ -65,21 +65,42 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
     return costMap;
   }, [recipes, materials]);
 
+  const getMaterialsForRecipe = (recipeId: string, qty: number, visited = new Set<string>()): Record<string, number> => {
+    const result: Record<string, number> = {};
+    if (visited.has(recipeId)) return result;
+    const recipe = recipes.find(r => r.id === recipeId);
+    if (!recipe || recipe.yield <= 0) return result;
+    
+    const ratio = qty / recipe.yield;
+    for (const item of recipe.items) {
+      if (item.type === 'material') {
+        result[item.itemId] = (result[item.itemId] || 0) + item.quantity * ratio;
+      } else {
+        const sub = getMaterialsForRecipe(item.itemId, item.quantity * ratio * (recipes.find(x => x.id === item.itemId)?.yield || 1), new Set([...visited, recipeId]));
+        Object.entries(sub).forEach(([k, v]) => result[k] = (result[k] || 0) + v);
+      }
+    }
+    return result;
+  };
+
   const handleAddItem = async () => {
     if (!record) return;
     if (!selectedItemId || qty === '' || qty <= 0) return alert('請填寫完整項目與數量');
 
     let unitCost = 0;
+    let materialsUsed: Record<string, number> = {};
+
     if (itemType === 'material') {
       const mat = materials.find(m => m.id === selectedItemId);
       if (!mat) return;
-      unitCost = mat.avgCost; // The cost updated via material cost tab (per stock unit)
+      unitCost = mat.avgCost; 
+      materialsUsed[selectedItemId] = qty as number;
     } else {
       unitCost = costs[selectedItemId] || 0;
+      materialsUsed = getMaterialsForRecipe(selectedItemId, qty as number);
     }
 
     const totalCost = unitCost * qty;
-    
     const recipeYield = itemType === 'recipe' ? recipes.find(r => r.id === selectedItemId)?.yield : undefined;
 
     const newItem: DailyUsageItem = {
@@ -101,21 +122,55 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
       totalValue: newTotal
     };
 
-    await setDoc(doc(db, 'shops', shopId, 'dailyUsages', date), updatedRecord);
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'shops', shopId, 'dailyUsages', date), updatedRecord);
+    
+    // Deduct inventory
+    Object.entries(materialsUsed).forEach(([matId, usedQty]) => {
+      const mat = materials.find(m => m.id === matId);
+      if (mat) {
+        batch.update(doc(db, 'shops', shopId, 'materials', matId), {
+          stock: Math.max(0, (mat.stock || 0) - usedQty)
+        });
+      }
+    });
+
+    await batch.commit();
     setQty('');
     setSelectedItemId('');
   };
 
-  const removeItem = async (itemId: string) => {
+  const removeItem = async (item: DailyUsageItem) => {
     if (!record) return;
-    const updatedItems = record.items.filter(i => i.id !== itemId);
+    const updatedItems = record.items.filter(i => i.id !== item.id);
     const newTotal = updatedItems.reduce((acc, curr) => acc + curr.totalCost, 0);
     const updatedRecord: DailyUsageRec = {
       ...record,
       items: updatedItems,
       totalValue: newTotal
     };
-    await setDoc(doc(db, 'shops', shopId, 'dailyUsages', date), updatedRecord);
+
+    const batch = writeBatch(db);
+    batch.set(doc(db, 'shops', shopId, 'dailyUsages', date), updatedRecord);
+
+    // Restore inventory
+    let materialsRestored: Record<string, number> = {};
+    if (item.type === 'material') {
+      materialsRestored[item.itemId] = item.qty;
+    } else {
+      materialsRestored = getMaterialsForRecipe(item.itemId, item.qty);
+    }
+
+    Object.entries(materialsRestored).forEach(([matId, restoredQty]) => {
+      const mat = materials.find(m => m.id === matId);
+      if (mat) {
+        batch.update(doc(db, 'shops', shopId, 'materials', matId), {
+          stock: (mat.stock || 0) + restoredQty
+        });
+      }
+    });
+
+    await batch.commit();
   };
 
   return (
@@ -256,7 +311,7 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
                         <div className="text-[10px] text-coffee-400">耗用價值</div>
                         <div className="font-serif-brand font-bold text-coffee-800 text-lg">${fmt(item.totalCost)}</div>
                       </div>
-                      <button onClick={() => removeItem(item.id)} className="w-8 h-8 flex items-center justify-center rounded-full bg-white text-coffee-300 hover:text-danger-brand border border-coffee-100 hover:border-danger-brand transition-colors">
+                      <button onClick={() => removeItem(item)} className="w-8 h-8 flex items-center justify-center rounded-full bg-white text-coffee-300 hover:text-danger-brand border border-coffee-100 hover:border-danger-brand transition-colors">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>

@@ -31,6 +31,7 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
   const [monthlyLogisticsVal, setMonthlyLogisticsVal] = useState<number>(0);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
+  const [dailyUsages, setDailyUsages] = useState<import('../types').DailyUsageRec[]>([]);
   const [activeTab, setActiveTab] = useState<'finance' | 'product'>('finance');
   
   // AR Modal State
@@ -111,7 +112,16 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
       setRecipes(snap.docs.map(d => d.data() as Recipe));
     });
 
-    return () => { unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); };
+    const qUsages = query(
+      collection(db, 'shops', shopId, 'dailyUsages'),
+      where('date', '>=', `${selectedMonth}-01`),
+      where('date', '<=', `${selectedMonth}-31`)
+    );
+    const unsubUsages = onSnapshot(qUsages, (snap) => {
+      setDailyUsages(snap.docs.map(d => d.data() as import('../types').DailyUsageRec));
+    });
+
+    return () => { unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); unsubUsages(); };
   }, [selectedMonth, shopId]);
 
   // Cost calculation function
@@ -225,6 +235,7 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
           getRecipeCost={getRecipeCost}
           materials={materials}
           recipes={recipes}
+          dailyUsages={dailyUsages}
           showARModal={showARModal}
           setShowARModal={setShowARModal}
           selectedBuyer={selectedBuyer}
@@ -432,7 +443,7 @@ function ARReconciliationModal({ monthData, settings, shopId, onClose, selectedB
   );
 }
 
-function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
+function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, dailyUsages, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
   const [showFoodCostModal, setShowFoodCostModal] = useState(false);
   const [showPRModal, setShowPRModal] = useState(false);
   const stats = useMemo(() => {
@@ -467,7 +478,8 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
         lossCost += cost * loss.qty;
       });
 
-      // Daily packaging (from forms)
+      // Daily packaging: replaced by auto-deduction from materialRecipe (see below)
+      // Keep for backward compat with old packagingUsage field if present
       Object.entries(d.packagingUsage || {}).forEach(([pkgId, qty]) => {
         const pkg = settings.packagingItems.find((p: any) => p.id === pkgId);
         if (pkg) {
@@ -512,9 +524,14 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                 if (o.status === '公關品') itemPR[normFlavor] = (itemPR[normFlavor] || 0) + vol;
               });
               
-              // If it's specifically a gift box, we still need to track packaging separately
+            // If it's specifically a gift box, track packaging via materialRecipe (new system)
               const isGift = settings.giftItems.find((i: any) => i.id === itemId);
-              if (isGift) {
+              if (isGift && isGift.materialRecipe) {
+                Object.entries(isGift.materialRecipe).forEach(([matId, pkgQty]: [string, any]) => {
+                  pkgUsage[matId] = (pkgUsage[matId] || 0) + parseNum(pkgQty) * qty;
+                });
+              } else if (isGift) {
+                // Legacy fallback
                 pkgUsage['禮盒紙盒'] = (pkgUsage['禮盒紙盒'] || 0) + qty;
                 pkgUsage['小卡'] = (pkgUsage['小卡'] || 0) + qty;
               }
@@ -523,6 +540,13 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
               const normName = normalizeFlavorName(item.name);
               itemSales[normName] = (itemSales[normName] || 0) + qty;
               if (o.status === '公關品') itemPR[normName] = (itemPR[normName] || 0) + qty;
+
+              // Track packaging via materialRecipe
+              if (item.materialRecipe) {
+                Object.entries(item.materialRecipe).forEach(([matId, pkgQty]: [string, any]) => {
+                  pkgUsage[matId] = (pkgUsage[matId] || 0) + parseNum(pkgQty) * qty;
+                });
+              }
             }
           }
         });
@@ -553,19 +577,33 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     const netRevenue = salesTotal - discTotal - prTotal; 
     
     // Ingredients cost sum
-    // Use the breakdown sum for consistency
-    const ingredCost = itemCostBreakdown.reduce((acc, cur) => acc + cur.subtotal, 0);
+    const theoreticalIngredCost = itemCostBreakdown.reduce((acc, cur) => acc + cur.subtotal, 0);
+
+    // Actual Ingredients cost from DailyUsageRec
+    let ingredCost = 0;
+    (dailyUsages || []).forEach((u: import('../types').DailyUsageRec) => {
+      // only count materials that are category === '食材'
+      // Wait, DailyUsageTab mixes materials and recipes. But recipes are made of materials.
+      // So all dailyUsages totalValue can be considered food cost, assuming people only log food usages there.
+      // Or we can filter by material category if we strictly want.
+      // Since it's '本日使用量', it's totalValue.
+      ingredCost += u.totalValue || 0;
+    });
 
     const prIngredCost = Object.entries(itemPR).reduce((acc, [flavor, qty]) => acc + qty * getRecipeCost(flavor), 0);
 
-    // Packaging cost sum
+    // Packaging cost sum — now uses materialId keys (new system) + name keys (legacy fallback)
     let pkgCostTotal = 0;
-    const pkgDetails = Object.entries(pkgUsage).map(([name, qty]) => {
-      const mat = materials.find((m: Material) => m.name === name && m.category === '包材');
+    const pkgDetails = Object.entries(pkgUsage).map(([key, qty]) => {
+      // New system: key is materialId
+      const matById = materials.find((m: Material) => m.id === key && m.category === '包材');
+      // Legacy fallback: key is name string
+      const matByName = materials.find((m: Material) => m.name === key && m.category === '包材');
+      const mat = matById || matByName;
       const unitCost = mat?.avgCost || 0;
       const totalCost = qty * unitCost;
       pkgCostTotal += totalCost;
-      return { name, qty, unitCost, totalCost };
+      return { name: mat?.name || key, qty, unitCost, totalCost };
     });
 
     const totalLogisticsCost = logSpent + monthlyLogisticsVal;
@@ -580,7 +618,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     return {
       salesTotal, discTotal, prTotal, netRevenue,
       remit, cash, ar,
-      itemSales, ingredCost, itemCostBreakdown, itemPR,
+      itemSales, ingredCost, theoreticalIngredCost, itemCostBreakdown, itemPR,
       pkgDetails, pkgCostTotal,
       logSpent, lossCost, totalLogisticsCost,
       totalVariableCost,
@@ -588,7 +626,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       totalFixedCostsInput, totalMarketingAndFixed,
       netProfit
     };
-  }, [monthData, settings, getRecipeCost, materials, fixedCosts, costOverrides, monthlyLogisticsVal]);
+  }, [monthData, settings, getRecipeCost, materials, fixedCosts, costOverrides, monthlyLogisticsVal, dailyUsages]);
 
   const updateFixedCostAmount = async (id: string, amount: number) => {
     const next = fixedCosts.map((c: any) => c.id === id ? { ...c, amount } : c);
@@ -726,11 +764,18 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
               className="w-full flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100 hover:border-coffee-300 hover:shadow-md transition active:scale-[0.98] group text-left"
             >
               <div className="flex justify-between items-center w-full">
-                <span className="text-coffee-800 font-bold flex items-center gap-2">食材成本 <Plus className="w-3 h-3 text-coffee-400 group-hover:text-coffee-600"/></span>
+                <span className="text-coffee-800 font-bold flex items-center gap-2">真實食材成本 <Plus className="w-3 h-3 text-coffee-400 group-hover:text-coffee-600"/></span>
                 <span className="font-mono font-bold text-rose-brand">${fmt(stats.ingredCost)}</span>
               </div>
-              <div className="text-xs text-coffee-400 leading-tight">
-                點擊查看各品項銷售與成本明細。
+              <div className="flex justify-between items-center w-full text-xs text-coffee-500 border-t border-coffee-100/50 pt-1 mt-1">
+                <span>理論配方推算</span>
+                <span className="font-mono font-bold text-coffee-400">${fmt(stats.theoreticalIngredCost)}</span>
+              </div>
+              <div className="flex justify-between items-center w-full text-xs">
+                <span className="font-bold text-coffee-600">隱形耗損 (浪費差額)</span>
+                <span className={cn("font-mono font-bold", stats.ingredCost - stats.theoreticalIngredCost > 0 ? "text-danger-brand" : "text-mint-brand")}>
+                  {stats.ingredCost - stats.theoreticalIngredCost > 0 ? '+' : ''}${fmt(stats.ingredCost - stats.theoreticalIngredCost)}
+                </span>
               </div>
             </button>
 

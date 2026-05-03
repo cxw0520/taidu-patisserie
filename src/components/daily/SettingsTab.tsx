@@ -18,6 +18,15 @@ export default function SettingsTab({
   dailyActive?: DailyReport['dailyActive'];
   updateDaily: (patch: Partial<DailyReport>) => void;
 }) {
+  const [materials, setMaterials] = useState<import('../../types').Material[]>([]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'shops', shopId, 'materials'), snap => {
+      setMaterials(snap.docs.map(d => ({ id: d.id, ...d.data() } as import('../../types').Material)));
+    });
+    return unsub;
+  }, [shopId]);
+
   const updateSettings = async (newSettings: Settings) => {
     try {
       await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), newSettings);
@@ -114,6 +123,7 @@ export default function SettingsTab({
   };
 
   const [recipeModal, setRecipeModal] = useState<{ isOpen: boolean; gbIndex: number | null }>({ isOpen: false, gbIndex: null });
+  const [pkgModal, setPkgModal] = useState<{ isOpen: boolean; type: 'single' | 'gift' | 'custom'; itemIdx: number; catIdx?: number } | null>(null);
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -155,6 +165,7 @@ export default function SettingsTab({
                     <th className="p-3 border-b border-[#f0ede8]">品項名稱</th>
                     <th className="p-3 border-b border-[#f0ede8]">預設商品單價</th>
                     {t.type === 'giftItems' && <th className="p-3 border-b border-[#f0ede8]">內容配方</th>}
+                    <th className="p-3 border-b border-[#f0ede8]">包材綁定</th>
                     <th className="p-3 w-20 border-b border-[#f0ede8]">移除</th>
                   </tr>
                 </thead>
@@ -188,6 +199,14 @@ export default function SettingsTab({
                           </button>
                         </td>
                       )}
+                      <td className="p-3">
+                        <button 
+                          onClick={() => setPkgModal({ isOpen: true, type: t.type === 'giftItems' ? 'gift' : 'single', itemIdx: idx })}
+                          className="text-xs bg-mint-50 hover:bg-mint-100 text-mint-700 font-bold px-3 py-1.5 rounded-lg transition"
+                        >
+                          📦 包材 ({Object.keys(item.materialRecipe || {}).length}種)
+                        </button>
+                      </td>
                       <td className="p-3">
                         <button onClick={() => handleDelete(typeTag, idx)} className="p-1.5 text-gray-400 hover:text-danger-brand hover:bg-danger-brand/10 inline-block rounded transition"><Trash2 className="w-4 h-4" /></button>
                       </td>
@@ -235,6 +254,7 @@ export default function SettingsTab({
                   <th className="p-3 w-32 border-b border-[#f0ede8]">今日上架 (依日期保留)</th>
                   <th className="p-3 border-b border-[#f0ede8]">品項名稱</th>
                   <th className="p-3 border-b border-[#f0ede8]">預設商品單價</th>
+                  <th className="p-3 border-b border-[#f0ede8]">包材綁定</th>
                   <th className="p-3 w-20 border-b border-[#f0ede8]">移除</th>
                 </tr>
               </thead>
@@ -257,6 +277,14 @@ export default function SettingsTab({
                     </td>
                     <td className="p-3">
                       <input type="number" className="w-24 text-center bg-transparent outline-none font-bold text-coffee-700 border border-gray-200 rounded px-2 py-1 focus:border-rose-brand" value={item.price} onChange={(e) => handleCustomChange(catIdx, idx, 'price', parseNum(e.target.value))} />
+                    </td>
+                    <td className="p-3">
+                      <button 
+                        onClick={() => setPkgModal({ isOpen: true, type: 'custom', itemIdx: idx, catIdx })}
+                        className="text-xs bg-mint-50 hover:bg-mint-100 text-mint-700 font-bold px-3 py-1.5 rounded-lg transition"
+                      >
+                        📦 包材 ({Object.keys(item.materialRecipe || {}).length}種)
+                      </button>
                     </td>
                     <td className="p-3">
                       <button onClick={() => handleCustomDelete(catIdx, idx)} className="p-1.5 text-gray-400 hover:text-danger-brand hover:bg-danger-brand/10 inline-block rounded transition"><Trash2 className="w-4 h-4" /></button>
@@ -307,6 +335,79 @@ export default function SettingsTab({
                 className="bg-brand-brown text-white font-bold bg-coffee-800 px-6 py-2 rounded-xl shadow-md hover:bg-coffee-900 transition active:scale-95"
               >
                 確定
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pkgModal?.isOpen && (
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm z-[99] flex items-center justify-center animate-in fade-in p-4">
+          <div className="bg-white rounded-2xl w-full max-w-sm overflow-hidden shadow-2xl flex flex-col max-h-[80vh]">
+            <div className="flex justify-between items-center p-4 border-b border-coffee-100 bg-[#faf7f2]">
+              <h3 className="font-bold text-coffee-800">綁定包材</h3>
+              <button onClick={() => setPkgModal(null)} className="p-1 text-gray-400 hover:text-coffee-600 rounded"><span className="text-xl leading-none">&times;</span></button>
+            </div>
+            <div className="p-4 space-y-4 overflow-y-auto flex-1">
+              <p className="text-xs text-coffee-500 font-bold">請填寫此產品銷售 1 單位時，會自動消耗多少包材：</p>
+              {materials.filter(m => m.category === '包材').map(mat => {
+                let currentItem: any = null;
+                if (pkgModal.type === 'gift') currentItem = settings.giftItems[pkgModal.itemIdx];
+                if (pkgModal.type === 'single') currentItem = settings.singleItems[pkgModal.itemIdx];
+                if (pkgModal.type === 'custom') currentItem = settings.customCategories![pkgModal.catIdx!].items[pkgModal.itemIdx];
+                
+                if (!currentItem) return null;
+                const count = currentItem.materialRecipe?.[mat.id] || 0;
+                return (
+                  <div key={mat.id} className="flex justify-between items-center bg-gray-50 p-3 rounded-lg border border-gray-100">
+                    <span className="font-bold text-coffee-700 text-sm">{mat.name}</span>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="number" 
+                        min="0"
+                        className="w-16 text-right border border-gray-200 shadow-sm rounded-md py-1 px-2 font-bold text-coffee-800 outline-none focus:border-mint-brand" 
+                        value={count || ''}
+                        placeholder="0"
+                        onChange={(e) => {
+                          const val = parseNum(e.target.value);
+                          if (pkgModal.type === 'gift') {
+                            const newItems = [...settings.giftItems];
+                            if(!newItems[pkgModal.itemIdx].materialRecipe) newItems[pkgModal.itemIdx].materialRecipe = {};
+                            if (val <= 0) delete newItems[pkgModal.itemIdx].materialRecipe![mat.id];
+                            else newItems[pkgModal.itemIdx].materialRecipe![mat.id] = val;
+                            updateSettings({ ...settings, giftItems: newItems });
+                          } else if (pkgModal.type === 'single') {
+                            const newItems = [...settings.singleItems];
+                            if(!newItems[pkgModal.itemIdx].materialRecipe) newItems[pkgModal.itemIdx].materialRecipe = {};
+                            if (val <= 0) delete newItems[pkgModal.itemIdx].materialRecipe![mat.id];
+                            else newItems[pkgModal.itemIdx].materialRecipe![mat.id] = val;
+                            updateSettings({ ...settings, singleItems: newItems });
+                          } else if (pkgModal.type === 'custom') {
+                            const newCats = [...settings.customCategories!];
+                            const newItems = [...newCats[pkgModal.catIdx!].items];
+                            if(!newItems[pkgModal.itemIdx].materialRecipe) newItems[pkgModal.itemIdx].materialRecipe = {};
+                            if (val <= 0) delete newItems[pkgModal.itemIdx].materialRecipe![mat.id];
+                            else newItems[pkgModal.itemIdx].materialRecipe![mat.id] = val;
+                            newCats[pkgModal.catIdx!].items = newItems;
+                            updateSettings({ ...settings, customCategories: newCats });
+                          }
+                        }}
+                      />
+                      <span className="text-xs font-bold text-coffee-400 w-8">{mat.unit}</span>
+                    </div>
+                  </div>
+                );
+              })}
+              {materials.filter(m => m.category === '包材').length === 0 && (
+                <div className="text-center py-6 text-coffee-400 font-bold text-sm">庫存中沒有設定任何包材</div>
+              )}
+            </div>
+            <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+              <button 
+                onClick={() => setPkgModal(null)}
+                className="bg-brand-brown text-white font-bold bg-mint-600 px-6 py-2 rounded-xl shadow-md hover:bg-mint-700 transition active:scale-95"
+              >
+                完成
               </button>
             </div>
           </div>

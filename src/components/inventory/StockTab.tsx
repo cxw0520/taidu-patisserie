@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { db } from '../../lib/firebase';
-import { deleteDoc, doc, setDoc } from 'firebase/firestore';
+import { deleteDoc, doc, setDoc, updateDoc, increment } from 'firebase/firestore';
 import { Material, InventoryAdj } from '../../types';
 import { fmt, uid } from '../../lib/utils';
 import { Plus, Target, CheckCircle2, AlertCircle, Save, Trash2, ArrowRightLeft, Edit2, X } from 'lucide-react';
@@ -14,6 +14,8 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
   const [convData, setConvData] = useState<{ purchaseUnit: string; midUnit: string; unit: string; purchaseUnitRate: number | ''; midUnitRate: number | '' }>({ purchaseUnit: '', midUnit: '', unit: '', purchaseUnitRate: '', midUnitRate: '' });
   const [editingMinAlert, setEditingMinAlert] = useState<{ id: string; value: string } | null>(null);
   const [editingAvgCost, setEditingAvgCost] = useState<{ id: string; value: string } | null>(null);
+  const [scrapModal, setScrapModal] = useState<Material | null>(null);
+  const [scrapQty, setScrapQty] = useState<number | ''>('');
 
   const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
     name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0
@@ -84,6 +86,15 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
     const confirmed = confirm(`確定刪除品項「${material.name}」？此動作不可復原。`);
     if (!confirmed) return;
     await deleteDoc(doc(db, 'shops', shopId, 'materials', material.id));
+  };
+
+  const handleScrapSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!scrapModal || scrapQty === '' || scrapQty <= 0) return;
+    const newStock = Math.max(0, (scrapModal.stock || 0) - scrapQty);
+    await setDoc(doc(db, 'shops', shopId, 'materials', scrapModal.id), { ...scrapModal, stock: newStock });
+    setScrapModal(null);
+    setScrapQty('');
   };
 
   const handleSaveConvRate = async () => {
@@ -399,7 +410,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                     </td>
                     <td className="py-4 px-6 text-right font-serif-brand font-bold text-mint-brand text-lg">${fmt(m.stock * m.avgCost)}</td>
                     <td className="py-4 px-6 text-center">
-                      <div className="inline-flex gap-2">
+                      <div className="inline-flex gap-2 flex-wrap justify-center">
                         <button
                           onClick={() => { 
                             let initialBig = 0;
@@ -428,6 +439,14 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                         >
                           <Target className="w-3 h-3" /> 庫存盤點
                         </button>
+                        {m.category === '包材' && (
+                          <button
+                            onClick={() => { setScrapModal(m); setScrapQty(''); }}
+                            className="px-4 py-1.5 bg-amber-100 text-amber-700 rounded-full text-xs font-bold hover:bg-amber-200 transition-colors inline-flex items-center gap-1"
+                          >
+                            🗑️ 報廢
+                          </button>
+                        )}
                         <button
                           onClick={() => handleDeleteMaterial(m)}
                           className="px-3 py-1.5 bg-rose-100 text-rose-700 rounded-full text-xs font-bold hover:bg-rose-200 transition-colors inline-flex items-center gap-1"
@@ -603,6 +622,45 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                   儲存換算設定
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+      {/* Scrap Modal */}
+      <AnimatePresence>
+        {scrapModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setScrapModal(null)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel w-full max-w-md bg-white border-0 shadow-2xl rounded-3xl relative z-10 p-8 space-y-6">
+              <div>
+                <h3 className="text-xl font-bold font-serif-brand text-coffee-800">🗑️ 包材報廢登記</h3>
+                <p className="text-sm font-bold text-coffee-400 mt-1">{scrapModal.name} — 目前庫存: {fmt(scrapModal.stock)} {scrapModal.unit}</p>
+              </div>
+              <form onSubmit={handleScrapSubmit} className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-coffee-500 mb-2 block">報廢數量 ({scrapModal.unit})</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      required
+                      value={scrapQty}
+                      onChange={e => setScrapQty(parseFloat(e.target.value) || '')}
+                      className="w-full bg-white border-2 border-amber-200 rounded-xl px-4 py-3 font-bold text-coffee-800 outline-none focus:border-amber-500 pr-16"
+                      placeholder="0"
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-sm font-bold text-coffee-400">{scrapModal.unit}</span>
+                  </div>
+                </div>
+                <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl text-xs font-bold text-amber-700">
+                  報廢後剩餘庫存: {fmt(Math.max(0, (scrapModal.stock || 0) - (Number(scrapQty) || 0)))} {scrapModal.unit}
+                </div>
+                <div className="pt-2 flex gap-3">
+                  <button type="button" onClick={() => setScrapModal(null)} className="flex-1 py-3 bg-coffee-100 text-coffee-600 rounded-xl font-bold hover:bg-coffee-200">取消</button>
+                  <button type="submit" className="flex-1 py-3 bg-amber-600 text-white rounded-xl font-bold hover:bg-amber-700 transition active:scale-95 shadow-md">確定報廢</button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

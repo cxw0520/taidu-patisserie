@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { doc, onSnapshot, setDoc, getDoc, query, collection, where, getDocs, limit, orderBy, runTransaction, writeBatch } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, query, collection, where, getDocs, limit, orderBy, runTransaction, writeBatch, increment } from 'firebase/firestore';
 import { fmt, uid, parseNum, todayISO, normalizeFlavorName } from '../lib/utils';
 import { DailyReport, Settings, Order, LossEntry } from '../types';
 import { 
@@ -244,6 +244,33 @@ export default function DailyView({
   const handleNewOrder = async (order: Order) => {
     if (!dailyData) return;
     updateDaily({ orders: [...dailyData.orders, order] });
+    
+    // Auto-deduct packaging from materialRecipe
+    const packagingUsed: Record<string, number> = {};
+    Object.entries(order.items || {}).forEach(([itemId, qtyStr]) => {
+      const qty = parseNum(qtyStr);
+      if (qty <= 0) return;
+      
+      const itemDef = settings.singleItems?.find(i => i.id === itemId) ||
+                      settings.giftItems?.find(i => i.id === itemId) ||
+                      (settings.customCategories || []).flatMap(c => c.items).find(i => i.id === itemId);
+      
+      if (itemDef && itemDef.materialRecipe) {
+        Object.entries(itemDef.materialRecipe).forEach(([matId, pkgQty]) => {
+          packagingUsed[matId] = (packagingUsed[matId] || 0) + (parseNum(pkgQty) * qty);
+        });
+      }
+    });
+
+    if (Object.keys(packagingUsed).length > 0) {
+      const batch = writeBatch(db);
+      Object.entries(packagingUsed).forEach(([matId, deductQty]) => {
+        batch.update(doc(db, 'shops', shopId, 'materials', matId), {
+          stock: increment(-deductQty)
+        });
+      });
+      await batch.commit().catch(e => console.error('Failed to deduct packaging:', e));
+    }
     
     // CRM update
     if (order.buyer === '現客' && !order.phone) return;
