@@ -76,7 +76,7 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
       if (item.type === 'material') {
         result[item.itemId] = (result[item.itemId] || 0) + item.quantity * ratio;
       } else {
-        const sub = getMaterialsForRecipe(item.itemId, item.quantity * ratio * (recipes.find(x => x.id === item.itemId)?.yield || 1), new Set([...visited, recipeId]));
+        const sub = getMaterialsForRecipe(item.itemId, item.quantity * ratio, new Set([...visited, recipeId]));
         Object.entries(sub).forEach(([k, v]) => result[k] = (result[k] || 0) + v);
       }
     }
