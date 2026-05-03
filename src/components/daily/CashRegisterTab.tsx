@@ -186,7 +186,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   const handleCloseShift = () => {
     const total = Object.entries(currencyForm).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
     const cashSales = dailyData.orders
-      .filter(o => o.status === '現結')
+      .filter(o => o.status === '現結' && (o.source === 'pos' || o.note?.includes('收銀機交易')))
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
     const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
     const expected = shift.openingTotal + cashSales - totalExpenses;
@@ -210,7 +210,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   const handleUpdateClosingCash = () => {
     const total = Object.entries(currencyForm).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
     const cashSales = dailyData.orders
-      .filter(o => o.status === '現結')
+      .filter(o => o.status === '現結' && (o.source === 'pos' || o.note?.includes('收銀機交易')))
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
     const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
     const expected = shift.openingTotal + cashSales - totalExpenses;
@@ -241,7 +241,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   const handleUpdateOpeningCash = () => {
     const total = Object.entries(currencyForm).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
     const cashSales = dailyData.orders
-      .filter(o => o.status === '現結')
+      .filter(o => o.status === '現結' && (o.source === 'pos' || o.note?.includes('收銀機交易')))
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
     const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
     const expected = total + cashSales - totalExpenses;
@@ -300,7 +300,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   const posSalesStats = useMemo(() => {
     const stats: Record<string, number> = {};
     dailyData.orders.forEach(o => {
-      if (o.note?.includes('收銀機交易')) {
+      if (o.source === 'pos' || o.note?.includes('收銀機交易')) {
         Object.entries(o.items || {}).forEach(([id, qty]) => {
           const item = allItems.find(i => i.id === id);
           if (item) {
