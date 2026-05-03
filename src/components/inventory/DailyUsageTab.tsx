@@ -50,12 +50,15 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
           const mat = materials.find(m => m.id === item.itemId);
           total += (mat?.avgCost || 0) * item.quantity;
         } else {
-          total += getCost(item.itemId, new Set([...visited, recipeId])) * item.quantity;
+          const subRecipe = recipes.find(r => r.id === item.itemId);
+          const subBatchCost = getCost(item.itemId, new Set([...visited, recipeId]));
+          const subUnitCost = subRecipe && subRecipe.yield > 0 ? subBatchCost / subRecipe.yield : 0;
+          total += subUnitCost * item.quantity;
         }
       }
-      const unitCost = total / recipe.yield;
-      memo[recipeId] = unitCost;
-      return unitCost;
+      const batchCost = total;
+      memo[recipeId] = batchCost;
+      return batchCost;
     };
 
     const costMap: Record<string, number> = {};
@@ -71,12 +74,14 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
     const recipe = recipes.find(r => r.id === recipeId);
     if (!recipe || recipe.yield <= 0) return result;
     
-    const ratio = qty / recipe.yield;
+    const ratio = qty; // qty is the number of BATCHES
     for (const item of recipe.items) {
       if (item.type === 'material') {
         result[item.itemId] = (result[item.itemId] || 0) + item.quantity * ratio;
       } else {
-        const sub = getMaterialsForRecipe(item.itemId, item.quantity * ratio, new Set([...visited, recipeId]));
+        const subRecipe = recipes.find(r => r.id === item.itemId);
+        const subRatio = subRecipe && subRecipe.yield > 0 ? item.quantity / subRecipe.yield : 0;
+        const sub = getMaterialsForRecipe(item.itemId, subRatio * ratio, new Set([...visited, recipeId]));
         Object.entries(sub).forEach(([k, v]) => result[k] = (result[k] || 0) + v);
       }
     }
@@ -250,7 +255,7 @@ export default function DailyUsageTab({ materials, shopId }: { materials: Materi
                   {itemType === 'material' ? (
                     materials.map(m => <option key={m.id} value={m.id}>{m.name} (單價: ${fmt(m.avgCost)}/{m.unit})</option>)
                   ) : (
-                    recipes.map(r => <option key={r.id} value={r.id}>{r.name} (一份產出 {r.yield}{r.unit}, 單價: ${fmt(costs[r.id] || 0)})</option>)
+                    recipes.map(r => <option key={r.id} value={r.id}>{r.name} (單次製作成本: ${fmt(costs[r.id] || 0)}, 產出 {r.yield}{r.unit})</option>)
                   )}
                 </select>
               </div>
