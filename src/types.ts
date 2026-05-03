@@ -269,6 +269,9 @@ export interface Customer {
   phone: string;
   email?: string;
   gender?: '先生' | '小姐' | '不選擇';
+  lineId?: string;
+  birthday?: string;
+  tags?: string[];
   note?: string;
   createdAt: string;
   updatedAt: string;

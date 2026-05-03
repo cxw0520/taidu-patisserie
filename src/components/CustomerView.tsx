@@ -7,7 +7,7 @@ import { uid, fmt, cn } from '../lib/utils';
 import { Customer, CustomerPurchase, Settings } from '../types';
 import {
   Users, Plus, Search, Trash2, ChevronDown, ChevronRight,
-  Phone, Mail, StickyNote, ShoppingBag, X, Edit2, Check, Star, User, Database
+  Phone, Mail, StickyNote, ShoppingBag, X, Edit2, Check, Star, User, Database, MessageCircle, Cake, Tag, AlertTriangle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -297,16 +297,26 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
-                    <span className="font-bold text-coffee-800">{c.name} {c.gender && c.gender !== '不選擇' ? c.gender : ''}</span>
+                    <span className="font-bold text-coffee-800 flex items-center gap-2">
+                      {c.name} {c.gender && c.gender !== '不選擇' ? c.gender : ''}
+                      {c.tags?.includes('奧客') && <AlertTriangle className="w-4 h-4 text-danger-brand" />}
+                    </span>
                     {c.totalPurchaseCount >= 3 && (
                       <span className="text-[10px] font-bold bg-amber-50 text-amber-600 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
                         <Star className="w-3 h-3" /> 回購顧客
                       </span>
                     )}
+                    {c.tags?.filter(t => t !== '奧客').map(t => (
+                      <span key={t} className="text-[10px] font-bold bg-coffee-100 text-coffee-600 px-2 py-0.5 rounded-full">
+                        {t}
+                      </span>
+                    ))}
                   </div>
-                  <div className="flex items-center gap-3 mt-0.5 text-xs text-coffee-400 font-bold">
+                  <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-coffee-400 font-bold">
                     {c.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{c.phone}</span>}
+                    {c.lineId && <span className="flex items-center gap-1 text-[#06C755]"><MessageCircle className="w-3 h-3" />{c.lineId}</span>}
                     {c.email && <span className="flex items-center gap-1 truncate"><Mail className="w-3 h-3" />{c.email}</span>}
+                    {c.birthday && <span className="flex items-center gap-1 text-rose-400"><Cake className="w-3 h-3" />{c.birthday}</span>}
                   </div>
                 </div>
                 {/* Stats */}
@@ -433,9 +443,26 @@ function CustomerFormModal({ shopId, initial, onClose }: {
     phone: initial?.phone || '',
     email: initial?.email || '',
     gender: initial?.gender || '不選擇',
+    lineId: initial?.lineId || '',
+    birthday: initial?.birthday || '',
+    tags: initial?.tags || [],
     note: initial?.note || '',
   });
+  const [tagInput, setTagInput] = useState('');
   const [saving, setSaving] = useState(false);
+
+  const toggleTag = (t: string) => {
+    setForm(prev => ({ ...prev, tags: prev.tags.includes(t) ? prev.tags.filter(x => x !== t) : [...prev.tags, t] }));
+  };
+  const addCustomTag = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && tagInput.trim()) {
+      e.preventDefault();
+      if (!form.tags.includes(tagInput.trim())) {
+        setForm(prev => ({ ...prev, tags: [...prev.tags, tagInput.trim()] }));
+      }
+      setTagInput('');
+    }
+  };
 
   const handleSave = async () => {
     if (!form.name.trim()) return alert('請輸入顧客姓名');
@@ -479,7 +506,9 @@ function CustomerFormModal({ shopId, initial, onClose }: {
           {[
             { label: '姓名 *', key: 'name', placeholder: '顧客姓名', icon: Users, type: 'text' },
             { label: '電話', key: 'phone', placeholder: '09xx-xxx-xxx', icon: Phone, type: 'tel' },
+            { label: 'LINE ID', key: 'lineId', placeholder: '@yourline', icon: MessageCircle, type: 'text' },
             { label: '電子郵件', key: 'email', placeholder: 'example@email.com', icon: Mail, type: 'email' },
+            { label: '生日', key: 'birthday', placeholder: '', icon: Cake, type: 'date' },
           ].map(({ label, key, placeholder, icon: Icon, type }) => (
             <div key={key}>
               <label className="text-xs font-bold text-coffee-400 mb-1 block">{label}</label>
@@ -505,6 +534,40 @@ function CustomerFormModal({ shopId, initial, onClose }: {
                   className={cn("py-2.5 rounded-xl text-sm font-bold border transition-all", form.gender === g ? "bg-rose-brand border-rose-brand text-white" : "bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300")}
                 >
                   {g}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="text-xs font-bold text-coffee-400 mb-1 block">顧客標籤</label>
+            <div className="flex flex-wrap gap-2 mb-2">
+              {form.tags.map(t => (
+                <span key={t} className="bg-coffee-100 text-coffee-700 text-xs font-bold px-2 py-1 rounded-lg flex items-center gap-1">
+                  {t} <button onClick={() => toggleTag(t)} className="text-coffee-400 hover:text-danger-brand"><X className="w-3 h-3" /></button>
+                </span>
+              ))}
+            </div>
+            <div className="relative">
+              <Tag className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-coffee-300" />
+              <input
+                type="text"
+                value={tagInput}
+                onChange={e => setTagInput(e.target.value)}
+                onKeyDown={addCustomTag}
+                placeholder="輸入自訂標籤後按 Enter"
+                className="w-full bg-coffee-50 border border-coffee-100 rounded-xl pl-10 pr-4 py-2.5 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand"
+              />
+            </div>
+            <div className="flex gap-2 mt-2">
+              {(['VIP', '常客', '公司行號', '奧客']).map(preset => (
+                <button
+                  key={preset}
+                  onClick={() => toggleTag(preset)}
+                  className={cn("text-[10px] font-bold px-2 py-1 rounded-full border transition-colors", 
+                    form.tags.includes(preset) ? "bg-coffee-700 text-white border-coffee-700" : "bg-white text-coffee-500 border-coffee-200 hover:border-coffee-400"
+                  )}
+                >
+                  {preset === '奧客' ? <AlertTriangle className="w-3 h-3 inline mr-1 text-danger-brand" /> : '+'}{preset}
                 </button>
               ))}
             </div>

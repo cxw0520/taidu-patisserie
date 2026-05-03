@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
+import CustomerAutocomplete from './CustomerAutocomplete';
 
 interface CashRegisterTabProps {
   dailyData: DailyReport;
@@ -27,6 +28,8 @@ interface CashRegisterTabProps {
   updateDaily: (patch: Partial<DailyReport>) => void;
   shopId: string;
   metrics: any;
+  customers: import('../../types').Customer[];
+  onAddOrder: (order: Order) => void;
 }
 
 const DEFAULT_CURRENCY: CurrencyBreakdown = {
@@ -39,7 +42,7 @@ const DEFAULT_CURRENCY: CurrencyBreakdown = {
   "1": 0
 };
 
-export default function CashRegisterTab({ dailyData, settings, updateDaily, metrics }: CashRegisterTabProps) {
+export default function CashRegisterTab({ dailyData, settings, updateDaily, metrics, customers, onAddOrder }: CashRegisterTabProps) {
   const [cart, setCart] = useState<{item: Item, qty: number}[]>([]);
   const [checkoutModal, setCheckoutModal] = useState(false);
   const [expenseModal, setExpenseModal] = useState(false);
@@ -53,6 +56,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   // Form states
   const [checkoutData, setCheckoutData] = useState({
     buyer: '現客',
+    phone: '',
     discAmt: 0,
     paymentMethod: '現結' as Order['status'],
     receivedAmt: 0
@@ -147,7 +151,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     const newOrder: Order = {
       id: orderId,
       buyer: checkoutData.buyer,
-      phone: '',
+      phone: checkoutData.phone,
       address: '',
       items: orderItems,
       prodAmt: totalCartAmt,
@@ -159,9 +163,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       source: 'pos'
     };
 
-    updateDaily({
-      orders: [...dailyData.orders, newOrder]
-    });
+    onAddOrder(newOrder);
 
     setFinalCheckModal({
       order: newOrder,
@@ -174,6 +176,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     setReceivedInput('');
     setCheckoutData({
       buyer: '現客',
+      phone: '',
       discAmt: 0,
       paymentMethod: '現結',
       receivedAmt: 0
@@ -728,6 +731,12 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                       />
                     </div>
                   </div>
+                  <CustomerAutocomplete
+                    customers={customers}
+                    phoneInput={checkoutData.phone}
+                    setPhoneInput={phone => setCheckoutData({ ...checkoutData, phone })}
+                    onSelectCustomer={c => setCheckoutData({ ...checkoutData, buyer: c.name, phone: c.phone })}
+                  />
 
                   <div className="grid grid-cols-3 gap-2">
                     {['現結', '匯款', '未結帳款'].map(m => (
