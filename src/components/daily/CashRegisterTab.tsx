@@ -30,6 +30,7 @@ interface CashRegisterTabProps {
   metrics: any;
   customers: import('../../types').Customer[];
   onAddOrder: (order: Order) => void;
+  onAddFutureOrder?: (targetDate: string, order: Order) => void;
 }
 
 const DEFAULT_CURRENCY: CurrencyBreakdown = {
@@ -42,7 +43,7 @@ const DEFAULT_CURRENCY: CurrencyBreakdown = {
   "1": 0
 };
 
-export default function CashRegisterTab({ dailyData, settings, updateDaily, metrics, customers, onAddOrder }: CashRegisterTabProps) {
+export default function CashRegisterTab({ dailyData, settings, updateDaily, metrics, customers, onAddOrder, onAddFutureOrder }: CashRegisterTabProps) {
   const [cart, setCart] = useState<{item: Item, qty: number}[]>([]);
   const [checkoutModal, setCheckoutModal] = useState(false);
   const [expenseModal, setExpenseModal] = useState(false);
@@ -59,7 +60,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     phone: '',
     discAmt: 0,
     paymentMethod: '現結' as Order['status'],
-    receivedAmt: 0
+    receivedAmt: 0,
+    pickupDate: dailyData.date
   });
 
   const [expenseData, setExpenseData] = useState({
@@ -148,25 +150,72 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     });
 
     const actualAmt = totalCartAmt - checkoutData.discAmt;
-    const newOrder: Order = {
-      id: orderId,
-      buyer: checkoutData.buyer,
-      phone: checkoutData.phone,
-      address: '',
-      items: orderItems,
-      prodAmt: totalCartAmt,
-      shipAmt: 0,
-      discAmt: checkoutData.discAmt,
-      actualAmt: actualAmt,
-      status: checkoutData.paymentMethod,
-      note: `收銀機交易 - ${checkoutData.paymentMethod}`,
-      source: 'pos'
-    };
+    const isFuturePickup = checkoutData.pickupDate !== dailyData.date;
 
-    onAddOrder(newOrder);
+    if (isFuturePickup) {
+      // 1. Prepayment Order (Today) - For Cashflow only
+      const prepaymentOrder: Order = {
+        id: orderId,
+        buyer: checkoutData.buyer,
+        phone: checkoutData.phone,
+        address: '',
+        items: {}, // No items recognized today
+        prodAmt: 0, // No revenue today
+        shipAmt: 0,
+        discAmt: 0,
+        actualAmt: actualAmt, // Cash collected today
+        status: checkoutData.paymentMethod,
+        note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨`,
+        source: 'pos',
+        orderType: 'prepayment',
+        pickupDate: checkoutData.pickupDate
+      };
+      onAddOrder(prepaymentOrder);
+
+      // 2. Pickup Order (Future) - For Revenue and Inventory
+      if (onAddFutureOrder) {
+        const pickupOrder: Order = {
+          id: uid(),
+          buyer: checkoutData.buyer,
+          phone: checkoutData.phone,
+          address: '',
+          items: orderItems,
+          prodAmt: totalCartAmt,
+          shipAmt: 0,
+          discAmt: checkoutData.discAmt,
+          actualAmt: 0, // No cash expected tomorrow
+          status: '已收帳款', // Already paid
+          note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳付款`,
+          source: 'pos',
+          orderType: 'pickup',
+          pendingPickup: true,
+          pickupDate: checkoutData.pickupDate
+        };
+        onAddFutureOrder(checkoutData.pickupDate, pickupOrder);
+      }
+    } else {
+      // Normal Order
+      const newOrder: Order = {
+        id: orderId,
+        buyer: checkoutData.buyer,
+        phone: checkoutData.phone,
+        address: '',
+        items: orderItems,
+        prodAmt: totalCartAmt,
+        shipAmt: 0,
+        discAmt: checkoutData.discAmt,
+        actualAmt: actualAmt,
+        status: checkoutData.paymentMethod,
+        note: `收銀機交易 - ${checkoutData.paymentMethod}`,
+        source: 'pos',
+        orderType: 'normal',
+        pickupDate: dailyData.date
+      };
+      onAddOrder(newOrder);
+    }
 
     setFinalCheckModal({
-      order: newOrder,
+      order: { id: orderId, actualAmt, status: checkoutData.paymentMethod } as Order,
       received: checkoutData.receivedAmt,
       change: checkoutData.paymentMethod === '現結' ? checkoutData.receivedAmt - actualAmt : 0
     });
@@ -179,7 +228,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       phone: '',
       discAmt: 0,
       paymentMethod: '現結',
-      receivedAmt: 0
+      receivedAmt: 0,
+      pickupDate: dailyData.date
     });
   };
 
@@ -753,6 +803,21 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                         {m}
                       </button>
                     ))}
+                  </div>
+
+                  <div className="flex flex-col">
+                    <label className="text-xs font-bold text-coffee-400 mb-1 block">取貨日期 (預設為今日)</label>
+                    <input
+                      type="date"
+                      value={checkoutData.pickupDate}
+                      onChange={e => setCheckoutData({...checkoutData, pickupDate: e.target.value})}
+                      className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand"
+                    />
+                    {checkoutData.pickupDate !== dailyData.date && (
+                      <p className="text-[10px] text-amber-600 mt-1 font-bold">
+                        注意：這是一筆預購單！今天將只記錄現金，商品數量與營收將在取貨日認列。
+                      </p>
+                    )}
                   </div>
 
                   <div className="p-4 bg-coffee-50 rounded-2xl space-y-2">

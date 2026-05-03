@@ -74,6 +74,8 @@ export interface Order {
   source?: 'pos' | 'manual' | 'import';
   arCollectedCash?: number;
   arCollectedRemit?: number;
+  orderType?: 'normal' | 'prepayment' | 'pickup';
+  pendingPickup?: boolean;
 }
 
 export interface JournalLine {

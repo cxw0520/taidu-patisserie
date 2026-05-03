@@ -240,21 +240,28 @@ export default function DailyView({
       return { ...prev, ...patch, date: loadedDateKey };
     });
   };
-
-  const handleNewOrder = async (order: Order) => {
+  const handlePickup = async (orderId: string) => {
     if (!dailyData) return;
-    updateDaily({ orders: [...dailyData.orders, order] });
+    const orderIndex = dailyData.orders.findIndex(o => o.id === orderId);
+    if (orderIndex === -1) return;
+    const order = dailyData.orders[orderIndex];
     
-    // Auto-deduct packaging from materialRecipe
+    // Auto-deduct packaging when picked up
+    await deductPackagingForOrder(order);
+    
+    const nextOrders = [...dailyData.orders];
+    nextOrders[orderIndex] = { ...order, pendingPickup: false };
+    updateDaily({ orders: nextOrders });
+  };
+
+  const deductPackagingForOrder = async (order: Order) => {
     const packagingUsed: Record<string, number> = {};
     Object.entries(order.items || {}).forEach(([itemId, qtyStr]) => {
       const qty = parseNum(qtyStr);
       if (qty <= 0) return;
-      
       const itemDef = settings.singleItems?.find(i => i.id === itemId) ||
                       settings.giftItems?.find(i => i.id === itemId) ||
                       (settings.customCategories || []).flatMap(c => c.items).find(i => i.id === itemId);
-      
       if (itemDef && itemDef.materialRecipe) {
         Object.entries(itemDef.materialRecipe).forEach(([matId, pkgQty]) => {
           packagingUsed[matId] = (packagingUsed[matId] || 0) + (parseNum(pkgQty) * qty);
@@ -270,6 +277,54 @@ export default function DailyView({
         });
       });
       await batch.commit().catch(e => console.error('Failed to deduct packaging:', e));
+    }
+  };
+
+  const handleAddFutureOrder = async (targetDate: string, order: Order) => {
+    const targetKey = normalizeDateKey(targetDate);
+    const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
+    const docSnap = await getDoc(docRef);
+    let targetData: DailyReport;
+    if (docSnap.exists()) {
+      targetData = docSnap.data() as DailyReport;
+    } else {
+      targetData = {
+        date: targetKey,
+        orders: [],
+        inventory: {},
+        losses: [],
+        packagingUsage: {},
+        ar: { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 }
+      };
+    }
+    
+    targetData.orders = [...targetData.orders, order];
+    await setDoc(docRef, targetData);
+
+    if (order.buyer && order.buyer !== '現客') {
+      upsertCustomerFromOrder(shopId, customers, {
+        orderId: order.id,
+        date: targetKey,
+        buyer: order.buyer,
+        phone: order.phone || '',
+        email: '',
+        prodAmt: order.prodAmt,
+        actualAmt: order.actualAmt,
+        items: order.items,
+        status: order.status
+      }, (candidates, resolve) => {
+        setMergeConflict({ candidates, resolve });
+      });
+    }
+  };
+
+  const handleNewOrder = async (order: Order) => {
+    if (!dailyData) return;
+    updateDaily({ orders: [...dailyData.orders, order] });
+    
+    // Auto-deduct packaging ONLY IF it's not a pending pickup order
+    if (!order.pendingPickup) {
+      await deductPackagingForOrder(order);
     }
     
     // CRM update
@@ -550,11 +605,51 @@ export default function DailyView({
                 handleNewOrder(order);
                 setSaveStatus('saving');
               }}
+              onAddFutureOrder={handleAddFutureOrder}
             />
       )}
 
       {subTab === 'dashboard' && (
         <div className="flex flex-col gap-8">
+          
+          {/* Pending Pickups Alert Block */}
+          {(() => {
+            const pendingPickups = dailyData.orders.filter(o => o.pendingPickup);
+            if (pendingPickups.length === 0) return null;
+            return (
+              <div className="bg-amber-50 border-l-4 border-amber-500 rounded-r-2xl p-6 shadow-sm">
+                <div className="flex items-center gap-3 mb-4">
+                  <Package className="w-6 h-6 text-amber-600" />
+                  <h3 className="text-lg font-bold text-amber-800">今日有 {pendingPickups.length} 筆預購單待交貨</h3>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {pendingPickups.map(order => (
+                    <div key={order.id} className="bg-white border border-amber-100 rounded-xl p-4 shadow-sm flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-bold text-coffee-800">{order.buyer}</span>
+                          <span className="text-xs text-coffee-400">{order.phone}</span>
+                        </div>
+                        <div className="text-xs text-coffee-500 font-medium">
+                          {Object.entries(order.items || {}).map(([id, qty]) => {
+                            const name = settings.singleItems?.find(i => i.id === id)?.name || settings.giftItems?.find(i => i.id === id)?.name || '未知名稱';
+                            return `${name} x${qty}`;
+                          }).join(', ')}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handlePickup(order.id)}
+                        className="px-5 py-2 bg-amber-500 text-white rounded-lg font-bold text-sm hover:bg-amber-600 active:scale-95 transition-all whitespace-nowrap shadow-md shadow-amber-200"
+                      >
+                        ✅ 確認交件 (扣除庫存)
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
+
           {/* Sales List */}
           <div className="glass-panel p-6 md:p-8">
             <div className="flex items-center justify-between mb-6">
