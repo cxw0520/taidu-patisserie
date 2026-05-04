@@ -165,7 +165,15 @@ export default function DailyView({
           if (snap.exists()) {
             const data = snap.data() as DailyReport;
             setLoadedDateKey(targetDateKey);
-            setDailyData({ ...data, date: targetDateKey, ar: { ...defaultAr(), ...(data.ar || {}) } });
+            setDailyData({ 
+              ...data, 
+              date: targetDateKey, 
+              orders: data.orders || [],
+              losses: data.losses || [],
+              inventory: data.inventory || {},
+              packagingUsage: data.packagingUsage || {},
+              ar: { ...defaultAr(), ...(data.ar || {}) } 
+            });
           } else {
             const [y, m, d] = normalizeDateKey(currentDate).split('-').map(Number);
             const prevDate = new Date(y, m - 1, d);
@@ -298,8 +306,8 @@ export default function DailyView({
       };
     }
     
-    targetData.orders = [...targetData.orders, order];
-    await setDoc(docRef, targetData);
+    targetData.orders = [...(targetData.orders || []), order];
+    await setDoc(docRef, targetData, { merge: true });
 
     if (order.buyer && order.buyer !== '現客') {
       upsertCustomerFromOrder(shopId, customers, {
