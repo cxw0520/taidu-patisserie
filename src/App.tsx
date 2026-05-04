@@ -411,21 +411,23 @@ export default function App() {
 
               <div className="pt-4 pb-12 space-y-3">
                 {hasPermission('manage_system') && (
-                  <button 
-                    onClick={() => navigateTo('settings')}
-                    className={cn("w-full p-3 rounded-xl transition-colors font-bold text-sm flex items-center justify-center gap-2", activeTab === 'settings' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-800 border border-coffee-200 hover:bg-coffee-50")}
-                  >
-                    <Settings2 className="w-4 h-4" />
-                    <span>系統設定</span>
-                  </button>
+                  <>
+                    <button 
+                      onClick={() => navigateTo('settings')}
+                      className={cn("w-full p-3 rounded-xl transition-colors font-bold text-sm flex items-center justify-center gap-2", activeTab === 'settings' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-800 border border-coffee-200 hover:bg-coffee-50")}
+                    >
+                      <Settings2 className="w-4 h-4" />
+                      <span>系統設定</span>
+                    </button>
+                    <button
+                      onClick={() => signOut(auth)}
+                      className="w-full p-3 text-danger-brand hover:bg-danger-brand/5 rounded-xl transition-colors font-bold text-sm flex items-center justify-center gap-2 border border-danger-brand/20"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      <span>登出整個系統 (Google 帳號)</span>
+                    </button>
+                  </>
                 )}
-                <button
-                  onClick={() => signOut(auth)}
-                  className="w-full p-3 text-danger-brand hover:bg-danger-brand/5 rounded-xl transition-colors font-bold text-sm flex items-center justify-center gap-2 border border-danger-brand/20"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>登出系統</span>
-                </button>
               </div>
             </div>
           </motion.div>
