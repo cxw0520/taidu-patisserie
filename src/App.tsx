@@ -258,6 +258,55 @@ export default function App() {
 
   const isLocked = operators.length > 0 && !currentOperator && !forceUnlocked;
 
+  const getPageTitle = () => {
+    const baseName = `${settings?.shopName || '態度貳貳甜點工作室'}內部運營系統`;
+    
+    let category = '';
+    let sub = '';
+
+    if (activeTab === 'pos') {
+      return `${baseName}-POS 收銀機`;
+    } else if (activeTab === 'settings') {
+      return `${baseName}-系統設定`;
+    } else if (activeTab === 'journal') {
+      category = '財務會計';
+      const s = globalSubTabs['journal'] || 'entries';
+      if (s === 'entries') sub = '日記簿';
+      else if (s === 'reports') sub = '財務報表';
+      else if (s === 'ledger') sub = '分類帳';
+      else if (s === 'coa') sub = '會計科目';
+      else if (s === 'assets') sub = '資產總表';
+    } else if (activeTab === 'daily') {
+      category = '日月報表';
+      const s = globalSubTabs['daily'] || 'dashboard';
+      if (s === 'dashboard') sub = '日報表-銷售與戰情室';
+      else if (s === 'import') sub = '日報表-訂單匯入';
+      else if (s === 'settings') sub = '日報表-品項設定';
+    } else if (activeTab === 'monthly') {
+      category = '日月報表';
+      const s = globalSubTabs['monthly'] || 'reports';
+      if (s === 'reports') sub = '月報表-財務報表';
+      else if (s === 'products') sub = '月報表-產品數據';
+    } else if (activeTab === 'inventory') {
+      category = '營運管理';
+      const s = globalSubTabs['inventory'] || 'purchasing';
+      if (s === 'purchasing') sub = '進貨管理';
+      else if (s === 'stock') sub = '庫存與盤點';
+      else if (s === 'daily') sub = '本日使用量';
+    } else if (activeTab === 'cost') {
+      category = '營運管理';
+      sub = '成本分析';
+    } else if (activeTab === 'customers') {
+      category = '營運管理';
+      sub = '顧客資料';
+    }
+
+    if (category && sub) {
+      return `${baseName}-${category}[${sub}]`;
+    }
+    return baseName;
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       {isLocked && (
@@ -282,7 +331,7 @@ export default function App() {
             )}
           </div>
           <div>
-            <h1 className="text-xl md:text-3xl font-light text-coffee-600 tracking-[2px]">{settings.shopName || '態度貳貳甜點工作室-內部運營系統'}</h1>
+            <h1 className="text-xl md:text-3xl font-light text-coffee-600 tracking-[2px]">{getPageTitle()}</h1>
             <div className="flex items-center gap-1.5 text-xs font-semibold text-mint-brand mt-1">
               <span className={cn(
                 "w-2 h-2 rounded-full",
