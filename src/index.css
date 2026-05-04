@@ -18,22 +18,95 @@
   --color-coffee-900: #2D1B18;
   
   --color-cream: #FFFDF5;
-  --color-rose-brand: #ff8fa3;
-  --color-mint-brand: #83c5be;
+  
+  /* Overriding default rose to a caramel/coffee tone */
+  --color-rose-50: #fdfaf6;
+  --color-rose-100: #f5eedf;
+  --color-rose-200: #ead8be;
+  --color-rose-300: #dfbb80;
+  --color-rose-400: #c28230;
+  --color-rose-500: #ad6823;
+  --color-rose-600: #8d4f1e;
+  --color-rose-700: #713f1d;
+  --color-rose-800: #5d351a;
+  --color-rose-900: #4a2914;
+
+  /* Overriding default mint to a taupe/beige tone */
+  --color-mint-50: #f9f8f6;
+  --color-mint-100: #f0ebe1;
+  --color-mint-200: #e2d8c7;
+  --color-mint-300: #d4c5ad;
+  --color-mint-400: #c1b092;
+  --color-mint-500: #aa9674;
+  --color-mint-600: #8c7b5c;
+  --color-mint-700: #70624a;
+  --color-mint-800: #594f3d;
+  --color-mint-900: #4a4133;
+
+  /* Muted Olive for Green (Success semantics) */
+  --color-green-50: #f5f7f5;
+  --color-green-100: #e7ece6;
+  --color-green-200: #d0dad0;
+  --color-green-300: #afc0af;
+  --color-green-400: #8ba28b;
+  --color-green-500: #6b846b;
+  --color-green-600: #526852;
+  --color-green-700: #435443;
+  --color-green-800: #374538;
+  --color-green-900: #2e392f;
+
+  /* Terracotta for Red (Danger semantics) */
+  --color-red-50: #fdf5f3;
+  --color-red-100: #fae6e1;
+  --color-red-200: #f4ccc2;
+  --color-red-300: #eba899;
+  --color-red-400: #df7b66;
+  --color-red-500: #d1563d;
+  --color-red-600: #bb4029;
+  --color-red-700: #9c3321;
+  --color-red-800: #812c1e;
+  --color-red-900: #6b281c;
+
+  /* Warm Stone for Gray */
+  --color-gray-50: #faf9f8;
+  --color-gray-100: #f3f0ec;
+  --color-gray-200: #e6e0d8;
+  --color-gray-300: #d3cabc;
+  --color-gray-400: #bcae9d;
+  --color-gray-500: #a59381;
+  --color-gray-600: #8b7968;
+  --color-gray-700: #746355;
+  --color-gray-800: #5e5146;
+  --color-gray-900: #4e443b;
+
+  /* Cool Taupe for Blue */
+  --color-blue-50: #f7f7f6;
+  --color-blue-100: #ecebe9;
+  --color-blue-200: #d5d3ce;
+  --color-blue-300: #b9b5ae;
+  --color-blue-400: #9a958c;
+  --color-blue-500: #797670;
+  --color-blue-600: #615e5a;
+  --color-blue-700: #4e4c48;
+  --color-blue-800: #3c3a37;
+  --color-blue-900: #2c2b29;
+
+  --color-rose-brand: var(--color-rose-500);
+  --color-mint-brand: var(--color-mint-500);
   
   /* Primary alias to bridge existing classes */
-  --color-primary-brand: #ff8fa3;
-  --color-primary-brand-light: #ffb3c1;
-  --color-secondary-brand: #ffcbf2;
-  --color-accent-brand: #83c5be;
-  --color-success-brand: #2b9348;
-  --color-danger-brand: #ef233c;
+  --color-primary-brand: var(--color-rose-500);
+  --color-primary-brand-light: var(--color-rose-300);
+  --color-secondary-brand: var(--color-rose-200);
+  --color-accent-brand: var(--color-mint-500);
+  --color-success-brand: var(--color-green-600);
+  --color-danger-brand: var(--color-red-500);
 }
 
 @layer base {
   body {
     @apply bg-cream text-coffee-800;
-    background-image: linear-gradient(135deg, #fdfbf7 0%, #fff0f3 100%);
+    background-image: linear-gradient(135deg, #fdfbf7 0%, #f5eedf 100%);
     background-attachment: fixed;
   }
   
@@ -50,7 +123,7 @@
   }
 
   .nav-tab-active {
-    @apply bg-rose-brand text-white shadow-[0_4px_15px_rgba(255,143,163,0.3)];
+    @apply bg-rose-brand text-white shadow-[0_4px_15px_rgba(173,104,35,0.3)];
   }
 
   .section-title {
