@@ -259,8 +259,8 @@ export default function App() {
   const isLocked = operators.length > 0 && !currentOperator && !forceUnlocked;
 
   const getPageTitle = () => {
-    const baseName = `${settings?.shopName || '態度貳貳甜點工作室'}內部運營系統`;
-    
+    const baseName = `${settings?.shopName || '態度貳貳甜點工作室'} 內部運營系統`;
+
     let category = '';
     let sub = '';
 
@@ -310,9 +310,9 @@ export default function App() {
   return (
     <div className="min-h-screen flex flex-col">
       {isLocked && (
-        <OperatorLockScreen 
-          operators={operators} 
-          onUnlock={setCurrentOperator} 
+        <OperatorLockScreen
+          operators={operators}
+          onUnlock={setCurrentOperator}
           onForceGoogleUnlock={() => {
             // Require a quick prompt to verify it's the owner wanting to bypass
             if (confirm(`這將使用您的 Google 帳號 (${user.email}) 強制登入系統，確定要繼續嗎？`)) {
@@ -447,11 +447,11 @@ export default function App() {
                         <NavMenuItem label="本日使用量" icon={<BarChart3 />} onClick={() => navigateTo('inventory', 'daily')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'daily'} />
                       </>
                     )}
-                    
+
                     {hasPermission('inventory') && (hasPermission('cost') || hasPermission('customers')) && (
                       <div className="w-full h-px bg-coffee-50 my-3"></div>
                     )}
-                    
+
                     {hasPermission('cost') && <NavMenuItem label="成本分析" icon={<BarChart3 />} onClick={() => navigateTo('cost', 'cost')} active={activeTab === 'cost'} />}
                     {hasPermission('customers') && <NavMenuItem label="顧客資料" icon={<Users />} onClick={() => navigateTo('customers', 'customers')} active={activeTab === 'customers'} />}
                   </div>
@@ -461,7 +461,7 @@ export default function App() {
               <div className="pt-4 pb-12 space-y-3">
                 {hasPermission('manage_system') && (
                   <>
-                    <button 
+                    <button
                       onClick={() => navigateTo('settings')}
                       className={cn("w-full p-3 rounded-xl transition-colors font-bold text-sm flex items-center justify-center gap-2", activeTab === 'settings' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-800 border border-coffee-200 hover:bg-coffee-50")}
                     >
