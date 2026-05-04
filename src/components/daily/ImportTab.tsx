@@ -20,6 +20,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
   const [refreshKey, setRefreshKey] = useState(0);
   const [weeklyData, setWeeklyData] = useState<DailyReport[]>([]);
   const [weekRange, setWeekRange] = useState('');
+  const [importing, setImporting] = useState(false);
 
   useEffect(() => {
     const fetchWeekly = async () => {
@@ -92,6 +93,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
     const idxStoreDate = getIdx(['預約取貨日期', '店取', '取貨日']);
     const idxShipDate = getIdx(['宅配出貨日', '出貨', '出貨日']);
     const idxMethod = getIdx(['取貨方式', '物流', '運送方式']);
+    const idxEmail = getIdx(['電子郵件', '信箱', 'Email', 'email', 'e-mail']);
 
     const itemMap: { item: any; colIdx: number }[] = [];
     const allPossibleItems = [
@@ -155,6 +157,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
       
       const buyer = idxBuyer !== -1 && row[idxBuyer] ? String(row[idxBuyer]) : '未知';
       const phone = idxPhone !== -1 && row[idxPhone] ? String(row[idxPhone]) : '';
+      const email = idxEmail !== -1 && row[idxEmail] ? String(row[idxEmail]).trim() : '';
       const addr = idxAddr !== -1 && row[idxAddr] ? String(row[idxAddr]) : '';
 
       const rNameRaw = idxRecipientName !== -1 ? String(row[idxRecipientName] || '').trim() : '';
@@ -191,7 +194,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
       if (Object.keys(items).length > 0) {
           parsed.push({
             date: d,
-            buyer, phone, addr, recipientName, recipientPhone, items, prodAmt,
+            buyer, phone, email, addr, recipientName, recipientPhone, items, prodAmt,
             method: method || ''
           });
         }
@@ -204,12 +207,8 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
   };
 
   const confirmImport = async () => {
-    // Replaced window.confirm with silent proceed or more interactive check if needed.
-    // Given the user report, window.confirm might be blocking in their iframe.
-    // We will proceed without confirm or add a simple state-based one if needed.
-    // For now, let's just make it robust.
-    
-    if (parsedOrders.length === 0) return;
+    if (parsedOrders.length === 0 || importing) return;
+    setImporting(true);
 
     // Group by date
     const byDate: Record<string, any[]> = {};
@@ -248,6 +247,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
           note: '',
           phone: po.phone,
           address: po.addr,
+          email: po.email,
           recipientName: po.recipientName,
           recipientPhone: po.recipientPhone,
           deliveryMethod,
@@ -324,6 +324,8 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
     } catch (err) {
       console.error(err);
       alert("匯入發生錯誤，請稍後再試。");
+    } finally {
+      setImporting(false);
     }
   };
 
@@ -364,8 +366,12 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
           <div className="mt-6 p-4 bg-mint-brand/5 border border-mint-brand/20 rounded-xl">
             <div className="flex justify-between items-center mb-3">
               <h3 className="font-bold text-mint-brand">待匯入預覽 ({parsedOrders.length} 筆)</h3>
-              <button className="px-4 py-2 bg-mint-brand text-white font-bold rounded-lg shadow-sm hover:bg-mint-brand/80 transition" onClick={confirmImport}>
-                確認匯入以上資料
+              <button 
+                disabled={importing}
+                className={cn("px-4 py-2 text-white font-bold rounded-lg shadow-sm transition", importing ? "bg-gray-400 cursor-not-allowed" : "bg-mint-brand hover:bg-mint-brand/80")} 
+                onClick={confirmImport}
+              >
+                {importing ? "匯入中..." : "確認匯入以上資料"}
               </button>
             </div>
             <div className="overflow-x-auto">

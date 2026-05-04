@@ -68,6 +68,24 @@ export async function upsertCustomerFromOrder(
   }
 
   const dups = findDuplicates(allCustomers, buyer, phone, email);
+
+  const exactMatch = dups.find(c => c.name === parsedName && normalizePhone(c.phone) === normalizePhone(phone));
+  if (exactMatch) {
+    // Auto-merge if exact match found
+    const newPurchases = [...exactMatch.purchases, purchase];
+    const updated: Customer = {
+      ...exactMatch,
+      email: email || exactMatch.email,
+      gender: exactMatch.gender === '不選擇' && parsedGender !== '不選擇' ? parsedGender : exactMatch.gender,
+      purchases: newPurchases,
+      totalPurchaseCount: newPurchases.length,
+      totalPurchaseAmt: newPurchases.reduce((s, p) => s + p.actualAmt, 0),
+      updatedAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, 'shops', shopId, 'customers', exactMatch.id), updated);
+    return;
+  }
+
   if (dups.length > 0) {
     // ask caller what to do
     await new Promise<void>((resolve) => {
