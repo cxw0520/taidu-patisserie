@@ -38,6 +38,10 @@ import MonthlyView from './components/MonthlyView';
 import CostView from './components/CostView';
 import InventoryView from './components/InventoryView';
 import CustomerView from './components/CustomerView';
+import SettingsView from './components/settings/SettingsView';
+import OperatorLockScreen from './components/auth/OperatorLockScreen';
+import { Role, Operator, Permissions } from './types';
+import { Lock } from 'lucide-react';
 
 const DEFAULT_SETTINGS: Settings = {
   giftItems: [
@@ -61,7 +65,7 @@ const DEFAULT_SETTINGS: Settings = {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers' | 'pos'>(() => {
+  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers' | 'pos' | 'settings'>(() => {
     return (localStorage.getItem('app_active_tab') as any) || 'journal';
   });
   const [globalSubTabs, setGlobalSubTabs] = useState<Record<string, string>>(() => {
@@ -99,6 +103,12 @@ export default function App() {
   const [loading, setLoading] = useState(true);
   const [syncStatus, setSyncStatus] = useState<'synced' | 'syncing' | 'error'>('synced');
   const [loginError, setLoginError] = useState<string | null>(null);
+
+  // Operator System State
+  const [roles, setRoles] = useState<Role[]>([]);
+  const [operators, setOperators] = useState<Operator[]>([]);
+  const [currentOperator, setCurrentOperator] = useState<Operator | null>(null);
+  const [forceUnlocked, setForceUnlocked] = useState(false);
 
   const shopId = user?.uid || '';
 
@@ -151,11 +161,25 @@ export default function App() {
     })();
 
     const settingsRef = doc(db, 'shops', shopId, 'meta', 'settings');
-    const unsub = onSnapshot(settingsRef, (snap) => {
+    const unsubSettings = onSnapshot(settingsRef, (snap) => {
       if (snap.exists()) setSettings(snap.data() as Settings);
     });
 
-    return unsub;
+    const rolesRef = collection(db, 'shops', shopId, 'roles');
+    const unsubRoles = onSnapshot(rolesRef, (snap) => {
+      setRoles(snap.docs.map(d => d.data() as Role));
+    });
+
+    const opsRef = collection(db, 'shops', shopId, 'operators');
+    const unsubOps = onSnapshot(opsRef, (snap) => {
+      setOperators(snap.docs.map(d => d.data() as Operator));
+    });
+
+    return () => {
+      unsubSettings();
+      unsubRoles();
+      unsubOps();
+    };
   }, [user, shopId]);
 
   const handleLogin = async () => {
@@ -225,8 +249,29 @@ export default function App() {
     );
   }
 
+  const hasPermission = (key: keyof Permissions) => {
+    if (operators.length === 0 || forceUnlocked) return true;
+    if (!currentOperator) return false;
+    const role = roles.find(r => r.id === currentOperator.roleId);
+    return role ? role.permissions[key] : false;
+  };
+
+  const isLocked = operators.length > 0 && !currentOperator && !forceUnlocked;
+
   return (
     <div className="min-h-screen flex flex-col">
+      {isLocked && (
+        <OperatorLockScreen 
+          operators={operators} 
+          onUnlock={setCurrentOperator} 
+          onForceGoogleUnlock={() => {
+            // Require a quick prompt to verify it's the owner wanting to bypass
+            if (confirm(`這將使用您的 Google 帳號 (${user.email}) 強制登入系統，確定要繼續嗎？`)) {
+              setForceUnlocked(true);
+            }
+          }}
+        />
+      )}
       <header className="px-4 md:px-10 py-5 md:py-8 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 bg-transparent">
         <div className="flex items-center gap-3 md:gap-4">
           <div className="w-16 h-16 bg-coffee-600 rounded-2xl flex items-center justify-center text-white font-bold text-2xl shadow-[0_4px_12px_rgba(93,46,23,0.2)] overflow-hidden relative">
@@ -250,6 +295,12 @@ export default function App() {
         </div>
 
         <div className="flex items-center gap-3 self-end lg:self-auto">
+          {operators.length > 0 && (
+            <button onClick={() => { setCurrentOperator(null); setForceUnlocked(false); }} className="p-2 bg-white text-coffee-600 rounded-xl shadow-sm border border-coffee-100 hover:bg-coffee-50 transition flex items-center gap-2">
+              <Lock className="w-5 h-5" />
+              <span className="hidden sm:inline font-bold text-sm">鎖定</span>
+            </button>
+          )}
           <button onClick={() => setIsDrawerOpen(true)} className="p-2 bg-coffee-800 text-white rounded-xl shadow-lg hover:bg-coffee-900 transition flex items-center gap-2">
             <Menu className="w-6 h-6" />
             <span className="hidden sm:inline font-bold">選單</span>
@@ -290,53 +341,84 @@ export default function App() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-4 space-y-6">
-              <div className="space-y-1">
-                <button onClick={() => navigateTo('pos', 'pos')} className="w-full flex items-center p-3 bg-rose-brand text-white rounded-xl font-bold shadow-md hover:bg-rose-brand/90 transition">
-                  <ShoppingBag className="w-5 h-5 mr-3" /> POS 收銀機
-                </button>
-              </div>
-
-              <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
-                <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">財務會計</h3>
+              {hasPermission('pos') && (
                 <div className="space-y-1">
-                  <NavMenuItem label="日記簿" icon={<BookOpen />} onClick={() => navigateTo('journal', 'entries')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'entries'} />
-                  <NavMenuItem label="財務報表" icon={<BarChart3 />} onClick={() => navigateTo('journal', 'reports')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'reports'} />
-                  <NavMenuItem label="分類帳" icon={<Layers />} onClick={() => navigateTo('journal', 'ledger')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'ledger'} />
-                  <NavMenuItem label="會計科目" icon={<Settings2 />} onClick={() => navigateTo('journal', 'coa')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'coa'} />
-                  <NavMenuItem label="資產總表" icon={<Gem />} onClick={() => navigateTo('journal', 'assets')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'assets'} />
+                  <button onClick={() => navigateTo('pos', 'pos')} className="w-full flex items-center p-3 bg-rose-brand text-white rounded-xl font-bold shadow-md hover:bg-rose-brand/90 transition">
+                    <ShoppingBag className="w-5 h-5 mr-3" /> POS 收銀機
+                  </button>
                 </div>
-              </div>
+              )}
 
-              <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
-                <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">日月報表</h3>
-                <div className="space-y-1">
-                  <div className="px-3 py-1 mt-1 text-[11px] font-bold text-coffee-300">日報表</div>
-                  <NavMenuItem label="銷售與戰情室" icon={<ClipboardList />} onClick={() => navigateTo('daily', 'dashboard')} active={activeTab === 'daily' && globalSubTabs['daily'] === 'dashboard'} />
-                  <NavMenuItem label="訂單匯入" icon={<Download />} onClick={() => navigateTo('daily', 'import')} active={activeTab === 'daily' && globalSubTabs['daily'] === 'import'} />
-                  <NavMenuItem label="品項設定" icon={<Settings2 />} onClick={() => navigateTo('daily', 'settings')} active={activeTab === 'daily' && globalSubTabs['daily'] === 'settings'} />
-
-                  <div className="px-3 py-1 mt-3 text-[11px] font-bold text-coffee-300">月報表</div>
-                  <NavMenuItem label="財務報表" icon={<CalendarDays />} onClick={() => navigateTo('monthly', 'reports')} active={activeTab === 'monthly' && globalSubTabs['monthly'] === 'reports'} />
-                  <NavMenuItem label="產品數據" icon={<BarChart3 />} onClick={() => navigateTo('monthly', 'products')} active={activeTab === 'monthly' && globalSubTabs['monthly'] === 'products'} />
+              {hasPermission('finance') && (
+                <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
+                  <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">財務會計</h3>
+                  <div className="space-y-1">
+                    <NavMenuItem label="日記簿" icon={<BookOpen />} onClick={() => navigateTo('journal', 'entries')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'entries'} />
+                    <NavMenuItem label="財務報表" icon={<BarChart3 />} onClick={() => navigateTo('journal', 'reports')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'reports'} />
+                    <NavMenuItem label="分類帳" icon={<Layers />} onClick={() => navigateTo('journal', 'ledger')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'ledger'} />
+                    <NavMenuItem label="會計科目" icon={<Settings2 />} onClick={() => navigateTo('journal', 'coa')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'coa'} />
+                    <NavMenuItem label="資產總表" icon={<Gem />} onClick={() => navigateTo('journal', 'assets')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'assets'} />
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
-                <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">營運管理</h3>
-                <div className="space-y-1">
-                  <div className="px-3 py-1 mt-1 text-[11px] font-bold text-coffee-300">進貨與庫存</div>
-                  <NavMenuItem label="進貨管理" icon={<Package />} onClick={() => navigateTo('inventory', 'purchasing')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'purchasing'} />
-                  <NavMenuItem label="庫存與盤點" icon={<ClipboardList />} onClick={() => navigateTo('inventory', 'stock')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'stock'} />
-                  <NavMenuItem label="本日使用量" icon={<BarChart3 />} onClick={() => navigateTo('inventory', 'daily')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'daily'} />
+              {(hasPermission('daily') || hasPermission('monthly')) && (
+                <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
+                  <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">日月報表</h3>
+                  <div className="space-y-1">
+                    {hasPermission('daily') && (
+                      <>
+                        <div className="px-3 py-1 mt-1 text-[11px] font-bold text-coffee-300">日報表</div>
+                        <NavMenuItem label="銷售與戰情室" icon={<ClipboardList />} onClick={() => navigateTo('daily', 'dashboard')} active={activeTab === 'daily' && globalSubTabs['daily'] === 'dashboard'} />
+                        <NavMenuItem label="訂單匯入" icon={<Download />} onClick={() => navigateTo('daily', 'import')} active={activeTab === 'daily' && globalSubTabs['daily'] === 'import'} />
+                        <NavMenuItem label="品項設定" icon={<Settings2 />} onClick={() => navigateTo('daily', 'settings')} active={activeTab === 'daily' && globalSubTabs['daily'] === 'settings'} />
+                      </>
+                    )}
 
-                  <div className="w-full h-px bg-coffee-50 my-3"></div>
-
-                  <NavMenuItem label="成本分析" icon={<BarChart3 />} onClick={() => navigateTo('cost', 'cost')} active={activeTab === 'cost'} />
-                  <NavMenuItem label="顧客資料" icon={<Users />} onClick={() => navigateTo('customers', 'customers')} active={activeTab === 'customers'} />
+                    {hasPermission('monthly') && (
+                      <>
+                        <div className="px-3 py-1 mt-3 text-[11px] font-bold text-coffee-300">月報表</div>
+                        <NavMenuItem label="財務報表" icon={<CalendarDays />} onClick={() => navigateTo('monthly', 'reports')} active={activeTab === 'monthly' && globalSubTabs['monthly'] === 'reports'} />
+                        <NavMenuItem label="產品數據" icon={<BarChart3 />} onClick={() => navigateTo('monthly', 'products')} active={activeTab === 'monthly' && globalSubTabs['monthly'] === 'products'} />
+                      </>
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="pt-4 pb-12">
+              {(hasPermission('inventory') || hasPermission('cost') || hasPermission('customers')) && (
+                <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
+                  <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">營運管理</h3>
+                  <div className="space-y-1">
+                    {hasPermission('inventory') && (
+                      <>
+                        <div className="px-3 py-1 mt-1 text-[11px] font-bold text-coffee-300">進貨與庫存</div>
+                        <NavMenuItem label="進貨管理" icon={<Package />} onClick={() => navigateTo('inventory', 'purchasing')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'purchasing'} />
+                        <NavMenuItem label="庫存與盤點" icon={<ClipboardList />} onClick={() => navigateTo('inventory', 'stock')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'stock'} />
+                        <NavMenuItem label="本日使用量" icon={<BarChart3 />} onClick={() => navigateTo('inventory', 'daily')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'daily'} />
+                      </>
+                    )}
+                    
+                    {hasPermission('inventory') && (hasPermission('cost') || hasPermission('customers')) && (
+                      <div className="w-full h-px bg-coffee-50 my-3"></div>
+                    )}
+                    
+                    {hasPermission('cost') && <NavMenuItem label="成本分析" icon={<BarChart3 />} onClick={() => navigateTo('cost', 'cost')} active={activeTab === 'cost'} />}
+                    {hasPermission('customers') && <NavMenuItem label="顧客資料" icon={<Users />} onClick={() => navigateTo('customers', 'customers')} active={activeTab === 'customers'} />}
+                  </div>
+                </div>
+              )}
+
+              <div className="pt-4 pb-12 space-y-3">
+                {hasPermission('manage_system') && (
+                  <button 
+                    onClick={() => navigateTo('settings')}
+                    className={cn("w-full p-3 rounded-xl transition-colors font-bold text-sm flex items-center justify-center gap-2", activeTab === 'settings' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-800 border border-coffee-200 hover:bg-coffee-50")}
+                  >
+                    <Settings2 className="w-4 h-4" />
+                    <span>系統設定</span>
+                  </button>
+                )}
                 <button
                   onClick={() => signOut(auth)}
                   className="w-full p-3 text-danger-brand hover:bg-danger-brand/5 rounded-xl transition-colors font-bold text-sm flex items-center justify-center gap-2 border border-danger-brand/20"
@@ -368,6 +450,7 @@ export default function App() {
             {activeTab === 'inventory' && <InventoryView forcedSubTab={globalSubTabs['inventory']} selectedYear={selectedYear} shopId={shopId} />}
             {activeTab === 'monthly' && <MonthlyView forcedSubTab={globalSubTabs['monthly']} settings={settings} shopId={shopId} />}
             {activeTab === 'cost' && <CostView settings={settings} shopId={shopId} />}
+            {activeTab === 'settings' && <SettingsView shopId={shopId} roles={roles} operators={operators} settings={settings} />}
           </motion.div>
         </AnimatePresence>
       </main>

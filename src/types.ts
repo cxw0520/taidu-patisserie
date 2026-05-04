@@ -1,3 +1,29 @@
+export interface Permissions {
+  manage_system: boolean;  // 系統設定與權限管理
+  pos: boolean;            // POS 收銀機
+  daily: boolean;          // 日報表 (戰情室, 匯入)
+  monthly: boolean;        // 月報表
+  finance: boolean;        // 財務會計 (日記簿, 資產)
+  inventory: boolean;      // 進貨與庫存
+  cost: boolean;           // 成本分析
+  customers: boolean;      // 顧客資料
+  can_void: boolean;       // 特權: 作廢訂單
+}
+
+export interface Role {
+  id: string;
+  name: string;
+  permissions: Permissions;
+  isOwner?: boolean; // Protects the owner role from deletion or stripping of manage_system
+}
+
+export interface Operator {
+  id: string;
+  name: string;
+  pinCode: string; // 4 to 6 digits
+  roleId: string;
+}
+
 export interface Material {
   id: string;
   category: '食材' | '包材' | string;
