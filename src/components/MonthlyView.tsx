@@ -3,7 +3,7 @@ import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
 import { fmt, parseNum, monthISO, uid, normalizeFlavorName } from '../lib/utils';
 import { DailyReport, Settings, Order, Material } from '../types';
-import { Wallet, PieChart as ChartIcon, TrendingUp, ReceiptText, Users, Home, Lightbulb, Wrench, Info, Megaphone, Trash2, Plus, X, Truck } from 'lucide-react';
+import { Wallet, PieChart as ChartIcon, TrendingUp, ReceiptText, Users, Home, Lightbulb, Wrench, Info, Megaphone, Trash2, Plus, X, Truck, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -23,7 +23,7 @@ interface Recipe {
   items: RecipeItem[];
 }
 
-export default function MonthlyView({ settings, shopId }: { settings: Settings, shopId: string }) {
+export default function MonthlyView({ settings, shopId, forcedSubTab }: { settings: Settings, shopId: string, forcedSubTab?: string }) {
   const [selectedMonth, setSelectedMonth] = useState(monthISO());
   const [monthData, setMonthData] = useState<DailyReport[]>([]);
   const [fixedCosts, setFixedCosts] = useState<{ id: string, label: string, amount: number }[]>([]);
@@ -33,6 +33,13 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
   const [materials, setMaterials] = useState<Material[]>([]);
   const [dailyUsages, setDailyUsages] = useState<import('../types').DailyUsageRec[]>([]);
   const [activeTab, setActiveTab] = useState<'finance' | 'product'>('finance');
+  const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
+
+  useEffect(() => {
+    if (forcedSubTab && ['reports', 'products'].includes(forcedSubTab)) {
+      setActiveTab(forcedSubTab === 'reports' ? 'finance' : 'product');
+    }
+  }, [forcedSubTab]);
   
   // AR Modal State
   const [showARModal, setShowARModal] = useState(false);
@@ -196,28 +203,72 @@ export default function MonthlyView({ settings, shopId }: { settings: Settings, 
   // Rest of the UI calculation logic...
   return (
     <div className="space-y-6 animate-in fade-in duration-500 h-full font-sans">
-      {/* Month Selector and Tabs */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="flex bg-coffee-100/50 p-1 rounded-2xl w-fit border border-coffee-100">
+        
+        {/* Sub-tabs hidden as they are managed by drawer */}
+        <div className="flex-1"></div>
+
+        <div className="relative w-full md:w-auto">
           <button 
-            onClick={() => setActiveTab('finance')}
-            className={cn("px-6 py-2.5 rounded-xl font-bold transition flex items-center gap-2", activeTab === 'finance' ? 'bg-white text-coffee-800 shadow-sm' : 'text-coffee-500 hover:text-coffee-700')}
+            onClick={() => setIsMonthPickerOpen(!isMonthPickerOpen)}
+            className="w-full md:w-auto bg-white border border-coffee-200 rounded-xl px-4 py-2.5 font-bold text-coffee-700 flex items-center justify-center gap-2 shadow-sm hover:border-coffee-300 transition-colors"
           >
-            財務報表
+            <Calendar className="w-5 h-5 text-coffee-400" />
+            <span>{selectedMonth.split('-')[0]} 年 {parseInt(selectedMonth.split('-')[1], 10)} 月</span>
           </button>
-          <button 
-            onClick={() => setActiveTab('product')}
-            className={cn("px-6 py-2.5 rounded-xl font-bold transition flex items-center gap-2", activeTab === 'product' ? 'bg-white text-coffee-800 shadow-sm' : 'text-coffee-500 hover:text-coffee-700')}
-          >
-            產品數據
-          </button>
+
+          <AnimatePresence>
+            {isMonthPickerOpen && (
+              <>
+                <motion.div 
+                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+                  className="fixed inset-0 z-20" onClick={() => setIsMonthPickerOpen(false)} 
+                />
+                <motion.div
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
+                  className="absolute right-0 mt-2 z-30 bg-white border border-coffee-100 rounded-2xl shadow-xl p-4 w-72"
+                >
+                  <div className="flex justify-between items-center mb-4">
+                    <button 
+                      onClick={() => setSelectedMonth(prev => `${parseInt(prev.split('-')[0])-1}-${prev.split('-')[1]}`)}
+                      className="p-1 hover:bg-coffee-50 rounded-lg text-coffee-400"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <span className="font-bold text-coffee-800">{selectedMonth.split('-')[0]} 年度</span>
+                    <button 
+                      onClick={() => setSelectedMonth(prev => `${parseInt(prev.split('-')[0])+1}-${prev.split('-')[1]}`)}
+                      className="p-1 hover:bg-coffee-50 rounded-lg text-coffee-400"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    {Array.from({length: 12}, (_, i) => i + 1).map(m => {
+                      const mStr = m.toString().padStart(2, '0');
+                      const isActive = selectedMonth.split('-')[1] === mStr;
+                      return (
+                        <button
+                          key={m}
+                          onClick={() => {
+                            setSelectedMonth(`${selectedMonth.split('-')[0]}-${mStr}`);
+                            setIsMonthPickerOpen(false);
+                          }}
+                          className={cn(
+                            "py-2 rounded-xl text-sm font-bold transition-all",
+                            isActive ? "bg-coffee-600 text-white shadow-md" : "text-coffee-600 hover:bg-coffee-50"
+                          )}
+                        >
+                          {m} 月
+                        </button>
+                      );
+                    })}
+                  </div>
+                </motion.div>
+              </>
+            )}
+          </AnimatePresence>
         </div>
-        <input 
-          type="month"
-          value={selectedMonth}
-          onChange={(e) => setSelectedMonth(e.target.value)}
-          className="bg-white border border-coffee-200 rounded-xl px-4 py-2.5 font-bold text-coffee-600 outline-none focus:border-coffee-500 transition-all shadow-sm"
-        />
       </div>
 
       {activeTab === 'finance' && (

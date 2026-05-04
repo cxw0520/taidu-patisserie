@@ -102,16 +102,24 @@ export default function DailyView({
   currentDate, 
   setCurrentDate, 
   settings: baseSettings, 
-  shopId 
+  shopId,
+  forcedSubTab
 }: { 
   currentDate: string, 
   setCurrentDate: (d: string) => void, 
   settings: Settings,
-  shopId: string 
+  shopId: string,
+  forcedSubTab?: string
 }) {
-  const [subTab, setSubTab] = useState<'dashboard' | 'cash_register' | 'import' | 'settings'>(() => {
+  const [subTab, setSubTab] = useState<'dashboard' | 'import' | 'settings'>(() => {
     return (localStorage.getItem('daily_sub_tab') as any) || 'dashboard';
   });
+
+  useEffect(() => {
+    if (forcedSubTab && ['dashboard', 'import', 'settings'].includes(forcedSubTab)) {
+      setSubTab(forcedSubTab as any);
+    }
+  }, [forcedSubTab]);
   const [addOrderModal, setAddOrderModal] = useState(false);
   const [phoneSearchModal, setPhoneSearchModal] = useState(false);
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -534,62 +542,68 @@ export default function DailyView({
           </div>
         </div>
 
-        <div className="relative w-full md:w-auto">
-          <div className="md:hidden">
-            <button
-              onClick={() => setIsMobileSubTabOpen(v => !v)}
-              className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2.5 font-bold text-coffee-700 flex items-center justify-between shadow-sm"
-            >
-              <span>
-                {[{ id: 'dashboard', label: '銷售與戰情室' }, { id: 'import', label: '訂單匯入' }, { id: 'settings', label: '品項設定' }].find(t => t.id === subTab)?.label}
-              </span>
-              {isMobileSubTabOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
-            </button>
-            {isMobileSubTabOpen && (
-              <div className="absolute z-20 mt-2 w-full bg-white border border-coffee-100 rounded-xl shadow-lg overflow-hidden">
-                {[
-                  { id: 'dashboard', label: '銷售與戰情室', icon: LayoutDashboard },
-                  { id: 'cash_register', label: '收銀機', icon: Monitor },
-                  { id: 'import', label: '訂單匯入', icon: FileUp },
-                  { id: 'settings', label: '品項設定', icon: SettingsIcon },
-                ].map(t => (
-                  <button
-                    key={t.id}
-                    onClick={() => { setSubTab(t.id as 'dashboard' | 'cash_register' | 'import' | 'settings'); setIsMobileSubTabOpen(false); }}
-                    className={cn(
-                      "w-full px-4 py-3 text-left text-sm font-bold border-b border-coffee-50 last:border-b-0 flex items-center gap-2",
-                      subTab === t.id ? "bg-coffee-50 text-coffee-700" : "text-coffee-500"
-                    )}
-                  >
-                    <t.icon className="w-4 h-4" />
-                    {t.label}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="hidden md:flex bg-coffee-100/50 p-1 rounded-xl">
-            {[
-              { id: 'dashboard', label: '銷售與戰情室', icon: LayoutDashboard },
-              { id: 'cash_register', label: '收銀機', icon: Monitor },
-              { id: 'import', label: '訂單匯入', icon: FileUp },
-              { id: 'settings', label: '品項設定', icon: SettingsIcon },
-            ].map(t => (
+        {!forcedSubTab || forcedSubTab !== 'pos' ? (
+          <div className="relative w-full md:w-auto">
+            <div className="md:hidden">
               <button
-                key={t.id}
-                onClick={() => setSubTab(t.id as 'dashboard' | 'cash_register' | 'import' | 'settings')}
-                className={cn(
-                  "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
-                  subTab === t.id ? "bg-white text-coffee-700 shadow-sm" : "text-coffee-400 hover:text-coffee-600"
-                )}
+                onClick={() => setIsMobileSubTabOpen(v => !v)}
+                className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2.5 font-bold text-coffee-700 flex items-center justify-between shadow-sm"
               >
-                <t.icon className="w-4 h-4" />
-                {t.label}
+                <span>
+                  {[{ id: 'dashboard', label: '銷售與戰情室' }, { id: 'import', label: '訂單匯入' }, { id: 'settings', label: '品項設定' }].find(t => t.id === subTab)?.label}
+                </span>
+                {isMobileSubTabOpen ? <X className="w-4 h-4" /> : <Menu className="w-4 h-4" />}
               </button>
-            ))}
+              {isMobileSubTabOpen && (
+                <div className="absolute z-20 mt-2 w-full bg-white border border-coffee-100 rounded-xl shadow-lg overflow-hidden">
+                  {[
+                    { id: 'dashboard', label: '銷售與戰情室', icon: LayoutDashboard },
+                    { id: 'import', label: '訂單匯入', icon: FileUp },
+                    { id: 'settings', label: '品項設定', icon: SettingsIcon },
+                  ].map(t => (
+                    <button
+                      key={t.id}
+                      onClick={() => { setSubTab(t.id as 'dashboard' | 'import' | 'settings'); setIsMobileSubTabOpen(false); }}
+                      className={cn(
+                        "w-full px-4 py-3 text-left text-sm font-bold border-b border-coffee-50 last:border-b-0 flex items-center gap-2",
+                        subTab === t.id ? "bg-coffee-50 text-coffee-700" : "text-coffee-500"
+                      )}
+                    >
+                      <t.icon className="w-4 h-4" />
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="hidden md:flex bg-coffee-100/50 p-1 rounded-xl">
+              {[
+                { id: 'dashboard', label: '銷售與戰情室', icon: LayoutDashboard },
+                { id: 'import', label: '訂單匯入', icon: FileUp },
+                { id: 'settings', label: '品項設定', icon: SettingsIcon },
+              ].map(t => (
+                <button
+                  key={t.id}
+                  onClick={() => setSubTab(t.id as 'dashboard' | 'import' | 'settings')}
+                  className={cn(
+                    "flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all",
+                    subTab === t.id ? "bg-white text-coffee-700 shadow-sm" : "text-coffee-400 hover:text-coffee-600"
+                  )}
+                >
+                  <t.icon className="w-4 h-4" />
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex-1 flex justify-center">
+            <div className="bg-rose-brand/10 text-rose-brand px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 shadow-sm border border-rose-brand/20">
+              <Monitor className="w-4 h-4" /> POS 收銀機模式
+            </div>
+          </div>
+        )}
         
         <button 
           onClick={syncInventory}
@@ -601,7 +615,7 @@ export default function DailyView({
         </button>
       </div>
 
-      {subTab === 'cash_register' && (
+      {forcedSubTab === 'pos' && (
         <CashRegisterTab
               shopId={shopId}
               dailyData={dailyData}
@@ -617,7 +631,7 @@ export default function DailyView({
             />
       )}
 
-      {subTab === 'dashboard' && (
+      {forcedSubTab !== 'pos' && subTab === 'dashboard' && (
         <div className="flex flex-col gap-8">
           
           {/* Pending Pickups Alert Block */}
@@ -1330,7 +1344,7 @@ export default function DailyView({
         </div>
       )}
 
-      {subTab === 'import' && (
+      {forcedSubTab !== 'pos' && subTab === 'import' && (
         <ImportTab
           settings={settings}
           shopId={shopId}
@@ -1342,7 +1356,7 @@ export default function DailyView({
         />
       )}
 
-      {subTab === 'settings' && (
+      {forcedSubTab !== 'pos' && subTab === 'settings' && (
         <SettingsTab settings={baseSettings} shopId={shopId} dailyActive={dailyData?.dailyActive} updateDaily={updateDaily} />
       )}
     </div>
