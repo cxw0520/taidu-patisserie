@@ -282,7 +282,7 @@ export default function App() {
             )}
           </div>
           <div>
-            <h1 className="text-xl md:text-3xl font-light text-coffee-600 tracking-[2px]">態度貳貳甜點工作室-內部運營系統</h1>
+            <h1 className="text-xl md:text-3xl font-light text-coffee-600 tracking-[2px]">{settings.shopName || '態度貳貳甜點工作室-內部運營系統'}</h1>
             <div className="flex items-center gap-1.5 text-xs font-semibold text-mint-brand mt-1">
               <span className={cn(
                 "w-2 h-2 rounded-full",

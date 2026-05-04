@@ -219,6 +219,8 @@ export interface Settings {
   packagingItems: Item[];
   customCategories?: CustomCategory[];
   logo?: string;
+  shopName?: string;
+  legalName?: string;
 }
 
 export interface COAItem {

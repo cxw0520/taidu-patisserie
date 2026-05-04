@@ -41,6 +41,7 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
   
   // Shop Settings State
   const [shopName, setShopName] = useState(settings?.shopName || '態度貳貳甜點工作室');
+  const [legalName, setLegalName] = useState(settings?.legalName || '');
   const [logoBase64, setLogoBase64] = useState(settings?.logo || '');
 
   // Role State
@@ -51,6 +52,7 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
 
   const handleSaveShopSettings = async () => {
     await setDoc(doc(db, 'shops', shopId), { shopName, logo: logoBase64 }, { merge: true });
+    await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), { shopName, legalName, logo: logoBase64 }, { merge: true });
     alert('店鋪設定已儲存！');
   };
 
@@ -156,8 +158,14 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
             <h2 className="text-xl font-bold text-coffee-800 mb-6">店鋪基本設定</h2>
             <div className="space-y-6 max-w-xl">
               <div>
-                <label className="block text-sm font-bold text-coffee-700 mb-2">店鋪名稱</label>
-                <input type="text" value={shopName} onChange={e => setShopName(e.target.value)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none" />
+                <label className="block text-sm font-bold text-coffee-700 mb-2">營業名稱 (網頁顯示用)</label>
+                <input type="text" value={shopName} onChange={e => setShopName(e.target.value)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none" placeholder="如：態度貳貳甜點工作室" />
+                <p className="text-[10px] text-coffee-400 mt-1">顯示於網頁左上角與系統主選單。</p>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-coffee-700 mb-2">公司抬頭 / 登記名稱 (報表列印用)</label>
+                <input type="text" value={legalName} onChange={e => setLegalName(e.target.value)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none" placeholder="如：態度貳貳有限公司" />
+                <p className="text-[10px] text-coffee-400 mt-1">未來匯出正式財務報表或收據時使用的正式名稱。</p>
               </div>
               <div>
                 <label className="block text-sm font-bold text-coffee-700 mb-2">系統 Logo (可留白)</label>
