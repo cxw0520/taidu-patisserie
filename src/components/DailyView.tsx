@@ -46,6 +46,7 @@ import AddOrderModal from './daily/AddOrderModal';
 import PhoneSearchModal from './daily/PhoneSearchModal';
 import { upsertCustomerFromOrder, MergeConflictModal } from './CustomerView';
 import { Customer } from '../types';
+import { useRef } from 'react';
 
 const toLegacyDateKey = (v: string) =>
   v.replace(/^(\d{4})-0?(\d{1,2})-0?(\d{1,2})$/, (_, y, m, d) => `${y}-${Number(m)}-${Number(d)}`);
@@ -141,6 +142,7 @@ export default function DailyView({
   const [loadedDateKey, setLoadedDateKey] = useState('');
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
+  const lastSnapshotRef = useRef<string>('');
   const settings = useMemo(
     () => applyDailyActive(baseSettings, dailyData?.dailyActive),
     [baseSettings, dailyData?.dailyActive]
@@ -173,7 +175,7 @@ export default function DailyView({
           if (snap.exists()) {
             const data = snap.data() as DailyReport;
             setLoadedDateKey(targetDateKey);
-            setDailyData({ 
+            const newData = { 
               ...data, 
               date: targetDateKey, 
               orders: data.orders || [],
@@ -181,13 +183,19 @@ export default function DailyView({
               inventory: data.inventory || {},
               packagingUsage: data.packagingUsage || {},
               ar: { ...defaultAr(), ...(data.ar || {}) } 
-            });
+            };
+            const newString = JSON.stringify(newData);
+            if (lastSnapshotRef.current !== newString) {
+              lastSnapshotRef.current = newString;
+              setDailyData(newData);
+            }
           } else {
             const [y, m, d] = normalizeDateKey(currentDate).split('-').map(Number);
             const prevDate = new Date(y, m - 1, d);
             prevDate.setDate(prevDate.getDate() - 1);
             const prevKey = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}-${String(prevDate.getDate()).padStart(2, '0')}`;
             let accumFromPrev = 0;
+            let inventoryFromPrev: Record<string, any> = {};
             try {
               const prevResolved = await getDailyDocRef(shopId, prevKey);
               if (prevResolved.snap.exists()) {
@@ -198,21 +206,37 @@ export default function DailyView({
                 } else {
                   accumFromPrev = Math.max(0, prevAr.accum + calcDayUnpaid(prev.orders || []) - prevAr.collect);
                 }
+
+                if (prev.inventory) {
+                  Object.entries(prev.inventory).forEach(([itemId, itemData]) => {
+                    inventoryFromPrev[itemId] = {
+                      org: itemData.act || 0,
+                      exp: 0,
+                      act: itemData.act || 0,
+                      los: 0
+                    };
+                  });
+                }
               }
             } catch (err) {
               console.error('載入前一天日報失敗:', err);
             }
             if (cancelled) return;
             setLoadedDateKey(targetDateKey);
-            setDailyData({
+            const newData = {
               date: targetDateKey,
               orders: [],
               dailyActive: {},
               ar: { ...defaultAr(), accum: accumFromPrev },
-              inventory: {},
+              inventory: inventoryFromPrev,
               losses: [],
               packagingUsage: {},
-            });
+            };
+            const newString = JSON.stringify(newData);
+            if (lastSnapshotRef.current !== newString) {
+              lastSnapshotRef.current = newString;
+              setDailyData(newData);
+            }
           }
           if (!cancelled) setLoading(false);
         })();
@@ -253,7 +277,9 @@ export default function DailyView({
       if (!prev) return null;
       const currentKey = normalizeDateKey(currentDate);
       if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
-      return { ...prev, ...patch, date: loadedDateKey };
+      const updated = { ...prev, ...patch, date: loadedDateKey };
+      lastSnapshotRef.current = JSON.stringify(updated); // prevent echo back
+      return updated;
     });
   };
   const handlePickup = async (orderId: string) => {
