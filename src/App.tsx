@@ -255,7 +255,13 @@ export default function App() {
     if (operators.length === 0 || forceUnlocked) return true;
     if (!currentOperator) return false;
     const role = roles.find(r => r.id === currentOperator.roleId);
-    return role ? role.permissions[key] : false;
+    if (!role) return false;
+    // Backward compatibility: if a permission key doesn't exist in old role data,
+    // owner roles get full access, others get false
+    if (role.permissions[key] === undefined) {
+      return role.isOwner === true || role.permissions.manage_system === true;
+    }
+    return role.permissions[key];
   };
 
   const isLocked = operators.length > 0 && !currentOperator && !forceUnlocked;
