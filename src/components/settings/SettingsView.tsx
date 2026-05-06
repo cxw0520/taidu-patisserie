@@ -37,12 +37,37 @@ const PERMISSION_LABELS: Record<keyof Permissions, string> = {
 };
 
 export default function SettingsView({ shopId, roles, operators, settings }: Props) {
-  const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators'>('operators');
+  const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators' | 'business_days' | 'operations' | 'finance'>('operators');
   
   // Shop Settings State
   const [shopName, setShopName] = useState(settings?.shopName || '態度貳貳甜點工作室');
   const [legalName, setLegalName] = useState(settings?.legalName || '');
   const [logoBase64, setLogoBase64] = useState(settings?.logo || '');
+
+  // Business Days State
+  const [businessHoursStart, setBusinessHoursStart] = useState(settings?.businessHoursStart || '13:00');
+  const [businessHoursEnd, setBusinessHoursEnd] = useState(settings?.businessHoursEnd || '20:00');
+  const [fixedClosedDays, setFixedClosedDays] = useState<number[]>(settings?.fixedClosedDays || []);
+  
+  // Operations State
+  const [enableBlindClose, setEnableBlindClose] = useState(!!settings?.enableBlindClose);
+  const [enableDepositFlow, setEnableDepositFlow] = useState(!!settings?.enableDepositFlow);
+  const [expiryAlertDays, setExpiryAlertDays] = useState(settings?.expiryAlertDays || 3);
+  
+  // HR Global State
+  const [timeRoundingInterval, setTimeRoundingInterval] = useState<1 | 15 | 30>(settings?.timeRoundingInterval || 15);
+  const [lateGracePeriod, setLateGracePeriod] = useState(settings?.lateGracePeriod || 5);
+  const [earlyLeaveTolerance, setEarlyLeaveTolerance] = useState(settings?.earlyLeaveTolerance || 3);
+  const [overtimeTier1Hours, setOvertimeTier1Hours] = useState(settings?.overtimeTier1Hours || 8);
+  const [overtimeTier1Rate, setOvertimeTier1Rate] = useState(settings?.overtimeTier1Rate || 1.34);
+  const [overtimeTier2Hours, setOvertimeTier2Hours] = useState(settings?.overtimeTier2Hours || 10);
+  const [overtimeTier2Rate, setOvertimeTier2Rate] = useState(settings?.overtimeTier2Rate || 1.67);
+  const [holidayPayRate, setHolidayPayRate] = useState(settings?.holidayPayRate || 2.0);
+
+  // Finance State
+  const [estimatedMonthlyRent, setEstimatedMonthlyRent] = useState(settings?.estimatedMonthlyRent || 0);
+  const [estimatedMonthlyUtilities, setEstimatedMonthlyUtilities] = useState(settings?.estimatedMonthlyUtilities || 0);
+  const [estimatedMonthlyPayroll, setEstimatedMonthlyPayroll] = useState(settings?.estimatedMonthlyPayroll || 0);
 
   // Role State
   const [editingRole, setEditingRole] = useState<Role | null>(null);
@@ -51,9 +76,17 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
   const [editingOp, setEditingOp] = useState<Operator | null>(null);
 
   const handleSaveShopSettings = async () => {
+    const payload = {
+      shopName, legalName, logo: logoBase64,
+      businessHoursStart, businessHoursEnd, fixedClosedDays,
+      enableBlindClose, enableDepositFlow, expiryAlertDays,
+      timeRoundingInterval, lateGracePeriod, earlyLeaveTolerance,
+      overtimeTier1Hours, overtimeTier1Rate, overtimeTier2Hours, overtimeTier2Rate, holidayPayRate,
+      estimatedMonthlyRent, estimatedMonthlyUtilities, estimatedMonthlyPayroll
+    };
     await setDoc(doc(db, 'shops', shopId), { shopName, logo: logoBase64 }, { merge: true });
-    await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), { shopName, legalName, logo: logoBase64 }, { merge: true });
-    alert('店鋪設定已儲存！');
+    await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), payload, { merge: true });
+    alert('系統設定已全部儲存成功！');
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -149,6 +182,18 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
         </button>
         <button onClick={() => setActiveTab('shop')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'shop' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
           <Store className="w-5 h-5" /> 店鋪基本設定
+        </button>
+        <button onClick={() => setActiveTab('business_days')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'business_days' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
+          📅 營業日與時段設定
+        </button>
+        <button onClick={() => setActiveTab('operations')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'operations' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
+          🛡️ 現場營運規則
+        </button>
+        <button onClick={() => setActiveTab('hr_rules')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'hr_rules' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
+          👥 人事與薪資規則
+        </button>
+        <button onClick={() => setActiveTab('finance')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'finance' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
+          💰 財務預估分攤
         </button>
       </div>
 
@@ -310,6 +355,20 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
                       {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
                     </select>
                   </div>
+                  <div>
+                    <label className="block text-sm font-bold text-coffee-800 mb-2">計薪方式</label>
+                    <select value={editingOp.payrollType || 'hourly'} onChange={e => setEditingOp({...editingOp, payrollType: e.target.value as any})} className="w-full border border-coffee-200 bg-white rounded-xl p-3 focus:ring-2 focus:ring-mint-brand outline-none font-bold text-coffee-700">
+                      <option value="hourly">時薪制 (兼職/工讀)</option>
+                      <option value="monthly">月薪制 (正職)</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-coffee-800 mb-2">{editingOp.payrollType === 'monthly' ? '本薪 (月薪總額)' : '基本時薪'}</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 font-bold">$</span>
+                      <input type="number" value={editingOp.baseRate || ''} onChange={e => setEditingOp({...editingOp, baseRate: Number(e.target.value)})} className="w-full pl-8 pr-3 py-3 border border-coffee-200 bg-white rounded-xl focus:ring-2 focus:ring-mint-brand outline-none font-mono" placeholder={editingOp.payrollType === 'monthly' ? '例如 36000' : '例如 190'} />
+                    </div>
+                  </div>
                 </div>
                 <div className="mt-6">
                   <button onClick={handleSaveOperator} className="px-8 py-3 bg-coffee-800 text-white font-bold rounded-xl shadow-md hover:bg-coffee-900 transition w-full md:w-auto">儲存員工資料</button>
@@ -359,6 +418,216 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'business_days' && (
+          <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-coffee-100">
+            <h2 className="text-xl font-bold text-coffee-800 mb-6">營業日與時段設定</h2>
+            <div className="space-y-6 max-w-xl">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-coffee-700 mb-2">每日營業開始時間</label>
+                  <input type="time" value={businessHoursStart} onChange={e => setBusinessHoursStart(e.target.value)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-coffee-700 mb-2">每日營業結束時間</label>
+                  <input type="time" value={businessHoursEnd} onChange={e => setBusinessHoursEnd(e.target.value)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-sm font-bold text-coffee-700 mb-2">固定公休日</label>
+                <div className="flex flex-wrap gap-3">
+                  {[1, 2, 3, 4, 5, 6, 0].map(day => {
+                    const names = ['日', '一', '二', '三', '四', '五', '六'];
+                    const isSelected = fixedClosedDays.includes(day);
+                    return (
+                      <button key={day} onClick={() => {
+                        if (isSelected) setFixedClosedDays(fixedClosedDays.filter(d => d !== day));
+                        else setFixedClosedDays([...fixedClosedDays, day]);
+                      }} className={cn("px-4 py-2 rounded-xl font-bold text-sm transition-colors border", isSelected ? "bg-coffee-600 text-white border-coffee-600" : "bg-white text-coffee-600 border-coffee-200 hover:bg-coffee-50")}>
+                        星期{names[day]}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="text-[10px] text-coffee-400 mt-2">系統在計算當月平均營業額時，將自動剔除這些固定的公休日。</p>
+              </div>
+              <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-4">
+                <Save className="w-5 h-5" /> 儲存設定
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'operations' && (
+          <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-coffee-100">
+            <h2 className="text-xl font-bold text-coffee-800 mb-6">現場營運規則</h2>
+            <div className="space-y-6 max-w-xl">
+              <label className="flex items-start gap-3 p-4 border border-coffee-100 rounded-xl cursor-pointer hover:bg-coffee-50 transition-colors">
+                <input type="checkbox" checked={enableBlindClose} onChange={e => setEnableBlindClose(e.target.checked)} className="mt-1 w-5 h-5 text-coffee-600 rounded focus:ring-coffee-500" />
+                <div>
+                  <div className="font-bold text-coffee-800">啟用「盲盤交接班」模式</div>
+                  <div className="text-xs text-coffee-500 mt-1">結帳關班時將隱藏系統預期金額，強制收銀員盲算實際現金，防止作弊與短溢收漏洞。</div>
+                </div>
+              </label>
+              <label className="flex items-start gap-3 p-4 border border-coffee-100 rounded-xl cursor-pointer hover:bg-coffee-50 transition-colors">
+                <input type="checkbox" checked={enableDepositFlow} onChange={e => setEnableDepositFlow(e.target.checked)} className="mt-1 w-5 h-5 text-coffee-600 rounded focus:ring-coffee-500" />
+                <div>
+                  <div className="font-bold text-coffee-800">啟用「訂金與尾款」結帳功能</div>
+                  <div className="text-xs text-coffee-500 mt-1">適用於大筆預購訂單。開啟後 POS 收銀機可紀錄部分訂金，並在取貨時提示收取尾款。</div>
+                </div>
+              </label>
+              <div>
+                <label className="block text-sm font-bold text-coffee-700 mb-2">食材效期警報天數</label>
+                <div className="flex items-center gap-3">
+                  <input type="number" min="1" value={expiryAlertDays} onChange={e => setExpiryAlertDays(Number(e.target.value))} className="w-24 border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none text-center font-bold" />
+                  <span className="text-sm font-bold text-coffee-600">天內過期發出警告</span>
+                </div>
+                <p className="text-[10px] text-coffee-400 mt-1">配合先進先出批號管理，當食材到期日小於此天數時，系統將在首頁亮起紅燈。</p>
+              </div>
+              <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-4">
+                <Save className="w-5 h-5" /> 儲存設定
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'hr_rules' && (
+          <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-coffee-100">
+            <h2 className="text-xl font-bold text-coffee-800 mb-6">人事薪資與打卡規則</h2>
+            <div className="space-y-8 max-w-2xl">
+              <div>
+                <h3 className="text-md font-bold text-coffee-800 mb-4 border-b border-coffee-100 pb-2">⏰ 打卡進位與寬限期 (Time Rounding)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-coffee-600 mb-2">計薪基本區間</label>
+                    <select value={timeRoundingInterval} onChange={e => setTimeRoundingInterval(Number(e.target.value) as any)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none font-bold text-coffee-800">
+                      <option value={1}>1 分鐘 (不進位)</option>
+                      <option value={15}>15 分鐘</option>
+                      <option value={30}>30 分鐘</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-coffee-600 mb-2">上班遲到寬限期</label>
+                    <div className="relative">
+                      <input type="number" min="0" value={lateGracePeriod} onChange={e => setLateGracePeriod(Number(e.target.value))} className="w-full border border-coffee-200 rounded-xl p-3 pr-10 focus:ring-2 focus:ring-coffee-500 outline-none font-bold text-coffee-800" />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-coffee-400">分鐘</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-coffee-600 mb-2">下班提早容忍值</label>
+                    <div className="relative">
+                      <input type="number" min="0" value={earlyLeaveTolerance} onChange={e => setEarlyLeaveTolerance(Number(e.target.value))} className="w-full border border-coffee-200 rounded-xl p-3 pr-10 focus:ring-2 focus:ring-coffee-500 outline-none font-bold text-coffee-800" />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-coffee-400">分鐘</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-md font-bold text-coffee-800 mb-4 border-b border-coffee-100 pb-2">📈 加班費與國定假日倍率 (Overtime & Holiday)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-coffee-50/50 p-4 rounded-xl border border-coffee-100">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-bold text-sm text-coffee-800">第一段加班 (Tier 1)</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-coffee-500 font-bold">超過</span>
+                        <input type="number" value={overtimeTier1Hours} onChange={e => setOvertimeTier1Hours(Number(e.target.value))} className="w-12 text-center border border-coffee-200 rounded p-1 text-sm font-bold" />
+                        <span className="text-xs text-coffee-500 font-bold">小時</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-coffee-500">時薪倍率乘上</span>
+                      <div className="flex items-center gap-2">
+                        <input type="number" step="0.01" value={overtimeTier1Rate} onChange={e => setOvertimeTier1Rate(Number(e.target.value))} className="w-16 text-center border border-coffee-200 rounded p-1 text-sm font-bold text-danger-brand" />
+                        <span className="text-xs text-coffee-500 font-bold">倍</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="bg-coffee-50/50 p-4 rounded-xl border border-coffee-100">
+                    <div className="flex items-center justify-between mb-3">
+                      <span className="font-bold text-sm text-coffee-800">第二段加班 (Tier 2)</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-coffee-500 font-bold">超過</span>
+                        <input type="number" value={overtimeTier2Hours} onChange={e => setOvertimeTier2Hours(Number(e.target.value))} className="w-12 text-center border border-coffee-200 rounded p-1 text-sm font-bold" />
+                        <span className="text-xs text-coffee-500 font-bold">小時</span>
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs text-coffee-500">時薪倍率乘上</span>
+                      <div className="flex items-center gap-2">
+                        <input type="number" step="0.01" value={overtimeTier2Rate} onChange={e => setOvertimeTier2Rate(Number(e.target.value))} className="w-16 text-center border border-coffee-200 rounded p-1 text-sm font-bold text-danger-brand" />
+                        <span className="text-xs text-coffee-500 font-bold">倍</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="bg-mint-brand/10 p-4 rounded-xl border border-mint-brand/20 md:col-span-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="font-bold text-sm text-mint-brand">🌟 國定假日出勤</div>
+                        <div className="text-[10px] text-mint-brand/70 mt-1">需於行事曆中將特定日期標註為國定假日</div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-mint-brand/80 font-bold">時薪倍率乘上</span>
+                        <input type="number" step="0.1" value={holidayPayRate} onChange={e => setHolidayPayRate(Number(e.target.value))} className="w-16 text-center border border-mint-brand/30 rounded p-1 text-sm font-bold text-mint-brand bg-white" />
+                        <span className="text-xs text-mint-brand/80 font-bold">倍</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-4">
+                <Save className="w-5 h-5" /> 儲存設定
+              </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'finance' && (
+          <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-coffee-100">
+            <h2 className="text-xl font-bold text-coffee-800 mb-6">財務分攤與攤提設定</h2>
+            <div className="space-y-6 max-w-xl">
+              <p className="text-sm text-coffee-500 font-bold bg-coffee-50 p-4 rounded-xl border border-coffee-100 mb-6">
+                💡 在這裡輸入「預估的每月固定開銷」。系統會自動將這些金額除以當月的「有效營業天數」，變成你每天的「隱形固定成本 KPI」。這能讓你在看「日報表」時，立刻知道今天到底有沒有真正賺到錢（跨過損益平衡點）。次月再於月報表中填寫實際帳單金額即可。
+              </p>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-bold text-coffee-700 mb-2">🏠 每月店面租金預估</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">$</span>
+                    <input type="number" value={estimatedMonthlyRent} onChange={e => setEstimatedMonthlyRent(Number(e.target.value))} className="w-full pl-8 pr-3 py-3 border border-coffee-200 rounded-xl focus:ring-2 focus:ring-coffee-500 outline-none font-mono" placeholder="例如 30000" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-coffee-700 mb-2">⚡️ 每月水電雜支預估</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">$</span>
+                    <input type="number" value={estimatedMonthlyUtilities} onChange={e => setEstimatedMonthlyUtilities(Number(e.target.value))} className="w-full pl-8 pr-3 py-3 border border-coffee-200 rounded-xl focus:ring-2 focus:ring-coffee-500 outline-none font-mono" placeholder="例如 8000" />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-coffee-700 mb-2">👥 每月基本人事預估</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">$</span>
+                    <input type="number" value={estimatedMonthlyPayroll} onChange={e => setEstimatedMonthlyPayroll(Number(e.target.value))} className="w-full pl-8 pr-3 py-3 border border-coffee-200 rounded-xl focus:ring-2 focus:ring-coffee-500 outline-none font-mono" placeholder="例如 60000" />
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-8 p-4 bg-gray-50 rounded-xl border border-gray-200 flex items-center justify-between">
+                <span className="font-bold text-gray-600">每月預估固定成本總計</span>
+                <span className="text-xl font-black text-coffee-800">${(estimatedMonthlyRent + estimatedMonthlyUtilities + estimatedMonthlyPayroll).toLocaleString()}</span>
+              </div>
+
+              <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-4">
+                <Save className="w-5 h-5" /> 儲存設定
+              </button>
             </div>
           </div>
         )}

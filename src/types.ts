@@ -22,6 +22,9 @@ export interface Operator {
   name: string;
   pinCode: string; // 4 to 6 digits
   roleId: string;
+  // HR & Payroll
+  payrollType?: 'hourly' | 'monthly';
+  baseRate?: number; // Hourly rate or Monthly salary
 }
 
 export interface Material {
@@ -87,8 +90,9 @@ export interface Order {
   shipAmt: number;
   discAmt: number;
   actualAmt: number;
-  status: '匯款' | '現結' | '未結帳款' | '公關品' | '已收帳款';
+  status: '匯款' | '現結' | '未結帳款' | '公關品' | '已收帳款' | '已付訂金';
   note: string;
+  depositAmt?: number; // For deposit flow
   deliveryMethod?: '宅配' | '自取';
   pickupDate?: string;
   recipientName?: string;
@@ -221,6 +225,32 @@ export interface Settings {
   logo?: string;
   shopName?: string;
   legalName?: string;
+  
+  // 營業日與時段設定
+  businessHoursStart?: string;
+  businessHoursEnd?: string;
+  fixedClosedDays?: number[]; // e.g., 1=Mon, 2=Tue, 0=Sun
+  exceptionCalendar?: Record<string, 'closed' | 'holiday'>; // 'YYYY-MM-DD' -> status
+  
+  // 現場營運與交接班規則
+  enableBlindClose?: boolean;
+  expiryAlertDays?: number;
+  enableDepositFlow?: boolean;
+
+  // 人事薪資與打卡規則
+  timeRoundingInterval?: 1 | 15 | 30; // Minutes
+  lateGracePeriod?: number; // Minutes
+  earlyLeaveTolerance?: number; // Minutes
+  overtimeTier1Hours?: number;
+  overtimeTier1Rate?: number;
+  overtimeTier2Hours?: number;
+  overtimeTier2Rate?: number;
+  holidayPayRate?: number;
+
+  // 財務分攤與攤提設定
+  estimatedMonthlyRent?: number;
+  estimatedMonthlyUtilities?: number;
+  estimatedMonthlyPayroll?: number;
 }
 
 export interface COAItem {
