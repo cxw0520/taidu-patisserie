@@ -221,6 +221,7 @@ export default function DailyView({
               setDailyData(newData);
             }
           } else {
+            // ── 當天文件不存在，計算帶入值 ──────────────────────────
             const [y, m, d] = normalizeDateKey(currentDate).split('-').map(Number);
             const prevDate = new Date(y, m - 1, d);
             prevDate.setDate(prevDate.getDate() - 1);
@@ -233,61 +234,58 @@ export default function DailyView({
                 const prev = prevResolved.snap.data() as DailyReport;
                 const prevAr = { ...defaultAr(), ...(prev.ar || {}) };
                 
-                // AR Carryover: Accum = yesterday.accum + yesterday.unpaid - yesterday.collect
-                // User clarified: Reset to 0 on the 1st of every month
-                const [y, m, d] = targetDateKey.split('-').map(Number);
-                if (d === 1) {
+                // AR 帶入：月初歸零，其他日累積
+                const [_y, _m, _d] = targetDateKey.split('-').map(Number);
+                if (_d === 1) {
                   accumFromPrev = 0;
                 } else {
                   const yesterdayUnpaid = calcDayUnpaid(prev.orders || []);
                   accumFromPrev = Math.max(0, (prevAr.accum || 0) + yesterdayUnpaid - (prevAr.collect || 0));
                 }
 
-                // Inventory Carryover: Today's Opening (org) = Yesterday's Closing (todayRemain)
+                // 庫存帶入：今日原庫存 = 昨日結存（原+實產-耗損-出貨）
                 if (prev.inventory) {
-                  // We need to calculate yesterday's inventory out to find the closing balance
-                  const prevMetrics = { inventoryOut: {} as Record<string, number> };
-                  const allItems = [...(settings.giftItems || []), ...(settings.singleItems || []), ...(settings.customCategories || []).flatMap(c => c.items || [])];
-                  
+                  const prevMetrics: Record<string, number> = {};
+                  const allItems = [
+                    ...(baseSettings.giftItems || []),
+                    ...(baseSettings.singleItems || []),
+                    ...(baseSettings.customCategories || []).flatMap(c => c.items || []),
+                  ];
+
                   (prev.orders || []).forEach(o => {
                     allItems.forEach(item => {
                       const qty = o.items?.[item.id] || 0;
                       if (qty <= 0) return;
                       if (item.recipe) {
-                        Object.entries(item.recipe || {}).forEach(([flavor, count]) => {
-                          const normFlavor = normalizeFlavorName(flavor);
-                          prevMetrics.inventoryOut[normFlavor] = (prevMetrics.inventoryOut[normFlavor] || 0) + qty * (Number(count) || 0);
+                        Object.entries(item.recipe).forEach(([flavor, count]) => {
+                          const norm = normalizeFlavorName(flavor);
+                          prevMetrics[norm] = (prevMetrics[norm] || 0) + qty * (Number(count) || 0);
                         });
                       } else {
-                        const normName = normalizeFlavorName(item.name);
-                        prevMetrics.inventoryOut[normName] = (prevMetrics.inventoryOut[normName] || 0) + qty;
+                        const norm = normalizeFlavorName(item.name);
+                        prevMetrics[norm] = (prevMetrics[norm] || 0) + qty;
                       }
                     });
                   });
 
                   Object.entries(prev.inventory).forEach(([itemId, itemData]) => {
                     const norm = normalizeFlavorName(itemId);
-                    const flavorLossTotal = (prev.losses || []).filter(l => normalizeFlavorName(l.flavor) === norm).reduce((sum, l) => sum + l.qty, 0);
-                    const outTotal = prevMetrics.inventoryOut[norm] || 0;
-                    
-                    // todayRemain = org + act - losses - outTotal
-                    const closingBalance = (itemData.org || 0) + (itemData.act || 0) - flavorLossTotal - outTotal;
-                    
-                    inventoryFromPrev[itemId] = {
-                      org: closingBalance,
-                      exp: 0,
-                      act: 0,
-                      los: 0
-                    };
+                    const lossTotal = (prev.losses || [])
+                      .filter(l => normalizeFlavorName(l.flavor) === norm)
+                      .reduce((sum, l) => sum + l.qty, 0);
+                    const outTotal = prevMetrics[norm] || 0;
+                    const closingBalance = (itemData.org || 0) + (itemData.act || 0) - lossTotal - outTotal;
+                    inventoryFromPrev[itemId] = { org: Math.max(0, closingBalance), exp: 0, act: 0, los: 0 };
                   });
                 }
               }
             } catch (err) {
-              console.error('載入前一天日報失敗:', err);
+              console.error('[帶入] 讀取前一天日報失敗:', err);
             }
+
             if (cancelled) return;
-            setLoadedDateKey(targetDateKey);
-            const newData = {
+
+            const newData: DailyReport = {
               date: targetDateKey,
               orders: [],
               dailyActive: {},
@@ -296,10 +294,25 @@ export default function DailyView({
               losses: [],
               packagingUsage: {},
             };
-            const newString = JSON.stringify(newData);
-            if (lastSnapshotRef.current !== newString) {
-              lastSnapshotRef.current = newString;
-              setDailyData(newData);
+
+            // ✅ 立即寫入 Firestore，不依賴 Debounced Save
+            // 這樣 onSnapshot 會再次觸發並走 snap.exists() 路徑，資料穩定
+            try {
+              await setDoc(
+                doc(db, 'shops', shopId, 'daily', targetDateKey),
+                { ...newData, date: targetDateKey },
+                { merge: false }
+              );
+              // onSnapshot 會自動收到更新並 setDailyData，不需要在這裡手動 set
+            } catch (err) {
+              console.error('[帶入] 寫入 Firestore 失敗，使用 local state:', err);
+              // 如果寫入失敗，至少用 local state 顯示
+              const newString = JSON.stringify(newData);
+              if (lastSnapshotRef.current !== newString) {
+                lastSnapshotRef.current = newString;
+                setLoadedDateKey(targetDateKey);
+                setDailyData(newData);
+              }
             }
           }
           if (!cancelled) setLoading(false);
