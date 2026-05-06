@@ -31,6 +31,7 @@ interface CashRegisterTabProps {
   customers: import('../../types').Customer[];
   onAddOrder: (order: Order) => void;
   onAddFutureOrder?: (targetDate: string, order: Order) => void;
+  onGoToDashboard?: () => void;
 }
 
 const DEFAULT_CURRENCY: CurrencyBreakdown = {
@@ -43,7 +44,7 @@ const DEFAULT_CURRENCY: CurrencyBreakdown = {
   "1": 0
 };
 
-export default function CashRegisterTab({ dailyData, settings, updateDaily, metrics, customers, onAddOrder, onAddFutureOrder }: CashRegisterTabProps) {
+export default function CashRegisterTab({ dailyData, settings, updateDaily, metrics, customers, onAddOrder, onAddFutureOrder, onGoToDashboard }: CashRegisterTabProps) {
   const [cart, setCart] = useState<{item: Item, qty: number}[]>([]);
   const [checkoutModal, setCheckoutModal] = useState(false);
   const [expenseModal, setExpenseModal] = useState(false);
@@ -646,6 +647,14 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                 <ShoppingBag className="w-5 h-5 text-rose-brand" /> 商品選單
               </h3>
               <div className="flex gap-2">
+                {onGoToDashboard && (
+                  <button 
+                    onClick={onGoToDashboard}
+                    className="px-4 py-2 bg-rose-50 text-rose-600 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-rose-100 transition-all border border-rose-100"
+                  >
+                    <Monitor className="w-4 h-4" /> 回戰情室
+                  </button>
+                )}
                 <button 
                   onClick={() => setExpenseModal(true)}
                   className="px-4 py-2 bg-amber-100 text-amber-700 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-amber-200 transition-all"
@@ -662,21 +671,37 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             </div>
     
             <div className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
-              {allItems.map(item => (
-                <motion.button
-                  whileTap={{ scale: 0.95 }}
-                  key={item.id}
-                  onClick={() => addToCart(item)}
-                  className="flex flex-col items-center justify-center p-4 bg-white border border-coffee-100 rounded-2xl shadow-sm hover:border-rose-brand/30 hover:shadow-md transition-all group aspect-square text-center"
-                >
-                  <div className="text-sm font-bold text-coffee-700 group-hover:text-rose-brand transition-colors line-clamp-2 mb-2">
-                    {item.name}
-                  </div>
-                  <div className="text-rose-brand font-mono font-bold">
-                    ${fmt(item.price)}
-                  </div>
-                </motion.button>
-              ))}
+              {allItems.map(item => {
+                const normName = item.name.replace(/(\(單顆\)|單顆)/g, '').trim();
+                const inv = dailyData?.inventory?.[normName] || { org: 0, act: 0 };
+                const outTotal = metrics?.inventoryOut?.[normName] || 0;
+                const lossTotal = dailyData.losses.filter(l => l.flavor === normName).reduce((sum, l) => sum + l.qty, 0);
+                const currentStock = (inv.org || 0) + (inv.act || 0) - lossTotal - outTotal;
+                const isOutOfStock = currentStock <= 0;
+
+                return (
+                  <motion.button
+                    whileTap={!isOutOfStock ? { scale: 0.95 } : {}}
+                    key={item.id}
+                    disabled={isOutOfStock}
+                    onClick={() => addToCart(item)}
+                    className={cn(
+                      "flex flex-col items-center justify-center p-4 bg-white border rounded-2xl shadow-sm transition-all group aspect-square text-center relative",
+                      isOutOfStock ? "opacity-50 grayscale cursor-not-allowed border-gray-100" : "hover:border-rose-brand/30 hover:shadow-md border-coffee-100"
+                    )}
+                  >
+                    <div className="text-sm font-bold text-coffee-700 group-hover:text-rose-brand transition-colors line-clamp-2 mb-2">
+                      {item.name}
+                    </div>
+                    <div className="text-rose-brand font-mono font-bold">
+                      ${fmt(item.price)}
+                    </div>
+                    <div className={cn("absolute bottom-2 right-2 text-[10px] font-bold px-1.5 rounded-md", isOutOfStock ? "bg-red-100 text-red-600" : "bg-mint-brand/10 text-mint-brand")}>
+                      {isOutOfStock ? '補貨' : `剩 ${currentStock}`}
+                    </div>
+                  </motion.button>
+                );
+              })}
             </div>
           </div>
     

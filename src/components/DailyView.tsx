@@ -143,6 +143,37 @@ export default function DailyView({
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const lastSnapshotRef = useRef<string>('');
+  
+  // Filters and Summary search
+  const [sourceFilter, setSourceFilter] = useState<'all' | 'pos' | 'manual' | 'import'>('all');
+  const [pickupFilter, setPickupFilter] = useState<'all' | 'picked' | 'pending'>('all');
+  const [summaryItemId, setSummaryItemId] = useState<string>('');
+
+  const filteredOrders = useMemo(() => {
+    if (!dailyData?.orders) return [];
+    return dailyData.orders.filter(o => {
+      const matchSource = sourceFilter === 'all' || o.source === sourceFilter;
+      const matchPickup = pickupFilter === 'all' || 
+                         (pickupFilter === 'picked' && o.isPickedUp) || 
+                         (pickupFilter === 'pending' && !o.isPickedUp);
+      return matchSource && matchPickup;
+    });
+  }, [dailyData?.orders, sourceFilter, pickupFilter]);
+
+  const itemSummary = useMemo(() => {
+    if (!summaryItemId || !dailyData?.orders) return null;
+    const stats = { picked: 0, pending: 0, total: 0 };
+    dailyData.orders.forEach(o => {
+      const qty = o.items?.[summaryItemId] || 0;
+      if (qty > 0) {
+        stats.total += qty;
+        if (o.isPickedUp) stats.picked += qty;
+        else stats.pending += qty;
+      }
+    });
+    return stats;
+  }, [summaryItemId, dailyData?.orders]);
+
   const settings = useMemo(
     () => applyDailyActive(baseSettings, dailyData?.dailyActive),
     [baseSettings, dailyData?.dailyActive]
@@ -201,18 +232,51 @@ export default function DailyView({
               if (prevResolved.snap.exists()) {
                 const prev = prevResolved.snap.data() as DailyReport;
                 const prevAr = { ...defaultAr(), ...(prev.ar || {}) };
+                
+                // AR Carryover: Accum = yesterday.accum + yesterday.unpaid - yesterday.collect
+                // User clarified: Reset to 0 on the 1st of every month
+                const [y, m, d] = targetDateKey.split('-').map(Number);
                 if (d === 1) {
-                  accumFromPrev = 0; // 每個月 1 號不帶入上個月的未結帳款
+                  accumFromPrev = 0;
                 } else {
-                  accumFromPrev = Math.max(0, prevAr.accum + calcDayUnpaid(prev.orders || []) - prevAr.collect);
+                  const yesterdayUnpaid = calcDayUnpaid(prev.orders || []);
+                  accumFromPrev = Math.max(0, (prevAr.accum || 0) + yesterdayUnpaid - (prevAr.collect || 0));
                 }
 
+                // Inventory Carryover: Today's Opening (org) = Yesterday's Closing (todayRemain)
                 if (prev.inventory) {
+                  // We need to calculate yesterday's inventory out to find the closing balance
+                  const prevMetrics = { inventoryOut: {} as Record<string, number> };
+                  const allItems = [...(settings.giftItems || []), ...(settings.singleItems || []), ...(settings.customCategories || []).flatMap(c => c.items || [])];
+                  
+                  (prev.orders || []).forEach(o => {
+                    allItems.forEach(item => {
+                      const qty = o.items?.[item.id] || 0;
+                      if (qty <= 0) return;
+                      if (item.recipe) {
+                        Object.entries(item.recipe || {}).forEach(([flavor, count]) => {
+                          const normFlavor = normalizeFlavorName(flavor);
+                          prevMetrics.inventoryOut[normFlavor] = (prevMetrics.inventoryOut[normFlavor] || 0) + qty * (Number(count) || 0);
+                        });
+                      } else {
+                        const normName = normalizeFlavorName(item.name);
+                        prevMetrics.inventoryOut[normName] = (prevMetrics.inventoryOut[normName] || 0) + qty;
+                      }
+                    });
+                  });
+
                   Object.entries(prev.inventory).forEach(([itemId, itemData]) => {
+                    const norm = normalizeFlavorName(itemId);
+                    const flavorLossTotal = (prev.losses || []).filter(l => normalizeFlavorName(l.flavor) === norm).reduce((sum, l) => sum + l.qty, 0);
+                    const outTotal = prevMetrics.inventoryOut[norm] || 0;
+                    
+                    // todayRemain = org + act - losses - outTotal
+                    const closingBalance = (itemData.org || 0) + (itemData.act || 0) - flavorLossTotal - outTotal;
+                    
                     inventoryFromPrev[itemId] = {
-                      org: itemData.act || 0,
+                      org: closingBalance,
                       exp: 0,
-                      act: itemData.act || 0,
+                      act: 0,
                       los: 0
                     };
                   });
@@ -654,6 +718,7 @@ export default function DailyView({
                 setSaveStatus('saving');
               }}
               onAddFutureOrder={handleAddFutureOrder}
+              onGoToDashboard={() => setSubTab('dashboard')}
             />
       )}
 
@@ -700,23 +765,82 @@ export default function DailyView({
 
           {/* Sales List */}
           <div className="glass-panel p-6 md:p-8">
-            <div className="flex items-center justify-between mb-6">
-              <h3 className="section-title">
-                <LayoutDashboard className="w-5 h-5 inline-block mr-2 mb-1" /> 銷售明細
-              </h3>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setPhoneSearchModal(true)}
-                  className="bg-white border border-coffee-200 text-coffee-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-coffee-50 transition-colors shadow-sm"
-                >
-                  <Search className="w-4 h-4" /> 搜尋訂單
-                </button>
-                <button
-                  onClick={() => setAddOrderModal(true)}
-                  className="bg-coffee-600 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-coffee-700 transition-colors shadow-md"
-                >
-                  <Plus className="w-4 h-4" /> 新增訂單
-                </button>
+            <div className="flex flex-col gap-6 mb-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <h3 className="section-title">
+                  <LayoutDashboard className="w-5 h-5 inline-block mr-2 mb-1" /> 銷售明細
+                </h3>
+                <div className="flex flex-wrap items-center gap-3">
+                  {/* Filters */}
+                  <div className="flex bg-coffee-50 p-1 rounded-xl border border-coffee-100">
+                    {['all', 'pos', 'manual', 'import'].map(f => (
+                      <button 
+                        key={f}
+                        onClick={() => setSourceFilter(f as any)}
+                        className={cn("px-3 py-1.5 text-xs font-bold rounded-lg transition-all", sourceFilter === f ? "bg-white text-coffee-800 shadow-sm" : "text-coffee-400 hover:text-coffee-600")}
+                      >
+                        {f === 'all' ? '全部' : f === 'pos' ? 'POS' : f === 'manual' ? '收銀' : '匯入'}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex bg-coffee-50 p-1 rounded-xl border border-coffee-100">
+                    {['all', 'picked', 'pending'].map(f => (
+                      <button 
+                        key={f}
+                        onClick={() => setPickupFilter(f as any)}
+                        className={cn("px-3 py-1.5 text-xs font-bold rounded-lg transition-all", pickupFilter === f ? "bg-white text-coffee-800 shadow-sm" : "text-coffee-400 hover:text-coffee-600")}
+                      >
+                        {f === 'all' ? '全部狀態' : f === 'picked' ? '已取貨' : '待取貨'}
+                      </button>
+                    ))}
+                  </div>
+                  
+                  <button
+                    onClick={() => setPhoneSearchModal(true)}
+                    className="bg-white border border-coffee-200 text-coffee-600 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-coffee-50 transition-colors shadow-sm"
+                  >
+                    <Search className="w-4 h-4" /> 搜尋
+                  </button>
+                  <button
+                    onClick={() => setAddOrderModal(true)}
+                    className="bg-coffee-600 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-coffee-700 transition-colors shadow-md"
+                  >
+                    <Plus className="w-4 h-4" /> 新增
+                  </button>
+                </div>
+              </div>
+
+              {/* Item Summary Search Widget */}
+              <div className="bg-coffee-50/50 p-4 rounded-2xl border border-coffee-100 flex flex-wrap items-center gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-bold text-coffee-600">品項提領統計:</span>
+                  <select 
+                    value={summaryItemId}
+                    onChange={e => setSummaryItemId(e.target.value)}
+                    className="bg-white border border-coffee-200 rounded-lg px-3 py-1.5 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand"
+                  >
+                    <option value="">選擇品項...</option>
+                    {[...(settings.giftItems || []), ...(settings.singleItems || [])].filter(i => i.active).map(i => (
+                      <option key={i.id} value={i.id}>{i.name}</option>
+                    ))}
+                  </select>
+                </div>
+                {itemSummary && (
+                  <div className="flex gap-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-coffee-400">總數:</span>
+                      <span className="text-sm font-bold text-coffee-800 font-mono">{itemSummary.total}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-mint-brand">已取:</span>
+                      <span className="text-sm font-bold text-mint-brand font-mono">{itemSummary.picked}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-rose-brand">待取:</span>
+                      <span className="text-sm font-bold text-rose-brand font-mono">{itemSummary.pending}</span>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -755,7 +879,9 @@ export default function DailyView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-[#f0ede8]">
-                  {dailyData.orders.map((order, idx) => {
+                  {filteredOrders.map((order) => {
+                    const idx = dailyData.orders.findIndex(o => o.id === order.id);
+                    if (idx === -1) return null;
                     const isDelivery = order.deliveryMethod === '宅配';
                     const isPickup = order.deliveryMethod === '自取';
                     const copyRecipient = () => {
@@ -765,12 +891,19 @@ export default function DailyView({
                     return (
                     <tr key={order.id} className="group hover:bg-coffee-50/50 transition-colors">
                       <td className="px-3 py-3 sticky left-0 z-10 bg-white/90 backdrop-blur-sm group-hover:bg-[#faf7f2]/90 border-r border-[#f0ede8]">
-                        <input
-                          className="w-20 md:w-28 bg-transparent font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
-                          placeholder="姓名"
-                          value={order.buyer}
-                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].buyer = e.target.value; updateDaily({ orders }); }}
-                        />
+                        <div className="flex flex-col items-start gap-1">
+                          <input
+                            className="w-20 md:w-28 bg-transparent font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
+                            placeholder="姓名"
+                            value={order.buyer}
+                            onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].buyer = e.target.value; updateDaily({ orders }); }}
+                          />
+                          <span className={cn("text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-tighter", 
+                            order.source === 'pos' ? "bg-coffee-100 text-coffee-500" : 
+                            order.source === 'import' ? "bg-blue-50 text-blue-500" : "bg-purple-50 text-purple-500")}>
+                            {order.source || 'manual'}
+                          </span>
+                        </div>
                       </td>
                       {(settings.giftItems || []).filter(i => i.active).map(i => (
                         <td key={i.id} className="px-2 py-3 bg-[#ffcbf2]/5">
