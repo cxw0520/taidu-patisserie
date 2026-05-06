@@ -325,10 +325,11 @@ export default function App() {
     <div className="min-h-screen flex flex-col">
       {isLocked && (
         <OperatorLockScreen
+          shopId={shopId}
           operators={operators}
+          settings={settings}
           onUnlock={setCurrentOperator}
           onForceGoogleUnlock={() => {
-            // Require a quick prompt to verify it's the owner wanting to bypass
             if (confirm(`這將使用您的 Google 帳號 (${user.email}) 強制登入系統，確定要繼續嗎？`)) {
               setForceUnlocked(true);
             }
