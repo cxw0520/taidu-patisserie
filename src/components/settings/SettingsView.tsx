@@ -22,6 +22,7 @@ const DEFAULT_PERMISSIONS: Permissions = {
   cost: false,
   customers: false,
   can_void: false,
+  hr: false,
 };
 
 const PERMISSION_LABELS: Record<keyof Permissions, string> = {
@@ -34,6 +35,7 @@ const PERMISSION_LABELS: Record<keyof Permissions, string> = {
   customers: '顧客資料',
   can_void: '特權: 作廢訂單',
   manage_system: '⚙️ 系統設定與權限管理',
+  hr: '👥 人事與薪資管理',
 };
 
 export default function SettingsView({ shopId, roles, operators, settings }: Props) {

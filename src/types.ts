@@ -8,6 +8,7 @@ export interface Permissions {
   cost: boolean;           // 成本分析
   customers: boolean;      // 顧客資料
   can_void: boolean;       // 特權: 作廢訂單
+  hr: boolean;             // 人事與薪資管理
 }
 
 export interface Role {
@@ -251,6 +252,104 @@ export interface Settings {
   estimatedMonthlyRent?: number;
   estimatedMonthlyUtilities?: number;
   estimatedMonthlyPayroll?: number;
+
+  // 人事 - 班別模板
+  shiftTemplates?: ShiftTemplate[];
+
+  // 人事 - 勞健保設定
+  enableInsurance?: boolean; // 工保/健保/勞退開關
+}
+
+// ── HR: 班別模板 ──────────────────────────────────────────────
+export interface ShiftTemplate {
+  id: string;
+  name: string;        // e.g. '早班', '晚班', '全班'
+  startTime: string;   // 'HH:mm'
+  endTime: string;     // 'HH:mm'
+  breakMinutes: number;
+  color?: string;      // hex color for calendar display
+}
+
+// ── HR: 排班記錄 ──────────────────────────────────────────────
+export interface RosterEntry {
+  operatorId: string;
+  dateKey: string;       // 'YYYY-MM-DD'
+  shiftTemplateId?: string;
+  customStart?: string;  // override 'HH:mm'
+  customEnd?: string;    // override 'HH:mm'
+  isOff?: boolean;       // 公休/排休
+  isHoliday?: boolean;   // 國定假日
+  note?: string;
+}
+
+// ── HR: 打卡紀錄 ──────────────────────────────────────────────
+export interface AttendancePunch {
+  id: string;
+  type: 'clock_in' | 'clock_out';
+  time: string;          // 'HH:mm'
+  rawTime: string;       // ISO timestamp
+  roundedTime?: string;  // After rounding logic
+  method: 'pin' | 'manual_admin';
+  adminNote?: string;    // If manually added by admin
+}
+
+export interface AttendanceRecord {
+  id: string;
+  operatorId: string;
+  dateKey: string;       // 'YYYY-MM-DD'
+  punches: AttendancePunch[];
+  clockIn?: string;      // Resolved 'HH:mm'
+  clockOut?: string;     // Resolved 'HH:mm'
+  effectiveMinutes?: number;  // After rounding
+  isLate?: boolean;
+  lateMinutes?: number;
+  isEarlyLeave?: boolean;
+  earlyLeaveMinutes?: number;
+  isOvertier1?: boolean;
+  isOvertier2?: boolean;
+  isHoliday?: boolean;
+  note?: string;
+}
+
+// ── HR: 薪資計算結果 ──────────────────────────────────────────
+export interface PayrollLineItem {
+  label: string;
+  amount: number;
+  type: 'add' | 'deduct';
+}
+
+export interface PayrollResult {
+  operatorId: string;
+  yearMonth: string;    // 'YYYY-MM'
+  payrollType: 'hourly' | 'monthly';
+  baseRate: number;
+
+  // Hours summary (for hourly)
+  totalRegularMinutes?: number;
+  totalOt1Minutes?: number;
+  totalOt2Minutes?: number;
+  holidayMinutes?: number;
+
+  // Monetary breakdown
+  basePay: number;
+  ot1Pay?: number;
+  ot2Pay?: number;
+  holidayPay?: number;
+  lateDeduction?: number;
+
+  // Insurance (when enabled)
+  laborInsuranceEmployee?: number;
+  healthInsuranceEmployee?: number;
+  pensionEmployee?: number;
+
+  // Company cost (when insurance enabled)
+  laborInsuranceCompany?: number;
+  healthInsuranceCompany?: number;
+  pensionCompany?: number;
+
+  netPay: number;         // Employee receives
+  companyCost?: number;   // Total cost to employer
+  lineItems: PayrollLineItem[];
 }
 
 export interface COAItem {

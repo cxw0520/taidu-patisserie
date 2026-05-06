@@ -21,7 +21,8 @@ import {
   BookOpen,
   Gem,
   Download,
-  Users
+  Users,
+  Clock
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from './lib/firebase';
@@ -39,6 +40,7 @@ import CostView from './components/CostView';
 import InventoryView from './components/InventoryView';
 import CustomerView from './components/CustomerView';
 import SettingsView from './components/settings/SettingsView';
+import HRView from './components/hr/HRView';
 import OperatorLockScreen from './components/auth/OperatorLockScreen';
 import { Role, Operator, Permissions } from './types';
 import { Lock } from 'lucide-react';
@@ -65,7 +67,7 @@ const DEFAULT_SETTINGS: Settings = {
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers' | 'pos' | 'settings'>(() => {
+  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers' | 'pos' | 'settings' | 'hr'>(() => {
     return (localStorage.getItem('app_active_tab') as any) || 'journal';
   });
   const [globalSubTabs, setGlobalSubTabs] = useState<Record<string, string>>(() => {
@@ -296,6 +298,12 @@ export default function App() {
     } else if (activeTab === 'cost') {
       category = '營運管理';
       sub = '成本分析';
+    } else if (activeTab === 'hr') {
+      category = '人事與薪資';
+      const s = globalSubTabs['hr'] || 'roster';
+      if (s === 'roster') sub = '排班管理';
+      else if (s === 'attendance') sub = '出勤打卡紀錄';
+      else if (s === 'payroll') sub = '薪資結算總表';
     } else if (activeTab === 'customers') {
       category = '營運管理';
       sub = '顧客資料';
@@ -435,6 +443,17 @@ export default function App() {
                 </div>
               )}
 
+              {hasPermission('hr') && (
+                <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
+                  <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">人事與薪資</h3>
+                  <div className="space-y-1">
+                    <NavMenuItem label="排班管理" icon={<Calendar />} onClick={() => navigateTo('hr', 'roster')} active={activeTab === 'hr' && globalSubTabs['hr'] === 'roster'} />
+                    <NavMenuItem label="出勤打卡紀錄" icon={<Clock />} onClick={() => navigateTo('hr', 'attendance')} active={activeTab === 'hr' && globalSubTabs['hr'] === 'attendance'} />
+                    <NavMenuItem label="薪資結算總表" icon={<FileSpreadsheet />} onClick={() => navigateTo('hr', 'payroll')} active={activeTab === 'hr' && globalSubTabs['hr'] === 'payroll'} />
+                  </div>
+                </div>
+              )}
+
               {(hasPermission('inventory') || hasPermission('cost') || hasPermission('customers')) && (
                 <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
                   <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">營運管理</h3>
@@ -494,6 +513,7 @@ export default function App() {
             transition={{ duration: 0.3 }}
             className="h-full"
           >
+            {activeTab === 'hr' && <HRView forcedSubTab={globalSubTabs['hr']} shopId={shopId} operators={operators} settings={settings} />}
             {activeTab === 'journal' && <JournalView forcedSubTab={globalSubTabs['journal']} selectedYear={selectedYear} shopId={shopId} />}
             {activeTab === 'daily' && <DailyView forcedSubTab={globalSubTabs['daily']} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
             {activeTab === 'pos' && <DailyView forcedSubTab={'pos'} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
