@@ -155,7 +155,7 @@ export default function DailyView({
       const matchSource = sourceFilter === 'all' || o.source === sourceFilter;
       const matchPickup = pickupFilter === 'all' || 
                          (pickupFilter === 'picked' && o.isPickedUp) || 
-                         (pickupFilter === 'pending' && !o.isPickedUp);
+                         (pickupFilter === 'pending' && o.deliveryMethod === '自取' && !o.isPickedUp);
       return matchSource && matchPickup;
     });
   }, [dailyData?.orders, sourceFilter, pickupFilter]);
@@ -168,7 +168,7 @@ export default function DailyView({
       if (qty > 0) {
         stats.total += qty;
         if (o.isPickedUp) stats.picked += qty;
-        else stats.pending += qty;
+        else if (o.deliveryMethod === '自取') stats.pending += qty;
       }
     });
     return stats;
