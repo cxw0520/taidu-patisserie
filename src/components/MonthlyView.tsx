@@ -31,7 +31,9 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   const [monthlyLogisticsVal, setMonthlyLogisticsVal] = useState<number>(0);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [materials, setMaterials] = useState<Material[]>([]);
-  const [dailyUsages, setDailyUsages] = useState<import('../types').DailyUsageRec[]>([]);
+  const [expenses, setExpenses] = useState<import('../types').ExpenseRecord[]>([]);
+  const [purchases, setPurchases] = useState<import('../types').Purchase[]>([]);
+  const [physicalCounts, setPhysicalCounts] = useState<import('../types').PhysicalCountRecord[]>([]);
   const [activeTab, setActiveTab] = useState<'finance' | 'product'>('finance');
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
 
@@ -119,16 +121,36 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
       setRecipes(snap.docs.map(d => d.data() as Recipe));
     });
 
-    const qUsages = query(
-      collection(db, 'shops', shopId, 'dailyUsages'),
-      where('date', '>=', `${selectedMonth}-01`),
-      where('date', '<=', `${selectedMonth}-31`)
+    const qExpenses = query(
+      collection(db, 'shops', shopId, 'expenses'),
+      where('yearMonth', '==', selectedMonth)
     );
-    const unsubUsages = onSnapshot(qUsages, (snap) => {
-      setDailyUsages(snap.docs.map(d => d.data() as import('../types').DailyUsageRec));
+    const unsubExpenses = onSnapshot(qExpenses, (snap) => {
+      setExpenses(snap.docs.map(d => d.data() as import('../types').ExpenseRecord));
     });
 
-    return () => { unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); unsubUsages(); };
+    const qPurchases = query(
+      collection(db, 'shops', shopId, 'purchases'),
+      where('yearMonth', '==', selectedMonth)
+    );
+    const unsubPurchases = onSnapshot(qPurchases, (snap) => {
+      setPurchases(snap.docs.map(d => d.data() as import('../types').Purchase));
+    });
+
+    // Need previous month count for opening balance if no specific opening balance exists
+    const prevMonthDate = new Date(`${selectedMonth}-01`);
+    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+    const prevMonthStr = prevMonthDate.toISOString().slice(0, 7);
+
+    const qCounts = query(
+      collection(db, 'shops', shopId, 'physicalCounts'),
+      where('yearMonth', 'in', [selectedMonth, prevMonthStr])
+    );
+    const unsubCounts = onSnapshot(qCounts, (snap) => {
+      setPhysicalCounts(snap.docs.map(d => d.data() as import('../types').PhysicalCountRecord));
+    });
+
+    return () => { unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); unsubExpenses(); unsubPurchases(); unsubCounts(); };
   }, [selectedMonth, shopId]);
 
   // Cost calculation function
@@ -286,7 +308,9 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
           getRecipeCost={getRecipeCost}
           materials={materials}
           recipes={recipes}
-          dailyUsages={dailyUsages}
+          expenses={expenses}
+          purchases={purchases}
+          physicalCounts={physicalCounts}
           showARModal={showARModal}
           setShowARModal={setShowARModal}
           selectedBuyer={selectedBuyer}
@@ -494,7 +518,7 @@ function ARReconciliationModal({ monthData, settings, shopId, onClose, selectedB
   );
 }
 
-function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, dailyUsages, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
+function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, expenses, purchases, physicalCounts, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
   const [showFoodCostModal, setShowFoodCostModal] = useState(false);
   const [showPRModal, setShowPRModal] = useState(false);
   const stats = useMemo(() => {
@@ -630,16 +654,75 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     // Ingredients cost sum
     const theoreticalIngredCost = itemCostBreakdown.reduce((acc, cur) => acc + cur.subtotal, 0);
 
-    // Actual Ingredients cost from DailyUsageRec
-    let ingredCost = 0;
-    (dailyUsages || []).forEach((u: import('../types').DailyUsageRec) => {
-      // only count materials that are category === '食材'
-      // Wait, DailyUsageTab mixes materials and recipes. But recipes are made of materials.
-      // So all dailyUsages totalValue can be considered food cost, assuming people only log food usages there.
-      // Or we can filter by material category if we strictly want.
-      // Since it's '本日使用量', it's totalValue.
-      ingredCost += u.totalValue || 0;
+    // --- New Periodic Cost Calculation (期初 + 進貨 - 期末) ---
+    const prevMonthDate = new Date(`${selectedMonth}-01`);
+    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
+    const prevMonthStr = prevMonthDate.toISOString().slice(0, 7);
+
+    // 1. 期初 (Opening Balance)
+    const currentMonthCount = physicalCounts.find((c: any) => c.yearMonth === selectedMonth);
+    const prevMonthCount = physicalCounts.find((c: any) => c.yearMonth === prevMonthStr);
+    
+    // 如果本月標記為期初開帳，期初庫存就是本月盤點值（此時本月進貨不應被計入開帳前，但實務上期初盤點通常是月底盤的，這裡簡化為若有標記期初開帳，則不計算當月進貨耗用，直接將 ingredCost 設為0或另計。
+    // 但更常見邏輯是：期初開帳盤點代表這是「系統上線第一天」的盤點。
+    let openingInvVal = 0;
+    if (currentMonthCount?.isOpeningBalance) {
+      openingInvVal = currentMonthCount.totalInventoryValue;
+    } else if (prevMonthCount) {
+      openingInvVal = prevMonthCount.totalInventoryValue;
+    }
+
+    // 2. 本月進貨 (Purchases + Material Expenses)
+    let purchaseVal = 0;
+    // 舊進貨單系統
+    (purchases || []).forEach((p: any) => {
+      purchaseVal += parseNum(p.totalAmt);
     });
+    // 新雜支系統 (只算 isMaterialCost = true 的明細)
+    let nonMaterialExpenseTotal = 0;
+    (expenses || []).forEach((e: any) => {
+      if (e.isTransfer) return; // 轉帳不計入
+      (e.lines || []).forEach((line: any) => {
+        const cat = settings?.expenseCategories?.find((c: any) => c.id === line.categoryId);
+        if (cat?.isMaterialCost) {
+          purchaseVal += parseNum(line.amount);
+        } else {
+          nonMaterialExpenseTotal += parseNum(line.amount);
+        }
+      });
+    });
+
+    // 3. 期末 (Ending Balance)
+    let endingInvVal = 0;
+    if (currentMonthCount && !currentMonthCount.isOpeningBalance) {
+      endingInvVal = currentMonthCount.totalInventoryValue;
+    } else if (currentMonthCount?.isOpeningBalance) {
+       // 如果本月是期初開帳，則期末庫存就等於期初庫存，本月無耗用（或者手動設定）
+       endingInvVal = openingInvVal;
+    }
+
+    let ingredCost = 0;
+    let isEstimatedIngredCost = false;
+    
+    if (currentMonthCount?.isOpeningBalance) {
+       // 第一個月期初開帳時，成本先算0，直到下個月底盤點才有消耗
+       ingredCost = 0;
+    } else if (currentMonthCount) {
+       // 本月已經盤點過，有期末結存
+       ingredCost = openingInvVal + purchaseVal - endingInvVal;
+       if (ingredCost < 0) ingredCost = 0; // 防止盤盈導致成本為負
+    } else {
+       // 尚未進行本月盤點，使用配方預估成本
+       ingredCost = theoreticalIngredCost;
+       isEstimatedIngredCost = true;
+    }
+
+    // 雜支算作其他固定或變動營業費用
+    // 我們將它加到固定費用裡，或者在變動成本中顯示？
+    // 這裡我們將 nonMaterialExpenseTotal 作為 totalMarketingAndFixed 的一部分，或獨立顯示。
+    // 使用者說「其餘雜支總額 ＋ 薪資 ＋ 固定攤提 = 其他營業費用」
+    // 所以我會把它加入到 Fixed Costs 輸入中。
+
 
     const prIngredCost = Object.entries(itemPR).reduce((acc, [flavor, qty]) => acc + qty * getRecipeCost(flavor), 0);
 
@@ -662,7 +745,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
     const prMarketingCost = prIngredCost + prShip;
     const totalFixedCostsInput = fixedCosts.reduce((acc: number, cur: any) => acc + parseNum(cur.amount), 0);
-    const totalMarketingAndFixed = totalFixedCostsInput + prMarketingCost;
+    const totalMarketingAndFixed = totalFixedCostsInput + prMarketingCost + nonMaterialExpenseTotal;
 
     const netProfit = netRevenue - totalVariableCost - totalMarketingAndFixed;
 
@@ -674,10 +757,13 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       logSpent, lossCost, totalLogisticsCost,
       totalVariableCost,
       prIngredCost, prShip, prMarketingCost,
-      totalFixedCostsInput, totalMarketingAndFixed,
-      netProfit
+      totalFixedCostsInput, nonMaterialExpenseTotal, totalMarketingAndFixed,
+      netProfit,
+      openingInvVal, purchaseVal, endingInvVal,
+      hasCountRecord: !!currentMonthCount,
+      isEstimatedIngredCost
     };
-  }, [monthData, settings, getRecipeCost, materials, fixedCosts, costOverrides, monthlyLogisticsVal, dailyUsages]);
+  }, [monthData, settings, getRecipeCost, materials, fixedCosts, costOverrides, monthlyLogisticsVal, expenses, purchases, physicalCounts]);
 
   const updateFixedCostAmount = async (id: string, amount: number) => {
     const next = fixedCosts.map((c: any) => c.id === id ? { ...c, amount } : c);
@@ -815,8 +901,18 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
               className="w-full flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100 hover:border-coffee-300 hover:shadow-md transition active:scale-[0.98] group text-left"
             >
               <div className="flex justify-between items-center w-full">
-                <span className="text-coffee-800 font-bold flex items-center gap-2">真實食材成本 <Plus className="w-3 h-3 text-coffee-400 group-hover:text-coffee-600"/></span>
+                <span className="text-coffee-800 font-bold flex items-center gap-2">
+                  {stats.isEstimatedIngredCost ? '配方預估食材成本' : '本月真實食材消耗'} 
+                  <Plus className="w-3 h-3 text-coffee-400 group-hover:text-coffee-600"/>
+                </span>
                 <span className="font-mono font-bold text-rose-brand">${fmt(stats.ingredCost)}</span>
+              </div>
+              <div className="w-full text-[10px] text-coffee-400 font-bold flex justify-between mt-1">
+                {stats.isEstimatedIngredCost ? (
+                  <span className="text-amber-500">⚠️ 本月尚未盤點，目前顯示為預估值</span>
+                ) : (
+                  <span>(期初 ${fmt(stats.openingInvVal)} + 進貨 ${fmt(stats.purchaseVal)} - 期末 ${fmt(stats.endingInvVal)})</span>
+                )}
               </div>
               <div className="flex justify-between items-center w-full text-xs text-coffee-500 border-t border-coffee-100/50 pt-1 mt-1">
                 <span>理論配方推算</span>
@@ -961,6 +1057,14 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                   </div>
                 </div>
               ))}
+              
+              <div className="flex justify-between items-center p-2 rounded-lg bg-coffee-50/50 border border-coffee-50">
+                <span className="text-coffee-600 text-sm font-bold flex flex-col">
+                  其他營業雜支
+                  <span className="text-[10px] text-coffee-400 font-normal">本月新增雜支總額 (不含食材/轉帳)</span>
+                </span>
+                <span className="font-mono font-bold text-coffee-800">${fmt(stats.nonMaterialExpenseTotal)}</span>
+              </div>
             </div>
 
             <div className="flex justify-between items-center bg-rose-50/50 p-4 rounded-xl border border-rose-200 shadow-sm mt-4">

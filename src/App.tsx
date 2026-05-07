@@ -284,6 +284,7 @@ export default function App() {
       else if (s === 'ledger') sub = '分類帳';
       else if (s === 'coa') sub = '會計科目';
       else if (s === 'assets') sub = '資產總表';
+      else if (s === 'expenses') sub = '雜支與零用金記帳本';
     } else if (activeTab === 'daily') {
       category = '日月報表';
       const s = globalSubTabs['daily'] || 'dashboard';
@@ -420,6 +421,7 @@ export default function App() {
                     <NavMenuItem label="日記簿" icon={<BookOpen />} onClick={() => navigateTo('journal', 'entries')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'entries'} />
                     <NavMenuItem label="財務報表" icon={<BarChart3 />} onClick={() => navigateTo('journal', 'reports')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'reports'} />
                     <NavMenuItem label="分類帳" icon={<Layers />} onClick={() => navigateTo('journal', 'ledger')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'ledger'} />
+                    <NavMenuItem label="雜支與零用金" icon={<FileSpreadsheet />} onClick={() => navigateTo('journal', 'expenses')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'expenses'} />
                     <NavMenuItem label="會計科目" icon={<Settings2 />} onClick={() => navigateTo('journal', 'coa')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'coa'} />
                     <NavMenuItem label="資產總表" icon={<Gem />} onClick={() => navigateTo('journal', 'assets')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'assets'} />
                   </div>
@@ -520,7 +522,7 @@ export default function App() {
             className="h-full"
           >
             {activeTab === 'hr' && <HRView forcedSubTab={globalSubTabs['hr']} shopId={shopId} operators={operators} settings={settings} />}
-            {activeTab === 'journal' && <JournalView forcedSubTab={globalSubTabs['journal']} selectedYear={selectedYear} shopId={shopId} />}
+            {activeTab === 'journal' && <JournalView forcedSubTab={globalSubTabs['journal']} selectedYear={selectedYear} shopId={shopId} settings={settings} />}
             {activeTab === 'daily' && <DailyView forcedSubTab={globalSubTabs['daily']} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
             {activeTab === 'pos' && <DailyView forcedSubTab={'pos'} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
             {activeTab === 'customers' && <CustomerView shopId={shopId} settings={settings} />}

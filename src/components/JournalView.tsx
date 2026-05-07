@@ -13,6 +13,7 @@ import LedgerView from './accounting/LedgerView';
 import CoaView from './accounting/CoaView';
 import AssetsView from './accounting/AssetsView';
 import ExportModal from './accounting/ExportModal';
+import ExpenseLogView from './accounting/ExpenseLogView';
 
 const DEFAULT_COA: COAItem[] = [
   { id: '1101', name: '現金', type: '資產', side: 'debit' },
@@ -64,13 +65,13 @@ const DEFAULT_COA: COAItem[] = [
   { id: '6403', name: '資產報廢損失', type: '費用', side: 'debit' },
 ];
 
-type SubTab = 'journal' | 'reports' | 'ledger' | 'coa' | 'assets';
+type SubTab = 'journal' | 'reports' | 'ledger' | 'coa' | 'assets' | 'expenses';
 
-export default function JournalView({ selectedYear, shopId, forcedSubTab }: { selectedYear: number, shopId: string, forcedSubTab?: string }) {
+export default function JournalView({ selectedYear, shopId, forcedSubTab, settings }: { selectedYear: number, shopId: string, forcedSubTab?: string, settings: any }) {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('journal');
   
   useEffect(() => {
-    if (forcedSubTab && ['entries', 'reports', 'ledger', 'coa', 'assets'].includes(forcedSubTab)) {
+    if (forcedSubTab && ['entries', 'reports', 'ledger', 'coa', 'assets', 'expenses'].includes(forcedSubTab)) {
       setActiveSubTab(forcedSubTab === 'entries' ? 'journal' : forcedSubTab as any);
     }
   }, [forcedSubTab]);
@@ -170,6 +171,7 @@ export default function JournalView({ selectedYear, shopId, forcedSubTab }: { se
             {activeSubTab === 'ledger' && <LedgerView entries={entries} coa={coa} />}
             {activeSubTab === 'coa' && <CoaView coa={coa} shopId={shopId} />}
             {activeSubTab === 'assets' && <AssetsView shopId={shopId} selectedYear={selectedYear} />}
+            {activeSubTab === 'expenses' && <ExpenseLogView shopId={shopId} selectedYear={selectedYear} fundingSources={settings?.fundingSources || []} expenseCategories={settings?.expenseCategories || []} />}
           </motion.div>
         </AnimatePresence>
       </div>

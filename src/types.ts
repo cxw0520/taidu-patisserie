@@ -61,6 +61,23 @@ export interface Purchase {
   notes?: string;
 }
 
+export interface PhysicalCountRecord {
+  id: string;
+  yearMonth: string; // 'YYYY-MM'
+  isOpeningBalance: boolean;
+  status: 'draft' | 'locked';
+  items: Record<string, {
+    actualQty: number; // 總克數或基本單位數量
+    unitCost: number;  // 當時鎖定的最新單價
+    totalValue: number; // actualQty * unitCost
+    tier1Qty?: number; // 箱
+    tier2Qty?: number; // 包/罐
+    tier3Qty?: number; // 零星克數
+  }>;
+  totalInventoryValue: number;
+  updatedAt: string;
+}
+
 export interface InventoryAdj {
   id: string;
   date: string;
@@ -282,6 +299,28 @@ export interface ExpenseCategory {
   name: string;
   isMaterialCost: boolean; // 若為 true，代表這筆支出會被算進本期「進貨總額」
   active: boolean;
+}
+
+export interface ExpenseLine {
+  id: string;
+  categoryId: string; // 對應 ExpenseCategory.id
+  amount: number;
+  note?: string;
+}
+
+export interface ExpenseRecord {
+  id: string;
+  dateKey: string; // YYYY-MM-DD
+  yearMonth: string; // YYYY-MM
+  vendor: string;
+  fundingSourceId: string; // 對應 FundingSource.id
+  isTransfer: boolean; // 是否為純資金互轉
+  targetFundingSourceId?: string; // 若為互轉，轉入的目標帳戶
+  lines: ExpenseLine[]; // 拆單明細
+  totalAmount: number;
+  invoiceNo?: string;
+  memo?: string;
+  createdAt: string; // ISO string
 }
 
 // ── HR: 班別模板 ──────────────────────────────────────────────

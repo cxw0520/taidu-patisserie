@@ -4,18 +4,17 @@ import { collection, query, where, onSnapshot, orderBy } from 'firebase/firestor
 import { Material, Purchase, InventoryAdj } from '../types';
 import { Package, ShoppingCart, Target, Menu, X, Calendar } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { cn } from '../lib/utils';
-
 import PurchasingTab from './inventory/PurchasingTab';
 import StockTab from './inventory/StockTab';
+import PeriodicCountTab from './inventory/PeriodicCountTab';
 
-type SubTab = 'purchases' | 'stock';
+type SubTab = 'purchases' | 'stock' | 'periodic_count';
 
 export default function InventoryView({ selectedYear, shopId, forcedSubTab }: { selectedYear: number, shopId: string, forcedSubTab?: string }) {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('purchases');
   
   useEffect(() => {
-    if (forcedSubTab && ['purchases', 'stock'].includes(forcedSubTab)) {
+    if (forcedSubTab && ['purchases', 'stock', 'periodic_count'].includes(forcedSubTab)) {
       setActiveSubTab(forcedSubTab as any);
     }
   }, [forcedSubTab]);
@@ -46,7 +45,8 @@ export default function InventoryView({ selectedYear, shopId, forcedSubTab }: { 
 
   const subTabs = [
     { id: 'purchases', label: '進貨管理', icon: ShoppingCart },
-    { id: 'stock', label: '庫存與盤點', icon: Target },
+    { id: 'stock', label: '材料與安全庫存', icon: Package },
+    { id: 'periodic_count', label: '月底實地盤點', icon: Target },
   ];
 
   return (
@@ -66,6 +66,9 @@ export default function InventoryView({ selectedYear, shopId, forcedSubTab }: { 
             )}
             {activeSubTab === 'stock' && (
               <StockTab materials={materials} shopId={shopId} />
+            )}
+            {activeSubTab === 'periodic_count' && (
+              <PeriodicCountTab materials={materials} shopId={shopId} selectedYear={selectedYear} />
             )}
           </motion.div>
         </AnimatePresence>
