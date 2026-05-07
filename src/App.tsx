@@ -22,7 +22,8 @@ import {
   Gem,
   Download,
   Users,
-  Clock
+  Clock,
+  Target
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from './lib/firebase';
@@ -298,10 +299,10 @@ export default function App() {
       else if (s === 'products') sub = '月報表-產品數據';
     } else if (activeTab === 'inventory') {
       category = '營運管理';
-      const s = globalSubTabs['inventory'] || 'purchasing';
-      if (s === 'purchasing') sub = '進貨管理';
-      else if (s === 'stock') sub = '庫存與盤點';
-      else if (s === 'daily') sub = '本日使用量';
+      const s = globalSubTabs['inventory'] || 'purchases';
+      if (s === 'purchases') sub = '進貨管理';
+      else if (s === 'stock') sub = '安全庫存設定';
+      else if (s === 'periodic_count') sub = '實地盤點 (月末結算)';
     } else if (activeTab === 'cost') {
       category = '營運管理';
       sub = '成本分析';
@@ -470,8 +471,9 @@ export default function App() {
                     {hasPermission('inventory') && (
                       <>
                         <div className="px-3 py-1 mt-1 text-[11px] font-bold text-coffee-300">進貨與庫存</div>
-                        <NavMenuItem label="進貨管理" icon={<Package />} onClick={() => navigateTo('inventory', 'purchasing')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'purchasing'} />
-                        <NavMenuItem label="庫存與盤點" icon={<ClipboardList />} onClick={() => navigateTo('inventory', 'stock')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'stock'} />
+                        <NavMenuItem label="進貨管理" icon={<Package />} onClick={() => navigateTo('inventory', 'purchases')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'purchases'} />
+                        <NavMenuItem label="安全庫存設定" icon={<ClipboardList />} onClick={() => navigateTo('inventory', 'stock')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'stock'} />
+                        <NavMenuItem label="實地盤點 (月末結算)" icon={<Target />} onClick={() => navigateTo('inventory', 'periodic_count')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'periodic_count'} />
                       </>
                     )}
 
