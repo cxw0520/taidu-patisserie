@@ -43,7 +43,7 @@ function applyRounding(timeStr: string, intervalMin: number): string {
 }
 
 export default function OperatorLockScreen({ shopId, operators, settings, onUnlock, onForceGoogleUnlock }: Props) {
-  const [mode, setMode] = useState<ScreenMode>('idle');
+  const [mode, setMode] = useState<ScreenMode>('pin_unlock');
   const [pin, setPin] = useState('');
   const [errorShake, setErrorShake] = useState(false);
   const [clockConfirm, setClockConfirm] = useState<ClockConfirm | null>(null);
@@ -66,7 +66,6 @@ export default function OperatorLockScreen({ shopId, operators, settings, onUnlo
       if (mode === 'pin_unlock') {
         onUnlock(match);
         setPin('');
-        setMode('idle');
       } else if (mode === 'pin_clock') {
         const punchType = pendingPunchType.current || 'clock_in';
         const timeNow = nowHHMM();
@@ -133,17 +132,17 @@ export default function OperatorLockScreen({ shopId, operators, settings, onUnlo
       setClockSuccess(clockConfirm);
       setMode('clock_success');
       setClockConfirm(null);
-      setTimeout(() => { setMode('idle'); setClockSuccess(null); }, 3000);
+      setTimeout(() => { setMode('pin_unlock'); setClockSuccess(null); }, 3000);
     } catch (err) {
       console.error('打卡失敗:', err);
       alert('打卡記錄失敗，請重試');
-      setMode('idle');
+      setMode('pin_unlock');
       setClockConfirm(null);
     }
   };
 
   const handleCancel = () => {
-    setMode('idle');
+    setMode('pin_unlock');
     setPin('');
     setClockConfirm(null);
     pendingPunchType.current = null;
@@ -158,7 +157,7 @@ export default function OperatorLockScreen({ shopId, operators, settings, onUnlo
     <div className="fixed inset-0 bg-coffee-900/95 backdrop-blur-md flex flex-col items-center justify-center z-[100]">
       <AnimatePresence mode="wait">
 
-        {/* ── IDLE: Main clock screen ── */}
+        {/* ── IDLE: Main clock screen (now secondary) ── */}
         {mode === 'idle' && (
           <motion.div
             key="idle"
@@ -259,12 +258,16 @@ export default function OperatorLockScreen({ shopId, operators, settings, onUnlo
                   {num}
                 </button>
               ))}
-              <button
-                onClick={handleCancel}
-                className="w-18 h-18 aspect-square hover:bg-coffee-800/30 rounded-full flex items-center justify-center text-coffee-500 hover:text-coffee-300 active:scale-90 transition-all"
-              >
-                <X className="w-6 h-6" />
-              </button>
+              {mode === 'pin_clock' ? (
+                <button
+                  onClick={handleCancel}
+                  className="w-18 h-18 aspect-square hover:bg-coffee-800/30 rounded-full flex items-center justify-center text-coffee-500 hover:text-coffee-300 active:scale-90 transition-all"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              ) : (
+                <div className="w-18 h-18" />
+              )}
               <button
                 onClick={() => handleNumpad('0')}
                 className="w-18 h-18 aspect-square bg-coffee-800/50 hover:bg-coffee-700 border border-coffee-700/50 rounded-full text-2xl font-light text-coffee-50 flex items-center justify-center active:scale-90 transition-all shadow-lg"
@@ -280,10 +283,16 @@ export default function OperatorLockScreen({ shopId, operators, settings, onUnlo
             </div>
 
             {mode === 'pin_unlock' && (
-              <div className="mt-10">
+              <div className="mt-10 flex flex-col items-center gap-4">
+                <button
+                  onClick={() => { setMode('idle'); setPin(''); }}
+                  className="flex items-center gap-2 text-mint-brand hover:text-mint-400 text-sm transition-colors border border-mint-brand/30 px-5 py-2.5 rounded-full hover:border-mint-brand bg-mint-brand/10"
+                >
+                  <Clock className="w-4 h-4" /> 進入打卡模式
+                </button>
                 <button
                   onClick={onForceGoogleUnlock}
-                  className="flex items-center gap-2 text-coffee-500 hover:text-coffee-300 text-sm transition-colors opacity-60 hover:opacity-100"
+                  className="flex items-center gap-2 text-coffee-500 hover:text-coffee-300 text-sm transition-colors opacity-60 hover:opacity-100 mt-4"
                 >
                   <Mail className="w-4 h-4" /> 忘記密碼？使用 Google 帳號
                 </button>
