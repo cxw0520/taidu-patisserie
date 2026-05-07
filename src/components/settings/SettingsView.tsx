@@ -4,6 +4,7 @@ import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { Role, Operator, Permissions } from '../../types';
 import { uid, cn } from '../../lib/utils';
 import { Shield, Users, Key, Save, Plus, Trash2, Edit2, AlertCircle, Store, Image as ImageIcon, X } from 'lucide-react';
+import { FundingSource, ExpenseCategory } from '../../types';
 
 interface Props {
   shopId: string;
@@ -39,7 +40,7 @@ const PERMISSION_LABELS: Record<keyof Permissions, string> = {
 };
 
 export default function SettingsView({ shopId, roles, operators, settings }: Props) {
-  const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators' | 'business_days' | 'operations' | 'finance'>('operators');
+  const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators' | 'business_days' | 'operations' | 'hr_rules' | 'finance' | 'accounting'>('operators');
   
   // Shop Settings State
   const [shopName, setShopName] = useState(settings?.shopName || '態度貳貳甜點工作室');
@@ -71,6 +72,20 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
   const [estimatedMonthlyUtilities, setEstimatedMonthlyUtilities] = useState(settings?.estimatedMonthlyUtilities || 0);
   const [estimatedMonthlyPayroll, setEstimatedMonthlyPayroll] = useState(settings?.estimatedMonthlyPayroll || 0);
 
+  // Accounting State
+  const [fundingSources, setFundingSources] = useState<FundingSource[]>(settings?.fundingSources || [
+    { id: uid(), name: '收銀台現金', type: 'cash_drawer', active: true },
+    { id: uid(), name: '店內零用金', type: 'petty_cash', active: true },
+    { id: uid(), name: '銀行存款', type: 'bank', active: true },
+    { id: uid(), name: '老闆代墊', type: 'owner', active: true }
+  ]);
+  const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>(settings?.expenseCategories || [
+    { id: uid(), name: '食材與原物料', isMaterialCost: true, active: true },
+    { id: uid(), name: '包材與耗材', isMaterialCost: false, active: true },
+    { id: uid(), name: '設備器具', isMaterialCost: false, active: true },
+    { id: uid(), name: '文具郵資', isMaterialCost: false, active: true }
+  ]);
+
   // Role State
   const [editingRole, setEditingRole] = useState<Role | null>(null);
   
@@ -84,7 +99,8 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
       enableBlindClose, enableDepositFlow, expiryAlertDays,
       timeRoundingInterval, lateGracePeriod, earlyLeaveTolerance,
       overtimeTier1Hours, overtimeTier1Rate, overtimeTier2Hours, overtimeTier2Rate, holidayPayRate,
-      estimatedMonthlyRent, estimatedMonthlyUtilities, estimatedMonthlyPayroll
+      estimatedMonthlyRent, estimatedMonthlyUtilities, estimatedMonthlyPayroll,
+      fundingSources, expenseCategories
     };
     await setDoc(doc(db, 'shops', shopId), { shopName, logo: logoBase64 }, { merge: true });
     await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), payload, { merge: true });
@@ -193,6 +209,9 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
         </button>
         <button onClick={() => setActiveTab('hr_rules')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'hr_rules' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
           👥 人事與薪資規則
+        </button>
+        <button onClick={() => setActiveTab('accounting')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'accounting' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
+          🧾 帳務與支出分類
         </button>
         <button onClick={() => setActiveTab('finance')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'finance' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
           💰 財務預估分攤
@@ -631,6 +650,93 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
                 <Save className="w-5 h-5" /> 儲存設定
               </button>
             </div>
+          </div>
+        )}
+
+        {activeTab === 'accounting' && (
+          <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-coffee-100">
+            <h2 className="text-xl font-bold text-coffee-800 mb-6">帳務與支出分類設定</h2>
+            
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+              {/* Funding Sources */}
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-bold text-coffee-800">💳 資金來源 (付款方式)</h3>
+                  <button onClick={() => setFundingSources([...fundingSources, { id: uid(), name: '新來源', type: 'other', active: true }])} className="text-mint-brand hover:text-mint-600 flex items-center gap-1 text-sm font-bold">
+                    <Plus className="w-4 h-4"/> 新增來源
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {fundingSources.map((fs, idx) => (
+                    <div key={fs.id} className="flex gap-2 items-center p-3 border border-coffee-100 rounded-xl hover:bg-coffee-50">
+                      <input type="text" value={fs.name} onChange={e => {
+                        const newFs = [...fundingSources];
+                        newFs[idx].name = e.target.value;
+                        setFundingSources(newFs);
+                      }} className="flex-1 border-none bg-transparent font-bold text-coffee-800 focus:ring-0" placeholder="名稱" />
+                      <select value={fs.type} onChange={e => {
+                        const newFs = [...fundingSources];
+                        newFs[idx].type = e.target.value as any;
+                        setFundingSources(newFs);
+                      }} className="text-sm border-coffee-200 rounded-lg text-coffee-600 font-bold">
+                        <option value="cash_drawer">收銀台現金</option>
+                        <option value="petty_cash">店內零用金</option>
+                        <option value="bank">銀行存款</option>
+                        <option value="owner">老闆代墊</option>
+                        <option value="other">其他</option>
+                      </select>
+                      <button onClick={() => {
+                        if (confirm('刪除後無法復原，確定？')) {
+                          setFundingSources(fundingSources.filter(f => f.id !== fs.id));
+                        }
+                      }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Expense Categories */}
+              <div>
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="text-lg font-bold text-coffee-800">🏷️ 支出分類</h3>
+                  <button onClick={() => setExpenseCategories([...expenseCategories, { id: uid(), name: '新分類', isMaterialCost: false, active: true }])} className="text-mint-brand hover:text-mint-600 flex items-center gap-1 text-sm font-bold">
+                    <Plus className="w-4 h-4"/> 新增分類
+                  </button>
+                </div>
+                <div className="space-y-3">
+                  {expenseCategories.map((cat, idx) => (
+                    <div key={cat.id} className="flex gap-2 items-center p-3 border border-coffee-100 rounded-xl hover:bg-coffee-50">
+                      <input type="text" value={cat.name} onChange={e => {
+                        const newCat = [...expenseCategories];
+                        newCat[idx].name = e.target.value;
+                        setExpenseCategories(newCat);
+                      }} className="flex-1 border-none bg-transparent font-bold text-coffee-800 focus:ring-0" placeholder="分類名稱" />
+                      <label className="flex items-center gap-2 cursor-pointer bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-100 hover:bg-amber-100 transition-colors">
+                        <input type="checkbox" checked={cat.isMaterialCost} onChange={e => {
+                          const newCat = [...expenseCategories];
+                          newCat[idx].isMaterialCost = e.target.checked;
+                          setExpenseCategories(newCat);
+                        }} className="w-4 h-4 text-amber-500 rounded focus:ring-amber-500" />
+                        <span className="text-xs font-bold text-amber-800">列入本月食材成本</span>
+                      </label>
+                      <button onClick={() => {
+                        if (confirm('刪除後無法復原，確定？')) {
+                          setExpenseCategories(expenseCategories.filter(c => c.id !== cat.id));
+                        }
+                      }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                    </div>
+                  ))}
+                  <div className="mt-4 p-3 bg-blue-50 text-blue-800 text-xs font-bold rounded-xl flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                    <p>勾選「列入本月食材成本」的項目，將自動加入「期初庫存+本月進貨-期末庫存」公式中的進貨額。</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-8">
+              <Save className="w-5 h-5" /> 儲存設定
+            </button>
           </div>
         )}
       </div>

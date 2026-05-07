@@ -76,9 +76,15 @@ export interface Item {
   name: string;
   price: number;
   active: boolean;
-  category?: 'gift' | 'single';
+  category?: 'gift' | 'single' | string;
   recipe?: Record<string, number>;
   materialRecipe?: Record<string, number>;
+  
+  // ── 新增：商品定價中心專用欄位 ──
+  linkedRecipeId?: string; // 連動【成本計算】的配方 ID
+  packagingCostType?: 'auto' | 'manual';
+  packagingMaterialId?: string; // 如果是 auto，選擇哪一個包材
+  manualPackagingCost?: number; // 如果是 manual，手填的金額
 }
 
 export interface Order {
@@ -258,6 +264,24 @@ export interface Settings {
 
   // 人事 - 勞健保設定
   enableInsurance?: boolean; // 工保/健保/勞退開關
+
+  // 帳務與支出設定
+  fundingSources?: FundingSource[];
+  expenseCategories?: ExpenseCategory[];
+}
+
+export interface FundingSource {
+  id: string;
+  name: string;
+  type: 'cash_drawer' | 'petty_cash' | 'bank' | 'owner' | 'other';
+  active: boolean;
+}
+
+export interface ExpenseCategory {
+  id: string;
+  name: string;
+  isMaterialCost: boolean; // 若為 true，代表這筆支出會被算進本期「進貨總額」
+  active: boolean;
 }
 
 // ── HR: 班別模板 ──────────────────────────────────────────────

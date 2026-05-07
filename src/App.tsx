@@ -470,7 +470,6 @@ export default function App() {
                         <div className="px-3 py-1 mt-1 text-[11px] font-bold text-coffee-300">進貨與庫存</div>
                         <NavMenuItem label="進貨管理" icon={<Package />} onClick={() => navigateTo('inventory', 'purchasing')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'purchasing'} />
                         <NavMenuItem label="庫存與盤點" icon={<ClipboardList />} onClick={() => navigateTo('inventory', 'stock')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'stock'} />
-                        <NavMenuItem label="本日使用量" icon={<BarChart3 />} onClick={() => navigateTo('inventory', 'daily')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'daily'} />
                       </>
                     )}
 

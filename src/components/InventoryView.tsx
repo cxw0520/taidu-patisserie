@@ -8,16 +8,15 @@ import { cn } from '../lib/utils';
 
 import PurchasingTab from './inventory/PurchasingTab';
 import StockTab from './inventory/StockTab';
-import DailyUsageTab from './inventory/DailyUsageTab';
 
-type SubTab = 'purchases' | 'stock' | 'daily_usage';
+type SubTab = 'purchases' | 'stock';
 
 export default function InventoryView({ selectedYear, shopId, forcedSubTab }: { selectedYear: number, shopId: string, forcedSubTab?: string }) {
   const [activeSubTab, setActiveSubTab] = useState<SubTab>('purchases');
   
   useEffect(() => {
-    if (forcedSubTab && ['purchases', 'stock', 'daily'].includes(forcedSubTab)) {
-      setActiveSubTab(forcedSubTab === 'daily' ? 'daily_usage' : forcedSubTab as any);
+    if (forcedSubTab && ['purchases', 'stock'].includes(forcedSubTab)) {
+      setActiveSubTab(forcedSubTab as any);
     }
   }, [forcedSubTab]);
 
@@ -48,7 +47,6 @@ export default function InventoryView({ selectedYear, shopId, forcedSubTab }: { 
   const subTabs = [
     { id: 'purchases', label: '進貨管理', icon: ShoppingCart },
     { id: 'stock', label: '庫存與盤點', icon: Target },
-    { id: 'daily_usage', label: '本日使用量', icon: Calendar },
   ];
 
   return (
@@ -68,9 +66,6 @@ export default function InventoryView({ selectedYear, shopId, forcedSubTab }: { 
             )}
             {activeSubTab === 'stock' && (
               <StockTab materials={materials} shopId={shopId} />
-            )}
-            {activeSubTab === 'daily_usage' && (
-              <DailyUsageTab materials={materials} shopId={shopId} />
             )}
           </motion.div>
         </AnimatePresence>
