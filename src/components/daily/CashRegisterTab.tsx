@@ -672,11 +672,41 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     
             <div className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
               {allItems.map(item => {
-                const normName = item.name.replace(/(\(單顆\)|單顆)/g, '').trim();
-                const inv = dailyData?.inventory?.[normName] || { org: 0, act: 0 };
-                const outTotal = metrics?.inventoryOut?.[normName] || 0;
-                const lossTotal = dailyData.losses.filter(l => l.flavor === normName).reduce((sum, l) => sum + l.qty, 0);
-                const currentStock = (inv.org || 0) + (inv.act || 0) - lossTotal - outTotal;
+                // ── 計算每個口味的即時可用庫存 ──────────────────────────
+                const getFlavorStock = (flavorName: string): number => {
+                  const norm = flavorName.trim();
+                  const inv = dailyData?.inventory?.[norm] || { org: 0, act: 0 };
+                  const outTotal = metrics?.inventoryOut?.[norm] || 0;
+                  const lossTotal = (dailyData.losses || []).filter(l => l.flavor === norm).reduce((s, l) => s + l.qty, 0);
+                  return Math.max(0, (inv.org || 0) + (inv.act || 0) - lossTotal - outTotal);
+                };
+                // 購物車已佔用的原料（避免超賣）
+                const cartConsumed: Record<string, number> = {};
+                cart.forEach(({ item: ci, qty: cq }) => {
+                  if (ci.recipe) {
+                    Object.entries(ci.recipe).forEach(([f, cnt]) => {
+                      const n = f.trim();
+                      cartConsumed[n] = (cartConsumed[n] || 0) + cq * (Number(cnt) || 0);
+                    });
+                  } else {
+                    const n = ci.name.replace(/(\(單顆\)|單顆)/g, '').trim();
+                    cartConsumed[n] = (cartConsumed[n] || 0) + cq;
+                  }
+                });
+                let currentStock: number;
+                if (item.recipe && Object.keys(item.recipe).length > 0) {
+                  // 禮盒：配方每種口味最少可出幾個，取最小值
+                  currentStock = Math.floor(
+                    Math.min(...Object.entries(item.recipe).map(([flavor, count]) => {
+                      const norm = flavor.trim();
+                      return Math.floor((getFlavorStock(norm) - (cartConsumed[norm] || 0)) / (Number(count) || 1));
+                    }))
+                  );
+                } else {
+                  // 單顆：直接查庫存
+                  const norm = item.name.replace(/(\(單顆\)|單顆)/g, '').trim();
+                  currentStock = getFlavorStock(norm) - (cartConsumed[norm] || 0);
+                }
                 const isOutOfStock = currentStock <= 0;
 
                 return (
