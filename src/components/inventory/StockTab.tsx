@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { db } from '../../lib/firebase';
-import { deleteDoc, doc, setDoc, updateDoc, increment } from 'firebase/firestore';
+import { deleteDoc, doc, setDoc, updateDoc, increment, collection, onSnapshot } from 'firebase/firestore';
 import { Material, InventoryAdj } from '../../types';
 import { fmt, uid } from '../../lib/utils';
 import { Plus, Target, CheckCircle2, AlertCircle, Save, Trash2, ArrowRightLeft, Edit2, X } from 'lucide-react';
