@@ -581,7 +581,14 @@ export default function PurchasingTab({
                           <option value="其他">其他</option>
                         </select>
                       </div>
-                      <div className="md:col-span-2">
+                      <div>
+                        <label className="text-[10px] font-bold text-coffee-400 block mb-1">所屬廠商 (進貨來源)</label>
+                        <select value={newMaterial.vendor || ''} onChange={e => setNewMaterial({...newMaterial, vendor: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400">
+                          <option value="">無指定 / 共用</option>
+                          {vendors.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
+                        </select>
+                      </div>
+                      <div>
                         <label className="text-[10px] font-bold text-coffee-400 block mb-1">材料名稱 *</label>
                         <input type="text" required value={newMaterial.name} onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: 麵粉" />
                       </div>

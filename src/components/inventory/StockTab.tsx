@@ -58,14 +58,24 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const id = uid();
+    const id = newMaterial.id || uid();
     const payload = { ...newMaterial, id };
     if (payload.purchaseUnit && payload.midUnit && payload.purchaseUnitRate && payload.midUnitRate) {
        payload.purchaseUnitRate = payload.purchaseUnitRate * payload.midUnitRate;
     }
-    await setDoc(doc(db, 'shops', shopId, 'materials', id), payload as Material);
+    await setDoc(doc(db, 'shops', shopId, 'materials', id), payload as Material, { merge: true });
     setIsAddingMode(false);
     setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '' });
+  };
+
+  const openCreateMode = () => {
+    setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '' });
+    setIsAddingMode(true);
+  };
+
+  const openEditMode = (m: Material) => {
+    setNewMaterial({ ...m });
+    setIsAddingMode(true);
   };
 
   const handleAdjSubmit = async (e: React.FormEvent) => {
@@ -161,7 +171,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
             <div className="text-xl font-serif-brand font-bold text-coffee-800">${fmt(totalInvValue)}</div>
           </div>
           <button
-            onClick={() => setIsAddingMode(!isAddingMode)}
+            onClick={isAddingMode ? () => setIsAddingMode(false) : openCreateMode}
             className="bg-coffee-600 text-white px-6 py-2 rounded-2xl font-bold flex items-center gap-2 hover:bg-coffee-700 transition shadow-lg active:scale-95"
           >
             <Plus className="w-5 h-5" /> 新增材料
@@ -174,7 +184,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
             <form onSubmit={handleAddSubmit} className="glass-panel relative bg-white/80 mb-6 border-2 border-coffee-100 shadow-md rounded-[24px] overflow-hidden">
               <div className="bg-coffee-50/50 border-b border-coffee-100 p-4 md:px-6 flex justify-between items-center">
-                <h3 className="font-bold text-coffee-800 text-lg">新增材料資料卡</h3>
+                <h3 className="font-bold text-coffee-800 text-lg">{newMaterial.id ? '編輯材料資料' : '新增材料資料卡'}</h3>
                 <button type="button" onClick={() => setIsAddingMode(false)} className="text-coffee-400 hover:text-coffee-600"><X className="w-5 h-5"/></button>
               </div>
               
@@ -465,6 +475,12 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                             🗑️ 報廢
                           </button>
                         )}
+                        <button
+                          onClick={() => openEditMode(m)}
+                          className="px-3 py-1.5 bg-coffee-100 text-coffee-700 rounded-full text-xs font-bold hover:bg-coffee-200 transition-colors inline-flex items-center gap-1"
+                        >
+                          <Edit2 className="w-3 h-3" /> 編輯
+                        </button>
                         <button
                           onClick={() => handleDeleteMaterial(m)}
                           className="px-3 py-1.5 bg-rose-100 text-rose-700 rounded-full text-xs font-bold hover:bg-rose-200 transition-colors inline-flex items-center gap-1"
