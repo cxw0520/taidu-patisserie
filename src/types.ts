@@ -40,6 +40,7 @@ export interface Material {
   purchaseUnitRate?: number;
   midUnit?: string;
   midUnitRate?: number;
+  vendor?: string;
 }
 
 export interface PurchaseLine {

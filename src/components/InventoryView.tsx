@@ -68,7 +68,7 @@ export default function InventoryView({ selectedYear, shopId, forcedSubTab }: { 
               <StockTab materials={materials} shopId={shopId} />
             )}
             {activeSubTab === 'periodic_count' && (
-              <PeriodicCountTab materials={materials} shopId={shopId} selectedYear={selectedYear} />
+              <PeriodicCountTab materials={materials} shopId={shopId} selectedYear={selectedYear} purchases={purchases} />
             )}
           </motion.div>
         </AnimatePresence>

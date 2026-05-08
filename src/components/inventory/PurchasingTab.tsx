@@ -464,7 +464,13 @@ export default function PurchasingTab({
                         <label className="text-[10px] font-bold text-coffee-300 uppercase block mb-1">材料/包材</label>
                         <select required value={line.materialId} onChange={e => updateLine(line.id, { materialId: e.target.value })} className="w-full bg-coffee-50 border border-coffee-50 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none">
                           <option value="">請選擇...</option>
-                          {materials.map(m => <option key={m.id} value={m.id}>[{m.category}] {m.name}</option>)}
+                          {materials
+                            .filter(m => !formData.vendor || !m.vendor || m.vendor === formData.vendor)
+                            .map(m => (
+                              <option key={m.id} value={m.id}>
+                                [{m.category}] {m.vendor ? `[${m.vendor}] ` : ''}{m.name}
+                              </option>
+                            ))}
                         </select>
                       </div>
                       <div className="md:col-span-3">

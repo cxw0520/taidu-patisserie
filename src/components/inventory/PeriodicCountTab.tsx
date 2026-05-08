@@ -136,6 +136,8 @@ export default function PeriodicCountTab({ materials, shopId, selectedYear }: Pr
           shopId={shopId} 
           record={editingRecord} 
           materials={materials} 
+          purchases={purchases}
+          records={records}
           onClose={() => setIsModalOpen(false)} 
         />
       )}
@@ -143,8 +145,21 @@ export default function PeriodicCountTab({ materials, shopId, selectedYear }: Pr
   );
 }
 
-function CountModal({ shopId, record, materials, onClose }: { shopId: string, record: PhysicalCountRecord, materials: Material[], onClose: () => void }) {
+function CountModal({ shopId, record, materials, purchases, records, onClose }: { shopId: string, record: PhysicalCountRecord, materials: Material[], purchases: Purchase[], records: PhysicalCountRecord[], onClose: () => void }) {
   const [data, setData] = useState<PhysicalCountRecord>(record);
+
+  const prevRecord = React.useMemo(() => {
+    return [...records].filter(r => r.yearMonth < data.yearMonth && r.status === 'locked').sort((a,b)=>b.yearMonth.localeCompare(a.yearMonth))[0];
+  }, [records, data.yearMonth]);
+
+  const groupedMaterials = React.useMemo(() => {
+    const groups: Record<string, Material[]> = {};
+    materials.forEach(m => {
+      if (!groups[m.name]) groups[m.name] = [];
+      groups[m.name].push(m);
+    });
+    return Object.entries(groups).sort((a,b) => a[0].localeCompare(b[0]));
+  }, [materials]);
 
   // 初始化單位輸入值
   useEffect(() => {
@@ -285,62 +300,94 @@ function CountModal({ shopId, record, materials, onClose }: { shopId: string, re
             <table className="w-full text-left text-sm border-collapse">
               <thead className="bg-coffee-50 border-b border-coffee-100">
                 <tr>
-                  <th className="p-3 font-bold text-coffee-600 w-32">分類</th>
-                  <th className="p-3 font-bold text-coffee-600">材料名稱</th>
+                  <th className="p-3 font-bold text-coffee-600 w-24">商品名稱</th>
+                  <th className="p-3 font-bold text-coffee-600 text-right w-24">期初庫存</th>
+                  <th className="p-3 font-bold text-coffee-600 w-24">廠商名稱</th>
+                  <th className="p-3 font-bold text-coffee-600 text-right w-24">本月進貨</th>
                   <th className="p-3 font-bold text-coffee-600 text-right w-24">單位成本</th>
-                  <th className="p-3 font-bold text-coffee-600 text-center w-[360px]">盤點數量輸入 (支援多階層)</th>
-                  <th className="p-3 font-bold text-coffee-600 text-right w-24">小計數量</th>
-                  <th className="p-3 font-bold text-coffee-600 text-right w-32">盤點總值</th>
+                  <th className="p-3 font-bold text-coffee-600 text-center w-[300px]">期末盤點輸入 (支援多階層)</th>
+                  <th className="p-3 font-bold text-coffee-600 text-right w-24">盤點總值</th>
                 </tr>
               </thead>
               <tbody>
-                {materials.map(m => {
-                  const item = data.items[m.id];
-                  if (!item) return null;
+                {groupedMaterials.map(([name, mats]) => {
+                  let beginningSum = 0;
+                  mats.forEach(m => {
+                    if (data.isOpeningBalance) {
+                      beginningSum += m.stock;
+                    } else if (prevRecord && prevRecord.items[m.id]) {
+                      beginningSum += prevRecord.items[m.id].actualQty;
+                    }
+                  });
 
                   return (
-                    <tr key={m.id} className="border-b border-gray-50 hover:bg-coffee-50/30 transition-colors">
-                      <td className="p-3 text-xs font-bold text-coffee-500">{m.category}</td>
-                      <td className="p-3 font-bold text-coffee-800">{m.name}</td>
-                      <td className="p-3 text-right font-mono text-coffee-500">${fmt(item.unitCost)}</td>
-                      <td className="p-3">
-                        {data.status === 'locked' ? (
-                          <div className="text-center font-bold text-coffee-700">
-                            {item.tier1Qty ? `${fmt(item.tier1Qty)} ${m.purchaseUnit} ` : ''}
-                            {item.tier2Qty ? `${fmt(item.tier2Qty)} ${m.midUnit} ` : ''}
-                            {item.tier3Qty ? `${fmt(item.tier3Qty)} ${m.unit}` : ''}
-                            {!item.tier1Qty && !item.tier2Qty && !item.tier3Qty && `${fmt(item.actualQty)} ${m.unit}`}
-                          </div>
-                        ) : (
-                          <div className="flex items-center justify-center gap-2">
-                            {m.purchaseUnit && m.purchaseUnitRate && (
-                              <div className="flex items-center gap-1">
-                                <input type="number" step="0.01" min="0" value={item.tier1Qty === 0 ? '' : item.tier1Qty} onChange={e => handleUpdateQty(m, 1, parseFloat(e.target.value) || 0)} className="w-14 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
-                                <span className="text-[10px] text-coffee-600 font-bold">{m.purchaseUnit}</span>
-                                <span className="text-[10px] text-coffee-300 mx-0.5">+</span>
-                              </div>
+                    <React.Fragment key={name}>
+                      {mats.map((m, idx) => {
+                        const item = data.items[m.id];
+                        if (!item) return null;
+
+                        let purchaseQty = 0;
+                        purchases.filter(p => p.date.startsWith(data.yearMonth)).forEach(p => {
+                          p.lines.filter(l => l.materialId === m.id).forEach(l => {
+                            const currentUnit = l.purchaseUnit || m.purchaseUnit || m.unit;
+                            const isPurchaseUnit = currentUnit === m.purchaseUnit;
+                            const isMidUnit = currentUnit === m.midUnit;
+                            const rate = isPurchaseUnit ? (m.purchaseUnitRate || 1) : (isMidUnit ? (m.midUnitRate || 1) : 1);
+                            purchaseQty += (l.purchaseQty !== undefined ? l.purchaseQty : (l.qty || 0)) * rate;
+                          });
+                        });
+
+                        return (
+                          <tr key={m.id} className="border-b border-gray-50 hover:bg-coffee-50/30 transition-colors">
+                            {idx === 0 && (
+                              <>
+                                <td rowSpan={mats.length} className="p-3 font-bold text-coffee-800 bg-white border-r border-coffee-50 align-top">{name}</td>
+                                <td rowSpan={mats.length} className="p-3 text-right font-bold text-coffee-600 bg-white border-r border-coffee-50 align-top">
+                                  {fmt(beginningSum)} <span className="text-[10px] text-coffee-400">{m.unit}</span>
+                                </td>
+                              </>
                             )}
-                            {m.midUnit && m.midUnitRate && (
-                              <div className="flex items-center gap-1">
-                                <input type="number" step="0.01" min="0" value={item.tier2Qty === 0 ? '' : item.tier2Qty} onChange={e => handleUpdateQty(m, 2, parseFloat(e.target.value) || 0)} className="w-14 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
-                                <span className="text-[10px] text-coffee-600 font-bold">{m.midUnit}</span>
-                                <span className="text-[10px] text-coffee-300 mx-0.5">+</span>
-                              </div>
-                            )}
-                            <div className="flex items-center gap-1">
-                              <input type="number" step="0.01" min="0" value={item.tier3Qty === 0 && item.actualQty !== 0 ? '' : item.tier3Qty} onChange={e => handleUpdateQty(m, 3, parseFloat(e.target.value) || 0)} className="w-16 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
-                              <span className="text-[10px] text-coffee-600 font-bold">{m.unit}</span>
-                            </div>
-                          </div>
-                        )}
-                      </td>
-                      <td className="p-3 text-right font-bold text-coffee-800">
-                        {fmt(item.actualQty)} <span className="text-[10px] text-coffee-400">{m.unit}</span>
-                      </td>
-                      <td className="p-3 text-right font-serif-brand font-bold text-mint-brand text-lg">
-                        ${fmt(item.totalValue)}
-                      </td>
-                    </tr>
+                            <td className="p-3 text-xs font-bold text-coffee-500">{m.vendor || '無'}</td>
+                            <td className="p-3 text-right font-bold text-coffee-600">{fmt(purchaseQty)} <span className="text-[10px] text-coffee-400">{m.unit}</span></td>
+                            <td className="p-3 text-right font-mono text-coffee-500">${fmt(item.unitCost)}</td>
+                            <td className="p-3">
+                              {data.status === 'locked' ? (
+                                <div className="text-center font-bold text-coffee-700">
+                                  {item.tier1Qty ? `${fmt(item.tier1Qty)} ${m.purchaseUnit} ` : ''}
+                                  {item.tier2Qty ? `${fmt(item.tier2Qty)} ${m.midUnit} ` : ''}
+                                  {item.tier3Qty ? `${fmt(item.tier3Qty)} ${m.unit}` : ''}
+                                  {!item.tier1Qty && !item.tier2Qty && !item.tier3Qty && `${fmt(item.actualQty)} ${m.unit}`}
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-center gap-2">
+                                  {m.purchaseUnit && m.purchaseUnitRate && (
+                                    <div className="flex items-center gap-1">
+                                      <input type="number" step="0.01" min="0" value={item.tier1Qty === 0 ? '' : item.tier1Qty} onChange={e => handleUpdateQty(m, 1, parseFloat(e.target.value) || 0)} className="w-14 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
+                                      <span className="text-[10px] text-coffee-600 font-bold">{m.purchaseUnit}</span>
+                                      <span className="text-[10px] text-coffee-300 mx-0.5">+</span>
+                                    </div>
+                                  )}
+                                  {m.midUnit && m.midUnitRate && (
+                                    <div className="flex items-center gap-1">
+                                      <input type="number" step="0.01" min="0" value={item.tier2Qty === 0 ? '' : item.tier2Qty} onChange={e => handleUpdateQty(m, 2, parseFloat(e.target.value) || 0)} className="w-14 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
+                                      <span className="text-[10px] text-coffee-600 font-bold">{m.midUnit}</span>
+                                      <span className="text-[10px] text-coffee-300 mx-0.5">+</span>
+                                    </div>
+                                  )}
+                                  <div className="flex items-center gap-1">
+                                    <input type="number" step="0.01" min="0" value={item.tier3Qty === 0 && item.actualQty !== 0 ? '' : item.tier3Qty} onChange={e => handleUpdateQty(m, 3, parseFloat(e.target.value) || 0)} className="w-16 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
+                                    <span className="text-[10px] text-coffee-600 font-bold">{m.unit}</span>
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                            <td className="p-3 text-right font-serif-brand font-bold text-mint-brand text-lg">
+                              ${fmt(item.totalValue)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

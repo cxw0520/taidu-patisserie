@@ -18,8 +18,16 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
   const [scrapQty, setScrapQty] = useState<number | ''>('');
 
   const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
-    name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0
+    name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: ''
   });
+
+  const [vendors, setVendors] = useState<{id: string, name: string}[]>([]);
+  React.useEffect(() => {
+    const unsub = onSnapshot(collection(db, 'shops', shopId, 'vendors'), snap => {
+      setVendors(snap.docs.map(d => ({ id: d.id, name: d.data().name })));
+    });
+    return unsub;
+  }, [shopId]);
 
   const [adjData, setAdjData] = useState({ actualQty: 0, reason: '', inputBig: 0, inputMid: 0, inputSmall: 0 });
 
@@ -57,7 +65,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
     }
     await setDoc(doc(db, 'shops', shopId, 'materials', id), payload as Material);
     setIsAddingMode(false);
-    setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0 });
+    setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '' });
   };
 
   const handleAdjSubmit = async (e: React.FormEvent) => {
@@ -184,7 +192,14 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                         <option value="其他">其他</option>
                       </select>
                     </div>
-                    <div className="md:col-span-2">
+                    <div>
+                      <label className="text-[10px] font-bold text-coffee-400 block mb-1">所屬廠商 (進貨來源)</label>
+                      <select value={newMaterial.vendor || ''} onChange={e => setNewMaterial({...newMaterial, vendor: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400">
+                        <option value="">無指定 / 共用</option>
+                        {vendors.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
                       <label className="text-[10px] font-bold text-coffee-400 block mb-1">材料名稱 *</label>
                       <input type="text" required value={newMaterial.name} onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: 麵粉" />
                     </div>
@@ -305,7 +320,10 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                         </span>
                       )}
                     </td>
-                    <td className="py-4 px-6 font-bold text-coffee-800 text-base">{m.name}</td>
+                    <td className="py-4 px-6 font-bold text-coffee-800 text-base">
+                      {m.vendor ? <span className="text-coffee-400 font-normal mr-1 text-sm">[{m.vendor}]</span> : null}
+                      {m.name}
+                    </td>
                     <td className="py-4 px-6"><span className="text-xs font-bold text-coffee-500 bg-coffee-100 px-2 py-1 rounded-lg">{m.category}</span></td>
                     <td className="py-4 px-6 text-right">
                       <div className="flex flex-col items-end">
