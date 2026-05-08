@@ -191,7 +191,13 @@ export default function CostView({ settings, shopId }: { settings: Settings, sho
                   {r.items.length === 0 && <span className="text-gray-400 italic">無設定配方</span>}
                   <ul className="space-y-1">
                     {r.items.map(item => {
-                      const name = item.type === 'material' ? materials.find(m => m.id === item.itemId)?.name : recipes.find(x => x.id === item.itemId)?.name;
+                      let name = '';
+                      if (item.type === 'material') {
+                        const m = materials.find(m => m.id === item.itemId);
+                        name = m ? (m.vendor ? `[${m.vendor}] ${m.name}` : m.name) : '';
+                      } else {
+                        name = recipes.find(x => x.id === item.itemId)?.name || '';
+                      }
                       const unit = item.type === 'material' ? materials.find(m => m.id === item.itemId)?.unit : recipes.find(x => x.id === item.itemId)?.unit;
                       return (
                         <li key={item.id} className="flex justify-between text-coffee-700">
@@ -370,7 +376,7 @@ export default function CostView({ settings, shopId }: { settings: Settings, sho
                         <select value={item.itemId} onChange={e => updateItem(item.id, 'itemId', e.target.value)} className="flex-1 bg-transparent border-none outline-none font-bold text-coffee-700 text-sm w-32">
                           <option value="">-- 選擇食材 --</option>
                           {materials.map(m => (
-                            <option key={m.id} value={m.id}>{m.name} (${m.avgCost}/{m.unit})</option>
+                            <option key={m.id} value={m.id}>{m.vendor ? `[${m.vendor}] ` : ''}{m.name} (${m.avgCost}/{m.unit})</option>
                           ))}
                         </select>
                         <input type="number" step="0.01" value={item.quantity || ''} onChange={e => updateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)} className="w-20 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 outline-none text-center font-mono text-sm" placeholder="用量" />
@@ -395,7 +401,7 @@ export default function CostView({ settings, shopId }: { settings: Settings, sho
                         <select value={item.itemId} onChange={e => updateItem(item.id, 'itemId', e.target.value)} className="flex-1 bg-transparent border-none outline-none font-bold text-coffee-700 text-sm w-32">
                           <option value="">-- 選擇半成品 --</option>
                           {halfway.map(m => (
-                            <option key={m.id} value={m.id}>{m.name} (${costs[m.id]?.toFixed(2)}/{m.unit})</option>
+                            <option key={m.id} value={m.id}>{m.vendor ? `[${m.vendor}] ` : ''}{m.name} (${costs[m.id]?.toFixed(2)}/{m.unit})</option>
                           ))}
                         </select>
                         <input type="number" step="0.01" value={item.quantity || ''} onChange={e => updateItem(item.id, 'quantity', parseFloat(e.target.value) || 0)} className="w-20 bg-gray-50 border border-gray-200 rounded-lg px-2 py-1 outline-none text-center font-mono text-sm" placeholder="用量" />
