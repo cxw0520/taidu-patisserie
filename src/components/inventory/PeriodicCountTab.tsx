@@ -11,9 +11,10 @@ interface Props {
   materials: Material[];
   shopId: string;
   selectedYear: number;
+  purchases: Purchase[];
 }
 
-export default function PeriodicCountTab({ materials, shopId, selectedYear }: Props) {
+export default function PeriodicCountTab({ materials, shopId, selectedYear, purchases }: Props) {
   const [records, setRecords] = useState<PhysicalCountRecord[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<PhysicalCountRecord | null>(null);
