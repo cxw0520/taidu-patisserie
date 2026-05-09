@@ -24,6 +24,37 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
   const [selectedVoucherRecord, setSelectedVoucherRecord] = useState<ExpenseRecord | null>(null);
 
+  const [filterFundingSourceId, setFilterFundingSourceId] = useState<string>('all');
+  const [batchQueue, setBatchQueue] = useState<ExpenseRecord[]>([]);
+
+  const displayedRecords = records.filter(r => activeTab === 'ledger' && filterFundingSourceId !== 'all' ? r.fundingSourceId === filterFundingSourceId : true);
+
+  const handleBatchGenerate = () => {
+    const pending = displayedRecords.filter(r => !r.voucherId);
+    if (pending.length === 0) return alert('目前畫面中沒有尚未產生傳票的紀錄！');
+    setBatchQueue(pending);
+    setSelectedVoucherRecord(pending[0]);
+    setIsVoucherModalOpen(true);
+  };
+
+  const handleVoucherNext = () => {
+    const newQueue = batchQueue.slice(1);
+    if (newQueue.length > 0) {
+      setBatchQueue(newQueue);
+      setSelectedVoucherRecord(newQueue[0]);
+    } else {
+      setBatchQueue([]);
+      setIsVoucherModalOpen(false);
+      setSelectedVoucherRecord(null);
+    }
+  };
+
+  const handleVoucherClose = () => {
+    setBatchQueue([]);
+    setIsVoucherModalOpen(false);
+    setSelectedVoucherRecord(null);
+  };
+
   useEffect(() => {
     const q = query(collection(db, 'shops', shopId, 'expenses'), where('dateKey', '>=', `${selectedYear}-01-01`), where('dateKey', '<=', `${selectedYear}-12-31`));
     const unsub = onSnapshot(q, (snap) => {
@@ -75,12 +106,25 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
             </button>
           </div>
         </div>
-        <button 
-          onClick={() => handleOpenModal()}
-          className="px-4 py-2 bg-mint-brand text-white font-bold rounded-xl shadow-md hover:bg-mint-600 transition flex items-center gap-2"
-        >
-          <Plus className="w-5 h-5" /> 新增記帳
-        </button>
+        <div className="flex flex-col items-end gap-3">
+          <button 
+            onClick={() => handleOpenModal()}
+            className="px-4 py-2 bg-mint-brand text-white font-bold rounded-xl shadow-md hover:bg-mint-600 transition flex items-center gap-2"
+          >
+            <Plus className="w-5 h-5" /> 新增記帳
+          </button>
+          {activeTab === 'ledger' && (
+            <div className="flex items-center gap-2">
+              <select value={filterFundingSourceId} onChange={e => setFilterFundingSourceId(e.target.value)} className="border border-gray-200 rounded-lg px-3 py-2 text-sm font-bold text-coffee-700 outline-none bg-white">
+                <option value="all">所有資金來源</option>
+                {fundingSources.map(fs => <option key={fs.id} value={fs.id}>{fs.name}</option>)}
+              </select>
+              <button onClick={handleBatchGenerate} className="px-4 py-2 bg-coffee-800 text-white font-bold text-sm rounded-lg shadow-sm hover:bg-coffee-900 transition flex items-center gap-2">
+                <BookOpen className="w-4 h-4"/> 批次產生傳票
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className="bg-white rounded-3xl shadow-sm border border-coffee-100 overflow-hidden">
@@ -96,9 +140,9 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
             </tr>
           </thead>
           <tbody>
-            {records.length === 0 ? (
+            {displayedRecords.length === 0 ? (
               <tr><td colSpan={6} className="p-8 text-center text-gray-400 font-bold">尚無記帳紀錄</td></tr>
-            ) : records.map(r => {
+            ) : displayedRecords.map(r => {
               const fs = fundingSources.find(f => f.id === r.fundingSourceId);
               const targetFs = fundingSources.find(f => f.id === r.targetFundingSourceId);
               const isExpanded = expandedId === r.id;
@@ -195,7 +239,9 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
           fundingSources={fundingSources} 
           expenseCategories={expenseCategories} 
           coa={coa}
-          onClose={() => setIsVoucherModalOpen(false)} 
+          onClose={handleVoucherClose} 
+          onNext={batchQueue.length > 0 ? handleVoucherNext : undefined}
+          remainingCount={batchQueue.length > 0 ? batchQueue.length - 1 : 0}
         />
       )}
     </div>
@@ -382,13 +428,15 @@ function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClo
   );
 }
 
-function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, onClose }: { shopId: string, record: ExpenseRecord, fundingSources: FundingSource[], expenseCategories: ExpenseCategory[], coa: COAItem[], onClose: () => void }) {
+function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, onClose, onNext, remainingCount }: { shopId: string, record: ExpenseRecord, fundingSources: FundingSource[], expenseCategories: ExpenseCategory[], coa: COAItem[], onClose: () => void, onNext?: () => void, remainingCount?: number }) {
   const [date, setDate] = useState(record.dateKey);
   const [description, setDescription] = useState(record.vendor || '雜支支出');
   const [lines, setLines] = useState<JournalLine[]>([]);
 
   useEffect(() => {
     const newLines: JournalLine[] = [];
+    setDate(record.dateKey);
+    setDescription(record.vendor || '雜支支出');
     
     // Auto map DEBIT lines (from lines)
     if (!record.isTransfer) {
@@ -468,7 +516,11 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
     await setDoc(doc(db, 'shops', shopId, 'entries', entryId), entry);
     await setDoc(doc(db, 'shops', shopId, 'expenses', record.id), { voucherId: entryId }, { merge: true });
     alert('已成功產生傳票！');
-    onClose();
+    if (onNext) {
+      onNext();
+    } else {
+      onClose();
+    }
   };
 
   const updateLine = (idx: number, field: keyof JournalLine, value: any) => {
@@ -481,7 +533,10 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
     <div className="fixed inset-0 bg-black/60 z-50 flex flex-col items-center justify-center p-4">
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl max-w-3xl w-full shadow-2xl flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-coffee-50/50 rounded-t-3xl">
-          <h3 className="text-xl font-bold text-coffee-800">產生傳票</h3>
+          <h3 className="text-xl font-bold text-coffee-800">
+            產生傳票
+            {remainingCount !== undefined && remainingCount > 0 && <span className="ml-3 text-sm bg-coffee-100 text-coffee-700 px-2 py-1 rounded-lg">還有 {remainingCount} 筆待處理</span>}
+          </h3>
           <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-200 transition"><X className="w-5 h-5"/></button>
         </div>
         <div className="p-6 overflow-y-auto flex-1 space-y-6">
@@ -517,9 +572,16 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
           </div>
         </div>
         <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50 rounded-b-3xl">
-          <button onClick={onClose} className="px-6 py-2.5 rounded-xl font-bold text-gray-500 hover:bg-gray-200 transition">取消</button>
+          <button onClick={onClose} className="px-6 py-2.5 rounded-xl font-bold text-gray-500 hover:bg-gray-200 transition">
+            {remainingCount !== undefined && remainingCount > 0 ? '全部取消' : '取消'}
+          </button>
+          {onNext && remainingCount !== undefined && remainingCount > 0 && (
+            <button onClick={onNext} className="px-6 py-2.5 rounded-xl font-bold text-coffee-600 border border-coffee-200 hover:bg-coffee-50 transition">
+              跳過此筆
+            </button>
+          )}
           <button onClick={handleSave} className="px-8 py-2.5 bg-coffee-800 text-white rounded-xl font-bold shadow-md hover:bg-coffee-900 transition flex items-center gap-2">
-            儲存傳票
+            {remainingCount !== undefined && remainingCount > 0 ? '儲存並下一筆' : '儲存傳票'}
           </button>
         </div>
       </motion.div>
