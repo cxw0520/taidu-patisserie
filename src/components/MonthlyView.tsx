@@ -741,7 +741,15 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     });
 
     const totalLogisticsCost = logSpent + monthlyLogisticsVal;
-    const totalVariableCost = ingredCost + pkgCostTotal + totalLogisticsCost + lossCost;
+    
+    let totalVariableCost = 0;
+    if (currentMonthCount && !currentMonthCount.isOpeningBalance) {
+      // 實際盤點制：ingredCost (期初+進貨-期末) 已經包含了所有原物料、包材的實際消耗與報廢耗損
+      totalVariableCost = ingredCost + totalLogisticsCost;
+    } else {
+      // 預估制：累加理論食材成本、理論包材成本、日報表紀錄的報廢成本
+      totalVariableCost = ingredCost + pkgCostTotal + totalLogisticsCost + lossCost;
+    }
 
     const prMarketingCost = prIngredCost + prShip;
     const totalFixedCostsInput = fixedCosts.reduce((acc: number, cur: any) => acc + parseNum(cur.amount), 0);
