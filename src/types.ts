@@ -293,6 +293,7 @@ export interface FundingSource {
   name: string;
   type: 'cash_drawer' | 'petty_cash' | 'bank' | 'owner' | 'other';
   active: boolean;
+  defaultCoaId?: string; // 預設對應的會計科目(貸方)
 }
 
 export interface ExpenseCategory {
@@ -300,6 +301,7 @@ export interface ExpenseCategory {
   name: string;
   isMaterialCost: boolean; // 若為 true，代表這筆支出會被算進本期「進貨總額」
   active: boolean;
+  defaultCoaId?: string; // 預設對應的會計科目(借方)
 }
 
 export interface ExpenseLine {
@@ -322,6 +324,7 @@ export interface ExpenseRecord {
   invoiceNo?: string;
   memo?: string;
   createdAt: string; // ISO string
+  voucherId?: string; // 對應產生的傳票ID
 }
 
 // ── HR: 班別模板 ──────────────────────────────────────────────

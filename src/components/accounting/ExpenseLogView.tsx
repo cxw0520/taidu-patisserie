@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
 import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
-import { ExpenseRecord, ExpenseLine, FundingSource, ExpenseCategory } from '../../types';
-import { Plus, Trash2, Edit2, FileText, ChevronDown, ChevronUp, ArrowRightLeft, X } from 'lucide-react';
+import { ExpenseRecord, ExpenseLine, FundingSource, ExpenseCategory, COAItem, JournalEntry, JournalLine } from '../../types';
+import { Plus, Trash2, Edit2, FileText, ChevronDown, ChevronUp, ArrowRightLeft, X, BookOpen, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { uid, todayISO } from '../../lib/utils';
 
@@ -11,13 +11,18 @@ interface Props {
   selectedYear: number;
   fundingSources: FundingSource[];
   expenseCategories: ExpenseCategory[];
+  coa?: COAItem[];
 }
 
-export default function ExpenseLogView({ shopId, selectedYear, fundingSources, expenseCategories }: Props) {
+export default function ExpenseLogView({ shopId, selectedYear, fundingSources, expenseCategories, coa = [] }: Props) {
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<ExpenseRecord | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  
+  const [activeTab, setActiveTab] = useState<'records' | 'ledger'>('records');
+  const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
+  const [selectedVoucherRecord, setSelectedVoucherRecord] = useState<ExpenseRecord | null>(null);
 
   useEffect(() => {
     const q = query(collection(db, 'shops', shopId, 'expenses'), where('dateKey', '>=', `${selectedYear}-01-01`), where('dateKey', '<=', `${selectedYear}-12-31`));
@@ -60,6 +65,15 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
         <div>
           <h2 className="text-xl font-bold text-coffee-800">零用金與雜支記帳本</h2>
           <p className="text-sm text-coffee-400 mt-1">管理各項支出與代墊款，支援單一發票多筆分類明細</p>
+          
+          <div className="flex bg-gray-100 p-1 rounded-xl mt-4 w-fit">
+            <button onClick={() => setActiveTab('records')} className={`px-4 py-2 font-bold text-sm rounded-lg transition-colors ${activeTab === 'records' ? 'bg-white text-coffee-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              🛒 雜支明細
+            </button>
+            <button onClick={() => setActiveTab('ledger')} className={`px-4 py-2 font-bold text-sm rounded-lg transition-colors ${activeTab === 'ledger' ? 'bg-white text-coffee-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+              📖 登入資料的分類帳
+            </button>
+          </div>
         </div>
         <button 
           onClick={() => handleOpenModal()}
@@ -78,7 +92,7 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
               <th className="p-4 border-b font-bold w-40 text-right">總金額</th>
               <th className="p-4 border-b font-bold w-40 text-center">資金來源</th>
               <th className="p-4 border-b font-bold w-32 text-center">明細</th>
-              <th className="p-4 border-b font-bold w-24 text-right">操作</th>
+              <th className="p-4 border-b font-bold w-32 text-right">{activeTab === 'ledger' ? '傳票狀態' : '操作'}</th>
             </tr>
           </thead>
           <tbody>
@@ -116,10 +130,22 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
                       )}
                     </td>
                     <td className="p-4 text-right">
-                      <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
-                        <button onClick={() => handleOpenModal(r)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4"/></button>
-                        <button onClick={() => handleDelete(r.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>
-                      </div>
+                      {activeTab === 'ledger' ? (
+                        r.voucherId ? (
+                          <div className="flex justify-end items-center gap-1 text-green-600 text-sm font-bold">
+                            <CheckCircle className="w-4 h-4" /> 已產生
+                          </div>
+                        ) : (
+                          <button onClick={(e) => { e.stopPropagation(); setSelectedVoucherRecord(r); setIsVoucherModalOpen(true); }} className="px-3 py-1 bg-coffee-800 text-white text-xs font-bold rounded-lg shadow-sm hover:bg-coffee-900 transition flex items-center gap-1 ml-auto">
+                            <BookOpen className="w-3 h-3"/> 產生傳票
+                          </button>
+                        )
+                      ) : (
+                        <div className="flex justify-end gap-1" onClick={e => e.stopPropagation()}>
+                          <button onClick={() => handleOpenModal(r)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4"/></button>
+                          <button onClick={() => handleDelete(r.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                        </div>
+                      )}
                     </td>
                   </tr>
                   
@@ -160,6 +186,16 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
           fundingSources={fundingSources} 
           expenseCategories={expenseCategories} 
           onClose={() => setIsModalOpen(false)} 
+        />
+      )}
+      {isVoucherModalOpen && selectedVoucherRecord && (
+        <VoucherModal 
+          shopId={shopId} 
+          record={selectedVoucherRecord} 
+          fundingSources={fundingSources} 
+          expenseCategories={expenseCategories} 
+          coa={coa}
+          onClose={() => setIsVoucherModalOpen(false)} 
         />
       )}
     </div>
@@ -339,6 +375,151 @@ function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClo
           <button onClick={onClose} className="px-6 py-2.5 rounded-xl font-bold text-gray-500 hover:bg-gray-200 transition">取消</button>
           <button onClick={handleSave} className="px-8 py-2.5 bg-coffee-800 text-white rounded-xl font-bold shadow-md hover:bg-coffee-900 transition flex items-center gap-2">
             儲存紀錄
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, onClose }: { shopId: string, record: ExpenseRecord, fundingSources: FundingSource[], expenseCategories: ExpenseCategory[], coa: COAItem[], onClose: () => void }) {
+  const [date, setDate] = useState(record.dateKey);
+  const [description, setDescription] = useState(record.vendor || '雜支支出');
+  const [lines, setLines] = useState<JournalLine[]>([]);
+
+  useEffect(() => {
+    const newLines: JournalLine[] = [];
+    
+    // Auto map DEBIT lines (from lines)
+    if (!record.isTransfer) {
+      record.lines.forEach(rl => {
+        const cat = expenseCategories.find(c => c.id === rl.categoryId);
+        let debitCoa = coa.find(c => c.id === cat?.defaultCoaId);
+        if (!debitCoa) debitCoa = coa.find(c => c.name === cat?.name);
+        if (!debitCoa) debitCoa = coa.find(c => c.type === '費用' || c.type === '成本'); // fallback
+
+        newLines.push({
+          id: uid(),
+          type: 'debit',
+          accountId: debitCoa?.id || '',
+          amount: rl.amount,
+          lineDescription: rl.note || cat?.name || ''
+        });
+      });
+    }
+
+    // Auto map CREDIT line (from fundingSource)
+    const fs = fundingSources.find(f => f.id === record.fundingSourceId);
+    let creditCoa = coa.find(c => c.id === fs?.defaultCoaId);
+    if (!creditCoa) creditCoa = coa.find(c => c.name.includes(fs?.name || '')) || coa.find(c => c.name === fs?.name);
+    if (!creditCoa) creditCoa = coa.find(c => c.type === '資產'); // fallback
+
+    newLines.push({
+      id: uid(),
+      type: 'credit',
+      accountId: creditCoa?.id || '',
+      amount: record.totalAmount,
+      lineDescription: record.vendor || fs?.name || ''
+    });
+
+    // If it's a transfer, map DEBIT line (target funding source)
+    if (record.isTransfer && record.targetFundingSourceId) {
+      const targetFs = fundingSources.find(f => f.id === record.targetFundingSourceId);
+      let targetCoa = coa.find(c => c.id === targetFs?.defaultCoaId);
+      if (!targetCoa) targetCoa = coa.find(c => c.name.includes(targetFs?.name || '')) || coa.find(c => c.name === targetFs?.name);
+      if (!targetCoa) targetCoa = coa.find(c => c.type === '資產');
+
+      newLines.push({
+        id: uid(),
+        type: 'debit',
+        accountId: targetCoa?.id || '',
+        amount: record.totalAmount,
+        lineDescription: record.memo || targetFs?.name || ''
+      });
+    }
+
+    setLines(newLines);
+  }, [record, fundingSources, expenseCategories, coa]);
+
+  const debitTotal = lines.filter(l => l.type === 'debit').reduce((sum, l) => sum + Number(l.amount), 0);
+  const creditTotal = lines.filter(l => l.type === 'credit').reduce((sum, l) => sum + Number(l.amount), 0);
+
+  const handleSave = async () => {
+    if (!date) return alert('請填寫日期');
+    if (!description) return alert('請填寫總摘要');
+    if (debitTotal !== creditTotal) return alert('借貸必須平衡！');
+    if (lines.some(l => !l.accountId)) return alert('請為所有明細選擇會計科目！');
+
+    const entryId = uid();
+    const year = parseInt(date.split('-')[0]);
+    const vNo = date.replace(/-/g, '') + '-' + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+
+    const entry: JournalEntry = {
+      id: entryId,
+      date,
+      year,
+      voucherNo: vNo,
+      description,
+      lines,
+      debitTotal,
+      creditTotal
+    };
+
+    await setDoc(doc(db, 'shops', shopId, 'entries', entryId), entry);
+    await setDoc(doc(db, 'shops', shopId, 'expenses', record.id), { voucherId: entryId }, { merge: true });
+    alert('已成功產生傳票！');
+    onClose();
+  };
+
+  const updateLine = (idx: number, field: keyof JournalLine, value: any) => {
+    const newLines = [...lines];
+    newLines[idx] = { ...newLines[idx], [field]: value };
+    setLines(newLines);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-50 flex flex-col items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl max-w-3xl w-full shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-coffee-50/50 rounded-t-3xl">
+          <h3 className="text-xl font-bold text-coffee-800">產生傳票</h3>
+          <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-200 transition"><X className="w-5 h-5"/></button>
+        </div>
+        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">日期</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full border border-gray-200 rounded-xl p-3 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">總摘要 (廠商/地點/摘要)</label>
+              <input type="text" value={description} onChange={e => setDescription(e.target.value)} className="w-full border border-gray-200 rounded-xl p-3 outline-none" />
+            </div>
+          </div>
+          <div className="space-y-3">
+            <h4 className="font-bold text-coffee-800 text-sm">借貸明細</h4>
+            {lines.map((l, idx) => (
+              <div key={l.id} className={`flex gap-2 items-center p-3 rounded-xl border ${l.type === 'debit' ? 'bg-blue-50/30 border-blue-100' : 'bg-red-50/30 border-red-100'}`}>
+                <span className={`px-2 py-1 text-xs font-bold rounded ${l.type === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
+                  {l.type === 'debit' ? '借' : '貸'}
+                </span>
+                <select value={l.accountId} onChange={e => updateLine(idx, 'accountId', e.target.value)} className="flex-1 border border-gray-200 rounded-lg p-2 text-sm font-bold text-gray-700 outline-none">
+                  <option value="" disabled>選擇會計科目...</option>
+                  {coa.map(c => <option key={c.id} value={c.id}>{c.id} {c.name}</option>)}
+                </select>
+                <input type="number" value={l.amount || ''} onChange={e => updateLine(idx, 'amount', Number(e.target.value))} className="w-24 border border-gray-200 rounded-lg p-2 text-sm font-mono outline-none text-right" placeholder="金額" />
+                <input type="text" value={l.lineDescription || ''} onChange={e => updateLine(idx, 'lineDescription', e.target.value)} className="flex-1 border border-gray-200 rounded-lg p-2 text-sm outline-none" placeholder="明細摘要" />
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-100 font-bold font-mono">
+             <div className="text-blue-700">借方總計：${debitTotal.toLocaleString()}</div>
+             <div className="text-red-700">貸方總計：${creditTotal.toLocaleString()}</div>
+          </div>
+        </div>
+        <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50 rounded-b-3xl">
+          <button onClick={onClose} className="px-6 py-2.5 rounded-xl font-bold text-gray-500 hover:bg-gray-200 transition">取消</button>
+          <button onClick={handleSave} className="px-8 py-2.5 bg-coffee-800 text-white rounded-xl font-bold shadow-md hover:bg-coffee-900 transition flex items-center gap-2">
+            儲存傳票
           </button>
         </div>
       </motion.div>
