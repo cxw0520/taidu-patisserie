@@ -285,16 +285,9 @@ export default function DailyView({
                       ...Object.keys(prev.inventory || {}),
                     ]));
 
-                    flavorNames.forEach(flavorKey => {
-                      const itemData = prev.inventory?.[flavorKey] || { org: 0, act: 0 };
-                      const norm = normalizeFlavorName(flavorKey);
-                      const lossTotal = (prev.losses || [])
-                        .filter(l => normalizeFlavorName(l.flavor) === norm)
-                        .reduce((sum, l) => sum + l.qty, 0);
-                      const outTotal = prevMetrics[norm] || 0;
-                      const closingBalance = (itemData.org || 0) + (itemData.act || 0) - lossTotal - outTotal;
-                      inventoryFromPrev[flavorKey] = { org: Math.max(0, closingBalance), exp: 0, act: 0, los: 0 };
-                    });
+                      flavorNames.forEach(flavorKey => {
+                        inventoryFromPrev[flavorKey] = { org: 0, exp: 0, act: 0, los: 0 };
+                      });
 
                     break; // 找到有資料的那天，停止往前搜尋
                   }
@@ -1395,7 +1388,15 @@ export default function DailyView({
                             return (
                                 <tr key={f}>
                                     <td className="p-2 text-left font-bold">{f}</td>
-                                    <td className="p-2"><input type="number" readOnly value={inv.org || 0} className="w-10 text-center bg-gray-100 rounded text-gray-500 font-mono font-bold outline-none" /></td>
+                                    <td className="p-2">
+                                        <input 
+                                            type="number" 
+                                            value={inv.org || ''} 
+                                            onChange={e => updateDaily({ inventory: { ...dailyData.inventory, [normalizeFlavorName(f)]: { ...inv, org: parseNum(e.target.value) } } })}
+                                            className="w-12 text-center border border-gray-200 rounded focus:border-coffee-400 font-mono font-bold outline-none" 
+                                            placeholder="0"
+                                        />
+                                    </td>
                                     <td className="p-2">
                                         <input 
                                             type="number" 
