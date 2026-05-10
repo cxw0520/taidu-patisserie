@@ -10,6 +10,10 @@ interface Props {
   shopId: string;
   operators: Operator[];
   settings: Settings;
+  viewYear: number;
+  setViewYear: React.Dispatch<React.SetStateAction<number>>;
+  viewMonth: number;
+  setViewMonth: React.Dispatch<React.SetStateAction<number>>;
 }
 
 function fmtYM(year: number, month: number) {
@@ -152,10 +156,15 @@ function calcPayroll(
   };
 }
 
-export default function PayrollTab({ shopId, operators, settings }: Props) {
-  const today = new Date();
-  const [viewYear, setViewYear] = useState(today.getFullYear());
-  const [viewMonth, setViewMonth] = useState(today.getMonth() + 1);
+export default function PayrollTab({ 
+  shopId, 
+  operators, 
+  settings,
+  viewYear,
+  setViewYear,
+  viewMonth,
+  setViewMonth
+}: Props) {
   const [allAttendance, setAllAttendance] = useState<Record<string, Record<string, AttendanceRecord>>>({});
   const [expandedOp, setExpandedOp] = useState<string | null>(null);
 

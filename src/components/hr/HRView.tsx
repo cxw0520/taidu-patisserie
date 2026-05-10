@@ -24,6 +24,12 @@ const TABS = [
 
 export default function HRView({ shopId, operators, settings, forcedSubTab }: Props) {
   const [activeTab, setActiveTab] = useState<string>(forcedSubTab || 'roster');
+  
+  // Lifted state to maintain context across tabs
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth() + 1);
+  const [selectedOpId, setSelectedOpId] = useState<string>(operators[0]?.id || '');
 
   const handleUpdateSettings = async (patch: Partial<Settings>) => {
     const ref = doc(db, 'shops', shopId, 'meta', 'settings');
@@ -70,6 +76,10 @@ export default function HRView({ shopId, operators, settings, forcedSubTab }: Pr
               operators={operators}
               settings={settings}
               onUpdateSettings={handleUpdateSettings}
+              viewYear={viewYear}
+              setViewYear={setViewYear}
+              viewMonth={viewMonth}
+              setViewMonth={setViewMonth}
             />
           )}
           {activeTab === 'attendance' && (
@@ -77,6 +87,12 @@ export default function HRView({ shopId, operators, settings, forcedSubTab }: Pr
               shopId={shopId}
               operators={operators}
               settings={settings}
+              viewYear={viewYear}
+              setViewYear={setViewYear}
+              viewMonth={viewMonth}
+              setViewMonth={setViewMonth}
+              selectedOpId={selectedOpId}
+              setSelectedOpId={setSelectedOpId}
             />
           )}
           {activeTab === 'payroll' && (
@@ -84,6 +100,10 @@ export default function HRView({ shopId, operators, settings, forcedSubTab }: Pr
               shopId={shopId}
               operators={operators}
               settings={settings}
+              viewYear={viewYear}
+              setViewYear={setViewYear}
+              viewMonth={viewMonth}
+              setViewMonth={setViewMonth}
             />
           )}
         </motion.div>

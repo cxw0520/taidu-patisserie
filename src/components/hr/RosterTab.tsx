@@ -13,6 +13,10 @@ interface Props {
   operators: Operator[];
   settings: Settings;
   onUpdateSettings: (patch: Partial<Settings>) => void;
+  viewYear: number;
+  setViewYear: React.Dispatch<React.SetStateAction<number>>;
+  viewMonth: number;
+  setViewMonth: React.Dispatch<React.SetStateAction<number>>;
 }
 
 function fmtYM(year: number, month: number) {
@@ -23,10 +27,17 @@ function getDaysInMonth(year: number, month: number) {
   return new Date(year, month, 0).getDate();
 }
 
-export default function RosterTab({ shopId, operators, settings, onUpdateSettings }: Props) {
+export default function RosterTab({ 
+  shopId, 
+  operators, 
+  settings, 
+  onUpdateSettings,
+  viewYear,
+  setViewYear,
+  viewMonth,
+  setViewMonth
+}: Props) {
   const today = new Date();
-  const [viewYear, setViewYear] = useState(today.getFullYear());
-  const [viewMonth, setViewMonth] = useState(today.getMonth() + 1);
   const [roster, setRoster] = useState<Record<string, RosterEntry>>({});
   const [editTemplateModal, setEditTemplateModal] = useState<ShiftTemplate | null | 'new'>(null);
   const [cellModal, setCellModal] = useState<{ operatorId: string; dateKey: string } | null>(null);

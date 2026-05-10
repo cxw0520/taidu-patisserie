@@ -3,7 +3,7 @@ import { db } from '../../lib/firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { Role, Operator, Permissions } from '../../types';
 import { uid, cn } from '../../lib/utils';
-import { Shield, Users, Key, Save, Plus, Trash2, Edit2, AlertCircle, Store, Image as ImageIcon, X } from 'lucide-react';
+import { Shield, Users, Key, Save, Plus, Trash2, Edit2, AlertCircle, Store, Image as ImageIcon, X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { FundingSource, ExpenseCategory } from '../../types';
 
 interface Props {
@@ -40,6 +40,7 @@ const PERMISSION_LABELS: Record<keyof Permissions, string> = {
 };
 
 export default function SettingsView({ shopId, roles, operators, settings }: Props) {
+  const today = new Date();
   const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators' | 'business_days' | 'operations' | 'hr_rules' | 'finance' | 'accounting'>('operators');
   
   // Shop Settings State
@@ -51,6 +52,8 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
   const [businessHoursStart, setBusinessHoursStart] = useState(settings?.businessHoursStart || '13:00');
   const [businessHoursEnd, setBusinessHoursEnd] = useState(settings?.businessHoursEnd || '20:00');
   const [fixedClosedDays, setFixedClosedDays] = useState<number[]>(settings?.fixedClosedDays || []);
+  const [exceptionCalendar, setExceptionCalendar] = useState<Record<string, 'closed' | 'holiday'>>(settings?.exceptionCalendar || {});
+  const [calView, setCalView] = useState({ y: today.getFullYear(), m: today.getMonth() + 1 });
   
   // Operations State
   const [enableBlindClose, setEnableBlindClose] = useState(!!settings?.enableBlindClose);
@@ -95,6 +98,7 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
     const payload = {
       shopName, legalName, logo: logoBase64,
       businessHoursStart, businessHoursEnd, fixedClosedDays,
+      exceptionCalendar,
       enableBlindClose, enableDepositFlow, expiryAlertDays,
       timeRoundingInterval, lateGracePeriod, earlyLeaveTolerance,
       overtimeTier1Hours, overtimeTier1Rate, overtimeTier2Hours, overtimeTier2Rate, holidayPayRate,
@@ -443,40 +447,114 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
         )}
 
         {activeTab === 'business_days' && (
-          <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-coffee-100">
-            <h2 className="text-xl font-bold text-coffee-800 mb-6">營業日與時段設定</h2>
-            <div className="space-y-6 max-w-xl">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-coffee-700 mb-2">每日營業開始時間</label>
-                  <input type="time" value={businessHoursStart} onChange={e => setBusinessHoursStart(e.target.value)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none" />
+          <div className="space-y-6">
+            <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-coffee-100">
+              <h2 className="text-xl font-bold text-coffee-800 mb-6">營業日與時段設定</h2>
+              <div className="space-y-6 max-w-xl">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-coffee-700 mb-2">每日營業開始時間</label>
+                    <input type="time" value={businessHoursStart} onChange={e => setBusinessHoursStart(e.target.value)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-coffee-700 mb-2">每日營業結束時間</label>
+                    <input type="time" value={businessHoursEnd} onChange={e => setBusinessHoursEnd(e.target.value)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none" />
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-coffee-700 mb-2">每日營業結束時間</label>
-                  <input type="time" value={businessHoursEnd} onChange={e => setBusinessHoursEnd(e.target.value)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none" />
+                  <label className="block text-sm font-bold text-coffee-700 mb-2">固定公休日</label>
+                  <div className="flex flex-wrap gap-3">
+                    {[1, 2, 3, 4, 5, 6, 0].map(day => {
+                      const names = ['日', '一', '二', '三', '四', '五', '六'];
+                      const isSelected = fixedClosedDays.includes(day);
+                      return (
+                        <button key={day} onClick={() => {
+                          if (isSelected) setFixedClosedDays(fixedClosedDays.filter(d => d !== day));
+                          else setFixedClosedDays([...fixedClosedDays, day]);
+                        }} className={cn("px-4 py-2 rounded-xl font-bold text-sm transition-colors border", isSelected ? "bg-coffee-600 text-white border-coffee-600" : "bg-white text-coffee-600 border-coffee-200 hover:bg-coffee-50")}>
+                          星期{names[day]}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <p className="text-[10px] text-coffee-400 mt-2">系統在計算當月平均營業額時，將自動剔除這些固定的公休日。</p>
+                </div>
+                <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-4">
+                  <Save className="w-5 h-5" /> 儲存基礎時段
+                </button>
+              </div>
+            </div>
+
+            {/* 店舖行事曆 (特殊日期設定) */}
+            <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-coffee-100">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-xl font-bold text-coffee-800">店舖行事曆 (特殊日期)</h2>
+                  <p className="text-xs text-coffee-500 mt-1">點擊日期以循環設定：正常 → <span className="text-amber-500 font-bold">國定假日</span> → <span className="text-rose-brand font-bold">特別店休</span></p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button onClick={() => setCalView(prev => {
+                    let m = prev.m - 1; let y = prev.y;
+                    if(m < 1) { m = 12; y--; }
+                    return { y, m };
+                  })} className="p-2 hover:bg-coffee-50 rounded-lg"><ChevronLeft className="w-4 h-4" /></button>
+                  <span className="font-bold text-coffee-800 w-24 text-center">{calView.y}年 {calView.m}月</span>
+                  <button onClick={() => setCalView(prev => {
+                    let m = prev.m + 1; let y = prev.y;
+                    if(m > 12) { m = 1; y++; }
+                    return { y, m };
+                  })} className="p-2 hover:bg-coffee-50 rounded-lg"><ChevronRight className="w-4 h-4" /></button>
                 </div>
               </div>
-              <div>
-                <label className="block text-sm font-bold text-coffee-700 mb-2">固定公休日</label>
-                <div className="flex flex-wrap gap-3">
-                  {[1, 2, 3, 4, 5, 6, 0].map(day => {
-                    const names = ['日', '一', '二', '三', '四', '五', '六'];
-                    const isSelected = fixedClosedDays.includes(day);
-                    return (
-                      <button key={day} onClick={() => {
-                        if (isSelected) setFixedClosedDays(fixedClosedDays.filter(d => d !== day));
-                        else setFixedClosedDays([...fixedClosedDays, day]);
-                      }} className={cn("px-4 py-2 rounded-xl font-bold text-sm transition-colors border", isSelected ? "bg-coffee-600 text-white border-coffee-600" : "bg-white text-coffee-600 border-coffee-200 hover:bg-coffee-50")}>
-                        星期{names[day]}
+
+              <div className="grid grid-cols-7 gap-2 max-w-2xl mx-auto">
+                {['日','一','二','三','四','五','六'].map(d => (
+                  <div key={d} className="text-center py-2 text-[10px] font-bold text-coffee-300 uppercase">{d}</div>
+                ))}
+                {(() => {
+                  const daysInMonth = new Date(calView.y, calView.m, 0).getDate();
+                  const firstDay = new Date(calView.y, calView.m - 1, 1).getDay();
+                  const cells = [];
+                  for (let i = 0; i < firstDay; i++) cells.push(<div key={`empty-${i}`} />);
+                  for (let d = 1; d <= daysInMonth; d++) {
+                    const dateKey = `${calView.y}-${String(calView.m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+                    const status = exceptionCalendar[dateKey];
+                    const isToday = new Date().toISOString().slice(0, 10) === dateKey;
+                    
+                    cells.push(
+                      <button
+                        key={d}
+                        onClick={() => {
+                          const nextStatus: any = status === 'holiday' ? 'closed' : status === 'closed' ? undefined : 'holiday';
+                          const newCal = { ...exceptionCalendar };
+                          if (nextStatus) newCal[dateKey] = nextStatus;
+                          else delete newCal[dateKey];
+                          setExceptionCalendar(newCal);
+                        }}
+                        className={cn(
+                          "aspect-square rounded-2xl border transition-all flex flex-col items-center justify-center relative overflow-hidden",
+                          !status ? "border-coffee-50 hover:border-coffee-200 text-coffee-600" :
+                          status === 'holiday' ? "bg-amber-50 border-amber-200 text-amber-700" :
+                          "bg-rose-50 border-rose-100 text-rose-700",
+                          isToday && "ring-2 ring-coffee-800 ring-offset-2"
+                        )}
+                      >
+                        <span className="text-sm font-bold">{d}</span>
+                        {status === 'holiday' && <span className="text-[8px] font-bold mt-0.5">國定假日</span>}
+                        {status === 'closed' && <span className="text-[8px] font-bold mt-0.5">特別店休</span>}
                       </button>
-                    )
-                  })}
-                </div>
-                <p className="text-[10px] text-coffee-400 mt-2">系統在計算當月平均營業額時，將自動剔除這些固定的公休日。</p>
+                    );
+                  }
+                  return cells;
+                })()}
               </div>
-              <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-4">
-                <Save className="w-5 h-5" /> 儲存設定
-              </button>
+
+              <div className="mt-8 flex justify-end gap-3">
+                <p className="text-[10px] text-coffee-400 self-center">⚠️ 變更特殊日期將即時影響人事薪資與業績統計。</p>
+                <button onClick={handleSaveShopSettings} className="px-8 py-3 bg-coffee-800 text-white font-bold rounded-2xl shadow-lg hover:bg-coffee-900 transition flex items-center gap-2">
+                  <Save className="w-5 h-5" /> 儲存行事曆設定
+                </button>
+              </div>
             </div>
           </div>
         )}

@@ -10,17 +10,30 @@ interface Props {
   shopId: string;
   operators: Operator[];
   settings: Settings;
+  viewYear: number;
+  setViewYear: React.Dispatch<React.SetStateAction<number>>;
+  viewMonth: number;
+  setViewMonth: React.Dispatch<React.SetStateAction<number>>;
+  selectedOpId: string;
+  setSelectedOpId: React.Dispatch<React.SetStateAction<string>>;
 }
 
 import { applyRounding, calcMinutesDiff, buildAttendanceRecord } from '../../lib/hrUtils';
 
-export default function AttendanceTab({ shopId, operators, settings }: Props) {
-  const today = new Date();
-  const [viewYear, setViewYear] = useState(today.getFullYear());
-  const [viewMonth, setViewMonth] = useState(today.getMonth() + 1);
-  const [selectedOpId, setSelectedOpId] = useState<string>(operators[0]?.id || '');
+export default function AttendanceTab({ 
+  shopId, 
+  operators, 
+  settings,
+  viewYear,
+  setViewYear,
+  viewMonth,
+  setViewMonth,
+  selectedOpId,
+  setSelectedOpId
+}: Props) {
   const [attendanceData, setAttendanceData] = useState<Record<string, AttendanceRecord>>({});
   const [roster, setRoster] = useState<Record<string, RosterEntry>>({});
+  const [loading, setLoading] = useState(true);
   const [punchModal, setPunchModal] = useState<{ dateKey: string } | null>(null);
   const [punchForm, setPunchForm] = useState<{ type: 'clock_in' | 'clock_out'; time: string; note: string }>({ type: 'clock_in', time: '', note: '' });
   const [editRecord, setEditRecord] = useState<AttendanceRecord | null>(null);
@@ -31,10 +44,16 @@ export default function AttendanceTab({ shopId, operators, settings }: Props) {
 
   useEffect(() => {
     if (!shopId || !selectedOpId) return;
+    setLoading(true);
+    setAttendanceData({}); // Clear stale data immediately
     const ref = doc(db, 'shops', shopId, 'hr', `attendance_${selectedOpId}_${ymKey}`);
     const unsub = onSnapshot(ref, snap => {
       if (snap.exists()) setAttendanceData(snap.data() as Record<string, AttendanceRecord>);
       else setAttendanceData({});
+      setLoading(false);
+    }, (err) => {
+      console.error('HR data sync error:', err);
+      setLoading(false);
     });
     return unsub;
   }, [shopId, selectedOpId, ymKey]);
@@ -50,9 +69,14 @@ export default function AttendanceTab({ shopId, operators, settings }: Props) {
   }, [shopId, ymKey]);
 
   const saveAttendance = async (newData: Record<string, AttendanceRecord>) => {
-    setAttendanceData(newData);
     const ref = doc(db, 'shops', shopId, 'hr', `attendance_${selectedOpId}_${ymKey}`);
-    await setDoc(ref, newData);
+    try {
+      await setDoc(ref, newData);
+      // Local state will be updated by onSnapshot automatically
+    } catch (err) {
+      console.error('Save HR error:', err);
+      alert('儲存失敗，請檢查網路連線');
+    }
   };
 
   const handleAddPunch = async () => {
@@ -141,7 +165,16 @@ export default function AttendanceTab({ shopId, operators, settings }: Props) {
       </div>
 
       {/* Attendance Records */}
-      <div className="glass-panel p-4 overflow-x-auto">
+      <div className="glass-panel overflow-hidden relative min-h-[300px]">
+        {loading && (
+          <div className="absolute inset-0 bg-white/60 backdrop-blur-[1px] z-20 flex items-center justify-center">
+            <div className="flex flex-col items-center gap-2">
+              <div className="w-8 h-8 border-4 border-coffee-200 border-t-coffee-800 rounded-full animate-spin" />
+              <p className="text-xs font-bold text-coffee-500">載入打卡資料中...</p>
+            </div>
+          </div>
+        )}
+
         <table className="w-full text-sm border-collapse">
           <thead>
             <tr className="text-coffee-400 font-bold uppercase text-xs tracking-wider">
