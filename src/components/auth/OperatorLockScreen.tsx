@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { Lock, Delete, Mail, Clock, LogIn, LogOut, CheckCircle2, X } from 'lucide-react';
-import { Operator, Settings, AttendanceRecord, AttendancePunch, ShiftTemplate } from '../../types';
+import { Operator, Settings, AttendanceRecord, AttendancePunch, ShiftTemplate, RosterEntry } from '../../types';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { uid } from '../../lib/utils';
@@ -33,14 +33,8 @@ function todayKey() {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-function applyRounding(timeStr: string, intervalMin: number): string {
-  const [h, m] = timeStr.split(':').map(Number);
-  const total = h * 60 + m;
-  const rounded = Math.round(total / intervalMin) * intervalMin;
-  const rh = Math.floor(rounded / 60) % 24;
-  const rm = rounded % 60;
-  return `${String(rh).padStart(2, '0')}:${String(rm).padStart(2, '0')}`;
-}
+import { buildAttendanceRecord, applyRounding } from '../../lib/hrUtils';
+import { fmtYM } from '../../lib/utils';
 
 export default function OperatorLockScreen({ shopId, operators, settings, onUnlock, onForceGoogleUnlock }: Props) {
   const [mode, setMode] = useState<ScreenMode>('pin_unlock');
@@ -108,27 +102,52 @@ export default function OperatorLockScreen({ shopId, operators, settings, onUnlo
     };
 
     try {
-      const ref = doc(db, 'shops', shopId, 'hr', `attendance_${operator.id}_${ymKey}`);
+      // 1. 取得排班表以作為計算基礎（例如休息時間）
+      const rosterRef = doc(db, 'shops', shopId, 'hr', `roster_${ymKey}`);
+      const rosterSnap = await getDoc(rosterRef);
+      const roster = rosterSnap.exists() ? rosterSnap.data() as Record<string, RosterEntry> : {};
+
+      // 2. 決定打卡要存入哪一天的紀錄
+      // 如果是凌晨 (0-6點) 下班打卡，檢查前一天是否有尚未下班的紀錄（支援跨夜排班）
+      let targetDateKey = dateKey;
+      if (punchType === 'clock_out') {
+        const hour = parseInt(time.split(':')[0]);
+        if (hour < 6) {
+          const yesterday = new Date();
+          yesterday.setDate(yesterday.getDate() - 1);
+          const yestKey = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+          
+          const yestRef = doc(db, 'shops', shopId, 'hr', `attendance_${operator.id}_${yestKey.slice(0, 7)}`);
+          const yestSnap = await getDoc(yestRef);
+          const yestData = yestSnap.exists() ? yestSnap.data() as Record<string, AttendanceRecord> : {};
+          const yestRec = yestData[yestKey];
+          
+          if (yestRec && yestRec.clockIn && !yestRec.clockOut) {
+            targetDateKey = yestKey;
+          }
+        }
+      }
+
+      const targetYmKey = targetDateKey.slice(0, 7);
+      const ref = doc(db, 'shops', shopId, 'hr', `attendance_${operator.id}_${targetYmKey}`);
       const snap = await getDoc(ref);
       const existing = snap.exists() ? snap.data() as Record<string, AttendanceRecord> : {};
-      const dayRecord = existing[dateKey];
+      const dayRecord = existing[targetDateKey];
       const existingPunches: AttendancePunch[] = dayRecord?.punches || [];
+      const newPunches = [...existingPunches, newPunch];
 
-      const newRecord: AttendanceRecord = {
-        id: dayRecord?.id || uid(),
-        operatorId: operator.id,
-        dateKey,
-        punches: [...existingPunches, newPunch],
-        clockIn: punchType === 'clock_in' ? applyRounding(time, interval) : dayRecord?.clockIn,
-        clockOut: punchType === 'clock_out' ? applyRounding(time, interval) : dayRecord?.clockOut,
-        effectiveMinutes: dayRecord?.effectiveMinutes,
-        isLate: dayRecord?.isLate,
-        lateMinutes: dayRecord?.lateMinutes,
-        isEarlyLeave: dayRecord?.isEarlyLeave,
-        earlyLeaveMinutes: dayRecord?.earlyLeaveMinutes,
-      };
+      // 3. 使用統一工具函數計算完整的出勤紀錄
+      const updatedRecord = buildAttendanceRecord(
+        operator.id, 
+        targetDateKey, 
+        newPunches, 
+        settings, 
+        roster, 
+        settings.shiftTemplates || []
+      );
 
-      await setDoc(ref, { ...existing, [dateKey]: newRecord });
+      await setDoc(ref, { ...existing, [targetDateKey]: updatedRecord });
+      
       setClockSuccess(clockConfirm);
       setMode('clock_success');
       setClockConfirm(null);

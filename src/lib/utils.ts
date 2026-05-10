@@ -48,3 +48,11 @@ export function copyText(text: string, e: React.MouseEvent<HTMLElement>) {
     }, 1500);
   });
 }
+
+export function getDaysInMonth(year: number, month: number) {
+  return new Date(year, month, 0).getDate();
+}
+
+export function fmtYM(year: number, month: number) {
+  return `${year}-${String(month).padStart(2, '0')}`;
+}

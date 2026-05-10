@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Operator, Settings, AttendanceRecord, AttendancePunch, RosterEntry, ShiftTemplate } from '../../types';
 import { db } from '../../lib/firebase';
 import { doc, setDoc, onSnapshot } from 'firebase/firestore';
-import { uid, cn } from '../../lib/utils';
+import { uid, cn, fmtYM, getDaysInMonth } from '../../lib/utils';
 import { Plus, Edit2, Trash2, Save, X, Clock, AlertTriangle, Star, ChevronLeft, ChevronRight } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -12,99 +12,7 @@ interface Props {
   settings: Settings;
 }
 
-function fmtYM(year: number, month: number) {
-  return `${year}-${String(month).padStart(2, '0')}`;
-}
-
-function getDaysInMonth(year: number, month: number) {
-  return new Date(year, month, 0).getDate();
-}
-
-function applyRounding(timeStr: string, intervalMin: number): string {
-  const [h, m] = timeStr.split(':').map(Number);
-  const total = h * 60 + m;
-  const rounded = Math.round(total / intervalMin) * intervalMin;
-  const rh = Math.floor(rounded / 60) % 24;
-  const rm = rounded % 60;
-  return `${String(rh).padStart(2, '0')}:${String(rm).padStart(2, '0')}`;
-}
-
-function calcMinutesDiff(start: string, end: string): number {
-  const [sh, sm] = start.split(':').map(Number);
-  const [eh, em] = end.split(':').map(Number);
-  return (eh * 60 + em) - (sh * 60 + sm);
-}
-
-function buildAttendanceRecord(
-  operatorId: string,
-  dateKey: string,
-  punches: AttendancePunch[],
-  settings: Settings,
-  roster: Record<string, RosterEntry>,
-  shiftTemplates: ShiftTemplate[]
-): AttendanceRecord {
-  const interval = settings.timeRoundingInterval || 1;
-  const lateGrace = settings.lateGracePeriod || 0;
-  const earlyTol = settings.earlyLeaveTolerance || 0;
-  const ot1H = settings.overtimeTier1Hours || 8;
-  const ot2H = settings.overtimeTier2Hours || 10;
-
-  const sortedPunches = [...punches].sort((a, b) => a.rawTime.localeCompare(b.rawTime));
-  const clockInPunch = sortedPunches.find(p => p.type === 'clock_in');
-  const clockOutPunch = [...sortedPunches].reverse().find(p => p.type === 'clock_out');
-
-  const clockIn = clockInPunch ? applyRounding(clockInPunch.time, interval) : undefined;
-  const clockOut = clockOutPunch ? applyRounding(clockOutPunch.time, interval) : undefined;
-
-  let effectiveMinutes = 0;
-  let isLate = false;
-  let lateMinutes = 0;
-  let isEarlyLeave = false;
-  let earlyLeaveMinutes = 0;
-
-  const rosterKey = `${operatorId}_${dateKey}`;
-  const rosterEntry = roster[rosterKey];
-  const tpl = rosterEntry?.shiftTemplateId ? shiftTemplates.find(t => t.id === rosterEntry.shiftTemplateId) : null;
-
-  if (clockIn && clockOut) {
-    const totalWorked = calcMinutesDiff(clockIn, clockOut);
-    const breakMins = tpl ? tpl.breakMinutes : 0;
-    effectiveMinutes = Math.max(0, totalWorked - breakMins);
-
-    if (tpl) {
-      const scheduledStartMins = tpl.startTime.split(':').reduce((h, m, i) => i === 0 ? Number(h) * 60 : Number(h) + Number(m), 0 as any);
-      const actualStartMins = clockIn.split(':').reduce((h, m, i) => i === 0 ? Number(h) * 60 : Number(h) + Number(m), 0 as any);
-      const actualEndMins = clockOut.split(':').reduce((h, m, i) => i === 0 ? Number(h) * 60 : Number(h) + Number(m), 0 as any);
-      const scheduledEndMins = tpl.endTime.split(':').reduce((h, m, i) => i === 0 ? Number(h) * 60 : Number(h) + Number(m), 0 as any);
-
-      lateMinutes = Math.max(0, actualStartMins - scheduledStartMins);
-      if (lateMinutes > lateGrace) isLate = true;
-      earlyLeaveMinutes = Math.max(0, scheduledEndMins - actualEndMins);
-      if (earlyLeaveMinutes > earlyTol) isEarlyLeave = true;
-    }
-  }
-
-  const ot1Min = ot1H * 60;
-  const ot2Min = ot2H * 60;
-  const isHoliday = rosterEntry?.isHoliday || settings.exceptionCalendar?.[dateKey] === 'holiday';
-
-  return {
-    id: uid(),
-    operatorId,
-    dateKey,
-    punches: sortedPunches,
-    clockIn,
-    clockOut,
-    effectiveMinutes,
-    isLate,
-    lateMinutes,
-    isEarlyLeave,
-    earlyLeaveMinutes,
-    isOvertier1: effectiveMinutes > ot1Min,
-    isOvertier2: effectiveMinutes > ot2Min,
-    isHoliday,
-  };
-}
+import { applyRounding, calcMinutesDiff, buildAttendanceRecord } from '../../lib/hrUtils';
 
 export default function AttendanceTab({ shopId, operators, settings }: Props) {
   const today = new Date();
