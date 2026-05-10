@@ -236,8 +236,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
   const handleCloseShift = () => {
     const total = Object.entries(currencyForm).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
+    // 計算所有現結收入（含 POS、匯入、手動新增）
     const cashSales = dailyData.orders
-      .filter(o => o.status === '現結' && (o.source === 'pos' || o.note?.includes('收銀機交易')))
+      .filter(o => o.status === '現結')
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
     const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
     const expected = shift.openingTotal + cashSales - totalExpenses;
@@ -260,8 +261,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
   const handleUpdateClosingCash = () => {
     const total = Object.entries(currencyForm).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
+    // 計算所有現結收入（含 POS、匯入、手動新增）
     const cashSales = dailyData.orders
-      .filter(o => o.status === '現結' && (o.source === 'pos' || o.note?.includes('收銀機交易')))
+      .filter(o => o.status === '現結')
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
     const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
     const expected = shift.openingTotal + cashSales - totalExpenses;
@@ -291,8 +293,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
   const handleUpdateOpeningCash = () => {
     const total = Object.entries(currencyForm).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
+    // 計算所有現結收入（含 POS、匯入、手動新增）
     const cashSales = dailyData.orders
-      .filter(o => o.status === '現結' && (o.source === 'pos' || o.note?.includes('收銀機交易')))
+      .filter(o => o.status === '現結')
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
     const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
     const expected = total + cashSales - totalExpenses;
@@ -669,7 +672,14 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                 </button>
               </div>
             </div>
-    
+
+            {/* Preorder mode banner */}
+            {checkoutData.pickupDate !== dailyData.date && (
+              <div className="px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-700 flex items-center gap-2">
+                ⚡ 預購模式：取貨日 {checkoutData.pickupDate} — 庫存限制已解除，可自由選取商品
+              </div>
+            )}
+
             <div className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
               {allItems.map(item => {
                 // ── 計算每個口味的即時可用庫存 ──────────────────────────
@@ -693,8 +703,13 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     cartConsumed[n] = (cartConsumed[n] || 0) + cq;
                   }
                 });
+
+                // 預購模式下不受庫存限制
+                const isPreorder = checkoutData.pickupDate !== dailyData.date;
                 let currentStock: number;
-                if (item.recipe && Object.keys(item.recipe).length > 0) {
+                if (isPreorder) {
+                  currentStock = 999; // 預購無上限
+                } else if (item.recipe && Object.keys(item.recipe).length > 0) {
                   // 禮盒：配方每種口味最少可出幾個，取最小值
                   currentStock = Math.floor(
                     Math.min(...Object.entries(item.recipe).map(([flavor, count]) => {
@@ -726,8 +741,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     <div className="text-rose-brand font-mono font-bold">
                       ${fmt(item.price)}
                     </div>
-                    <div className={cn("absolute bottom-2 right-2 text-[10px] font-bold px-1.5 rounded-md", isOutOfStock ? "bg-red-100 text-red-600" : "bg-mint-brand/10 text-mint-brand")}>
-                      {isOutOfStock ? '補貨' : `剩 ${currentStock}`}
+                    <div className={cn("absolute bottom-2 right-2 text-[10px] font-bold px-1.5 rounded-md", isOutOfStock ? "bg-red-100 text-red-600" : isPreorder ? "bg-amber-100 text-amber-700" : "bg-mint-brand/10 text-mint-brand")}>
+                      {isOutOfStock ? '補貨' : isPreorder ? '預購' : `剩 ${currentStock}`}
                     </div>
                   </motion.button>
                 );
