@@ -81,10 +81,9 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
   ]);
   const [expenseCategories, setExpenseCategories] = useState<ExpenseCategory[]>(settings?.expenseCategories || [
     { id: uid(), name: '食材與原物料', isMaterialCost: true, active: true },
-    { id: uid(), name: '包材與耗材', isMaterialCost: false, active: true },
-    { id: uid(), name: '設備器具', isMaterialCost: false, active: true },
     { id: uid(), name: '文具郵資', isMaterialCost: false, active: true }
   ]);
+  const [paymentMethods, setPaymentMethods] = useState<string[]>(settings?.paymentMethods || ['現結', '匯款', '未結帳款']);
 
   // Role State
   const [editingRole, setEditingRole] = useState<Role | null>(null);
@@ -100,7 +99,7 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
       timeRoundingInterval, lateGracePeriod, earlyLeaveTolerance,
       overtimeTier1Hours, overtimeTier1Rate, overtimeTier2Hours, overtimeTier2Rate, holidayPayRate,
       estimatedMonthlyRent, estimatedMonthlyUtilities, estimatedMonthlyPayroll,
-      fundingSources, expenseCategories
+      fundingSources, expenseCategories, paymentMethods
     };
     await setDoc(doc(db, 'shops', shopId), { shopName, logo: logoBase64 }, { merge: true });
     await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), payload, { merge: true });
@@ -732,6 +731,39 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
                   </div>
                 </div>
               </div>
+            </div>
+
+            {/* Payment Methods Section */}
+            <div className="mt-12 border-t border-coffee-100 pt-8">
+              <div className="flex justify-between items-center mb-6">
+                <h3 className="text-lg font-bold text-coffee-800">🏪 POS 結帳付款方式</h3>
+                <button onClick={() => setPaymentMethods([...paymentMethods, '新付款方式'])} className="text-mint-brand hover:text-mint-600 flex items-center gap-1 text-sm font-bold">
+                  <Plus className="w-4 h-4"/> 新增方式
+                </button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {paymentMethods.map((pm, idx) => (
+                  <div key={idx} className="flex gap-2 items-center p-3 border border-coffee-100 rounded-xl bg-white hover:bg-coffee-50 shadow-sm transition-all">
+                    <input 
+                      type="text" 
+                      value={pm} 
+                      onChange={e => {
+                        const newPms = [...paymentMethods];
+                        newPms[idx] = e.target.value;
+                        setPaymentMethods(newPms);
+                      }} 
+                      className="flex-1 border-none bg-transparent font-bold text-coffee-800 focus:ring-0 text-sm" 
+                    />
+                    <button onClick={() => {
+                      if (paymentMethods.length <= 1) return alert('必須保留至少一種付款方式');
+                      setPaymentMethods(paymentMethods.filter((_, i) => i !== idx));
+                    }} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                  </div>
+                ))}
+              </div>
+              <p className="text-[10px] text-coffee-400 mt-4">
+                💡 這些選項將出現在 POS 結帳畫面的按鈕中。建議保留「現結」作為現金交易的標籤，系統將自動計算入收銀機現金中。
+              </p>
             </div>
 
             <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-8">

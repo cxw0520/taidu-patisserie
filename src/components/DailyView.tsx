@@ -522,9 +522,18 @@ export default function DailyView({
         } else {
             m.ship += o.shipAmt;
             m.recv += o.actualAmt;
-            if(o.status === '匯款') { m.remit += o.actualAmt; m.act += o.actualAmt; }
-            if(o.status === '現結') { m.cash += o.actualAmt; m.act += o.actualAmt; }
-            if(o.status === '未結帳款') { m.unpaid += o.actualAmt; }
+            if(o.status === '匯款') { 
+                m.remit += o.actualAmt; 
+            } else if(o.status === '現結') { 
+                m.cash += o.actualAmt; 
+            }
+            
+            // 只要不是未結帳款，都算進今日實收
+            if(o.status !== '未結帳款') {
+                m.act += o.actualAmt;
+            } else {
+                m.unpaid += o.actualAmt;
+            }
         }
 
         // Standard categories

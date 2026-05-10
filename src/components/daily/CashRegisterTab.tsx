@@ -415,171 +415,184 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             left: 0; 
             top: 0; 
             width: 100%; 
-            padding: 0; 
+            padding: 20px; 
             margin: 0; 
           }
           .no-print, svg { display: none !important; }
-          .glass-panel { padding: 0 !important; margin-bottom: 20px !important; }
-          h2 { font-size: 24pt; border-bottom: 1px solid black !important; margin-bottom: 20px; }
-          h4 { font-size: 16pt; margin-top: 20px; border-bottom: 0.5pt solid #eee !important; }
-          .bg-coffee-50, .bg-white, .bg-amber-50\\/50 { background: none !important; }
-          .text-2xl, .text-3xl { font-size: 18pt !important; }
-          .text-rose-brand, .text-mint-brand, .text-amber-600 { color: black !important; }
+          table { width: 100% !important; border-collapse: collapse !important; }
+          th, td { border: 1px solid #333 !important; padding: 8px !important; }
+          th { background-color: #f3f4f6 !important; -webkit-print-color-adjust: exact; }
+          .font-mono { font-family: monospace !important; }
+          .text-red-600 { color: #dc2626 !important; }
+          .text-green-700 { color: #15803d !important; }
         }
       `}</style>
       {dailyData.cashRegister?.closeTime && !dailyData.cashRegister?.isOpen && !isEditing ? (
-        <div id="cash-report-section" className="lg:col-span-12 space-y-8 animate-fade-in print-section p-4 bg-white">
-          <div className="flex justify-between items-center no-print">
-            <h2 className="text-2xl font-serif-brand font-bold text-coffee-800">今日收銀結報</h2>
+        <div id="cash-report-section" className="lg:col-span-12 space-y-8 animate-fade-in print-section p-8 bg-white">
+          <div className="flex justify-between items-center no-print mb-6">
+            <h2 className="text-2xl font-bold text-gray-800">今日收銀結報</h2>
             <div className="flex gap-3">
               <button 
                 onClick={() => setIsEditing(true)} 
-                className="px-5 py-2 bg-coffee-100 text-coffee-600 rounded-xl font-bold hover:bg-coffee-200 flex items-center gap-2"
+                className="px-5 py-2 bg-gray-100 text-gray-600 rounded-xl font-bold hover:bg-gray-200 flex items-center gap-2"
               >
                 <Edit2 className="w-4 h-4" /> 編輯資料
               </button>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            <div className="space-y-6">
-              {/* Cash Management Summary */}
-              <div className="glass-panel p-8 space-y-6">
-                <h4 className="font-bold text-lg text-coffee-800 flex items-center gap-2 border-b border-coffee-50 pb-4">
-                  <Calculator className="w-5 h-5 text-rose-brand" /> 開閉帳與溢短金盤點
-                </h4>
-                
-                <div className="grid grid-cols-2 gap-8">
-                  <div>
-                    <span className="text-xs font-bold text-coffee-400 block mb-2 uppercase tracking-widest">開帳盤點 ({shift.openTime})</span>
-                    <div className="space-y-1">
-                      {Object.entries(shift.openingCash).map(([val, count]) => (
-                        count > 0 && <div key={val} className="text-xs text-coffee-600 flex justify-between"><span>{val}元 x {count}</span><span>${fmt(Number(val) * count)}</span></div>
-                      ))}
-                      <div className="pt-2 border-t border-coffee-50 flex justify-between font-bold text-coffee-800">
-                        <span>總計</span><span>${fmt(shift.openingTotal)}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div>
-                    <span className="text-xs font-bold text-coffee-400 block mb-2 uppercase tracking-widest">閉帳盤點 ({shift.closeTime})</span>
-                    <div className="space-y-1">
-                      {shift.closingCash && Object.entries(shift.closingCash).map(([val, count]) => (
-                        count > 0 && <div key={val} className="text-xs text-coffee-600 flex justify-between"><span>{val}元 x {count}</span><span>${fmt(Number(val) * count)}</span></div>
-                      ))}
-                      <div className="pt-2 border-t border-coffee-50 flex justify-between font-bold text-coffee-800">
-                        <span>總計</span><span>${fmt(shift.closingTotal || 0)}</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
+          <div className="max-w-4xl mx-auto space-y-10 text-gray-800">
+            {/* 1. 基本營業數據 */}
+            <section className="space-y-4">
+              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">全天銷售概況 (含 POS、匯入、手動)</h3>
+              <table className="w-full border-collapse border border-gray-300 text-left">
+                <tbody>
+                  <tr>
+                    <th className="p-3 bg-gray-50 border border-gray-300 w-1/3">營業日</th>
+                    <td className="p-3 border border-gray-300 font-mono">{dailyData.date}</td>
+                  </tr>
+                  <tr>
+                    <th className="p-3 bg-gray-50 border border-gray-300">營業總額</th>
+                    <td className="p-3 border border-gray-300 font-mono font-bold">${fmt(dailyData.orders.reduce((sum, o) => sum + (o.prodAmt || 0) + (o.shipAmt || 0), 0))}</td>
+                  </tr>
+                  <tr>
+                    <th className="p-3 bg-gray-50 border border-gray-300">折扣總額</th>
+                    <td className="p-3 border border-gray-300 font-mono text-red-600">-${fmt(dailyData.orders.reduce((sum, o) => sum + (o.discAmt || 0), 0))}</td>
+                  </tr>
+                  <tr>
+                    <th className="p-3 bg-gray-50 border border-gray-300">營業淨額</th>
+                    <td className="p-3 border border-gray-300 font-mono font-bold text-lg">${fmt(dailyData.orders.reduce((sum, o) => sum + (o.actualAmt || 0), 0))}</td>
+                  </tr>
+                  <tr>
+                    <th className="p-3 bg-gray-50 border border-gray-300">來客數 (總筆數)</th>
+                    <td className="p-3 border border-gray-300 font-mono">{dailyData.orders.length} 筆</td>
+                  </tr>
+                  <tr>
+                    <th className="p-3 bg-gray-50 border border-gray-300">客單價 (淨額/筆數)</th>
+                    <td className="p-3 border border-gray-300 font-mono">
+                      ${fmt(dailyData.orders.length > 0 ? (dailyData.orders.reduce((sum, o) => sum + (o.actualAmt || 0), 0) / dailyData.orders.length) : 0)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
 
-                <div className="p-6 bg-coffee-50 rounded-[32px] space-y-3">
-                  <div className="flex justify-between text-sm">
-                    <span className="text-coffee-500 font-bold">系統應有現金</span>
-                    <span className="font-mono font-bold">${fmt(shift.expectedCash || 0)}</span>
-                  </div>
-                  <div className="flex justify-between items-center">
-                    <span className="text-lg font-bold text-coffee-800">實際盤點總額</span>
-                    <span className="text-2xl font-serif-brand font-bold text-coffee-800">${fmt(shift.closingTotal || 0)}</span>
-                  </div>
-                  <div className="h-px bg-coffee-200 mt-2" />
-                  <div className="flex justify-between items-center pt-2">
-                    <span className="font-bold text-lg">溢短金 (Over/Short)</span>
-                    <span className={cn(
-                      "text-2xl font-serif-brand font-bold px-4 py-1 rounded-xl",
-                      (shift.overShort || 0) >= 0 ? "bg-mint-brand text-white" : "bg-rose-brand text-white"
-                    )}>
-                      {(shift.overShort || 0) >= 0 ? '+' : ''}{fmt(shift.overShort || 0)}
-                    </span>
-                  </div>
-                </div>
-              </div>
+            {/* 2. POS 系統數據 */}
+            <section className="space-y-4">
+              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">ＰＯＳ結帳總額 (僅經由收銀機結帳)</h3>
+              <table className="w-full border-collapse border border-gray-300 text-left">
+                <thead>
+                  <tr className="bg-gray-50">
+                    <th className="p-3 border border-gray-300">付款方式</th>
+                    <th className="p-3 border border-gray-300 text-right">結帳總額</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(settings.paymentMethods || ['現結', '匯款', '未結帳款']).map(method => {
+                    const total = dailyData.orders
+                      .filter(o => o.source === 'pos' && o.status === method)
+                      .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+                    return (
+                      <tr key={method}>
+                        <td className="p-3 border border-gray-300">{method}</td>
+                        <td className="p-3 border border-gray-300 text-right font-mono">${fmt(total)}</td>
+                      </tr>
+                    );
+                  })}
+                  <tr className="bg-gray-50 font-bold">
+                    <td className="p-3 border border-gray-300">POS 總額小計</td>
+                    <td className="p-3 border border-gray-300 text-right font-mono">
+                      ${fmt(dailyData.orders.filter(o => o.source === 'pos').reduce((sum, o) => sum + (o.actualAmt || 0), 0))}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </section>
 
-              {/* Expense List */}
-              <div className="glass-panel p-8 space-y-4">
-                <h4 className="font-bold text-lg text-coffee-800 flex items-center gap-2 border-b border-coffee-50 pb-4">
-                  <TrendingDown className="w-5 h-5 text-amber-500" /> 本日支出明細
-                </h4>
-                <div className="space-y-3">
-                  {shift.expenses.length === 0 ? (
-                    <p className="text-center py-4 text-coffee-300 font-bold">今日無支出紀錄</p>
-                  ) : (
-                    shift.expenses.map(e => (
-                      <div key={e.id} className="flex justify-between items-center p-3 bg-white border border-coffee-50 rounded-2xl shadow-sm">
-                        <div>
-                          <p className="text-sm font-bold text-coffee-800">{e.reason}</p>
-                          <p className="text-[10px] text-coffee-400 font-bold">{e.time}</p>
-                        </div>
-                        <span className="text-rose-brand font-mono font-bold">-${fmt(e.amount)}</span>
-                      </div>
-                    ))
-                  )}
-                  {shift.expenses.length > 0 && (
-                    <div className="pt-2 flex justify-between font-bold text-coffee-800">
-                      <span>支出總額</span>
-                      <span className="text-rose-brand">-${fmt(shift.expenses.reduce((s, e) => s + e.amount, 0))}</span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-6">
-              {/* Sales Stats */}
-              <div className="glass-panel p-8 space-y-6 h-full">
-                <h4 className="font-bold text-lg text-coffee-800 flex items-center gap-2 border-b border-coffee-50 pb-4">
-                  <ShoppingBag className="w-5 h-5 text-rose-brand" /> 本日收銀機銷售統計
-                </h4>
-                <div className="space-y-4 overflow-y-auto max-h-[600px] pr-2">
-                  {posSalesStats.length === 0 ? (
-                    <p className="text-center py-8 text-coffee-300 font-bold">今日收銀機無銷售紀錄</p>
-                  ) : (
-                    posSalesStats.map(s => (
-                      <div key={s.name} className="flex justify-between items-center p-4 bg-coffee-50/50 rounded-2xl">
-                        <span className="text-sm font-bold text-coffee-700">{s.name}</span>
-                        <div className="flex items-center gap-4">
-                          <span className="px-3 py-1 bg-white border border-coffee-100 rounded-lg text-xs font-bold text-coffee-500">x{s.qty}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* Logs & Export */}
-          <div className="space-y-6">
-            {shift.editLogs && shift.editLogs.length > 0 && (
-              <div className="p-6 bg-amber-50/50 border border-amber-100 rounded-[32px] space-y-3">
-                <h5 className="text-sm font-bold text-amber-700 flex items-center gap-2">
-                  <History className="w-4 h-4" /> 修改紀錄與備註
-                </h5>
-                <div className="space-y-2">
-                  {shift.editLogs.map((log, i) => (
-                    <p key={i} className="text-xs text-amber-600 font-medium bg-white/50 p-2 rounded-lg">{log}</p>
+            {/* 3. 本日全部銷售明細 */}
+            <section className="space-y-4">
+              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">本日銷售明細 (全天清單)</h3>
+              <table className="w-full border-collapse border border-gray-300 text-left text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-2 border border-gray-300">明細編號 (後四碼)</th>
+                    <th className="p-2 border border-gray-300 text-right">金額</th>
+                    <th className="p-2 border border-gray-300 text-center">付款方式</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {dailyData.orders.map(o => (
+                    <tr key={o.id}>
+                      <td className="p-2 border border-gray-300 font-mono">...{o.id.slice(-4)}</td>
+                      <td className="p-2 border border-gray-300 text-right font-mono">${fmt(o.actualAmt)}</td>
+                      <td className="p-2 border border-gray-300 text-center">{o.status}</td>
+                    </tr>
                   ))}
+                </tbody>
+              </table>
+            </section>
+
+            {/* 4. 付款方式彙整 */}
+            <section className="space-y-4">
+              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">付款方式彙整統計</h3>
+              <table className="w-full border-collapse border border-gray-300 text-left text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-2 border border-gray-300">付款方式</th>
+                    <th className="p-2 border border-gray-300 text-right">交易筆數</th>
+                    <th className="p-2 border border-gray-300 text-right">總金額</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Array.from(new Set(dailyData.orders.map(o => o.status))).map(method => {
+                    const group = dailyData.orders.filter(o => o.status === method);
+                    const total = group.reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+                    return (
+                      <tr key={method}>
+                        <td className="p-2 border border-gray-300 font-bold">{method}</td>
+                        <td className="p-2 border border-gray-300 text-right">{group.length} 筆</td>
+                        <td className="p-2 border border-gray-300 text-right font-mono font-bold">${fmt(total)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </section>
+
+            {/* 5. 收銀機盤點數據 (保留原有的溢短金邏輯) */}
+            <section className="space-y-4">
+              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">收銀機實體現金盤點 (Over/Short)</h3>
+              <div className="grid grid-cols-2 gap-6 border border-gray-300 p-6">
+                <div className="space-y-2">
+                  <div className="flex justify-between text-sm"><span>開帳現金:</span> <span className="font-mono">${fmt(shift.openingTotal)}</span></div>
+                  <div className="flex justify-between text-sm"><span>現金營收(現結):</span> <span className="font-mono">${fmt(dailyData.orders.filter(o => o.status === '現結').reduce((sum, o) => sum + (o.actualAmt || 0), 0))}</span></div>
+                  <div className="flex justify-between text-sm text-red-600"><span>現金支出:</span> <span className="font-mono">-${fmt(shift.expenses.reduce((sum, e) => sum + e.amount, 0))}</span></div>
+                  <div className="border-t border-gray-200 pt-2 flex justify-between font-bold"><span>應有現金:</span> <span className="font-mono">${fmt(shift.expectedCash || 0)}</span></div>
                 </div>
+                <div className="space-y-2 border-l border-gray-200 pl-6">
+                  <div className="flex justify-between text-sm"><span>實際盤點:</span> <span className="font-mono font-bold">${fmt(shift.closingTotal || 0)}</span></div>
+                  <div className={cn("flex justify-between text-lg font-bold p-2 rounded", (shift.overShort || 0) >= 0 ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700")}>
+                    <span>溢短金:</span>
+                    <span>{(shift.overShort || 0) >= 0 ? '+' : ''}{fmt(shift.overShort || 0)}</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+
+            {shift.editLogs && shift.editLogs.length > 0 && (
+              <div className="p-4 bg-gray-50 border border-gray-200 text-xs text-gray-500 space-y-1">
+                <p className="font-bold">修改備註紀錄：</p>
+                {shift.editLogs.map((log, i) => <p key={i}>• {log}</p>)}
               </div>
             )}
 
-            <div className="flex justify-center no-print">
+            <div className="flex justify-center no-print pt-10">
               <button 
                 onClick={handleExportPDF}
                 disabled={isExporting}
-                className="px-10 py-4 bg-coffee-800 text-white rounded-[24px] font-bold shadow-xl hover:bg-coffee-900 transition-all flex items-center gap-2 disabled:opacity-70"
+                className="px-10 py-4 bg-gray-800 text-white rounded-xl font-bold shadow-xl hover:bg-black transition-all flex items-center gap-2 disabled:opacity-70"
               >
-                {isExporting ? (
-                  <>
-                    <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    結報單準備中...
-                  </>
-                ) : (
-                  <>
-                    <FileText className="w-5 h-5" /> 匯出為 PDF 結報單
-                  </>
-                )}
+                <FileText className="w-5 h-5" /> 匯出為 PDF 結報單
               </button>
             </div>
           </div>
@@ -859,7 +872,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                   />
 
                   <div className="grid grid-cols-3 gap-2">
-                    {['現結', '匯款', '未結帳款'].map(m => (
+                    {(settings.paymentMethods || ['現結', '匯款', '未結帳款']).map(m => (
                       <button
                         key={m}
                         onClick={() => setCheckoutData({...checkoutData, paymentMethod: m as any})}

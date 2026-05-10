@@ -115,7 +115,7 @@ export interface Order {
   shipAmt: number;
   discAmt: number;
   actualAmt: number;
-  status: '匯款' | '現結' | '未結帳款' | '公關品' | '已收帳款' | '已付訂金';
+  status: string; // '匯款' | '現結' | '未結帳款' | '公關品' | '已收帳款' | '已付訂金' or custom payment methods
   note: string;
   depositAmt?: number; // For deposit flow
   deliveryMethod?: '宅配' | '自取';
@@ -286,6 +286,7 @@ export interface Settings {
   // 帳務與支出設定
   fundingSources?: FundingSource[];
   expenseCategories?: ExpenseCategory[];
+  paymentMethods?: string[];
 }
 
 export interface FundingSource {
