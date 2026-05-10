@@ -559,25 +559,57 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               </table>
             </section>
 
-            {/* 5. 收銀機盤點數據 (保留原有的溢短金邏輯) */}
-            <section className="space-y-4">
-              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">收銀機實體現金盤點 (Over/Short)</h3>
-              <div className="grid grid-cols-2 gap-6 border border-gray-300 p-6">
-                <div className="space-y-2">
-                  <div className="flex justify-between text-sm"><span>開帳現金:</span> <span className="font-mono">${fmt(shift.openingTotal)}</span></div>
-                  <div className="flex justify-between text-sm"><span>現金營收(現結):</span> <span className="font-mono">${fmt(dailyData.orders.filter(o => o.status === '現結').reduce((sum, o) => sum + (o.actualAmt || 0), 0))}</span></div>
-                  <div className="flex justify-between text-sm text-red-600"><span>現金支出:</span> <span className="font-mono">-${fmt(shift.expenses.reduce((sum, e) => sum + e.amount, 0))}</span></div>
-                  <div className="border-t border-gray-200 pt-2 flex justify-between font-bold"><span>應有現金:</span> <span className="font-mono">${fmt(shift.expectedCash || 0)}</span></div>
-                </div>
-                <div className="space-y-2 border-l border-gray-200 pl-6">
-                  <div className="flex justify-between text-sm"><span>實際盤點:</span> <span className="font-mono font-bold">${fmt(shift.closingTotal || 0)}</span></div>
-                  <div className={cn("flex justify-between text-lg font-bold p-2 rounded", (shift.overShort || 0) >= 0 ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700")}>
-                    <span>溢短金:</span>
-                    <span>{(shift.overShort || 0) >= 0 ? '+' : ''}{fmt(shift.overShort || 0)}</span>
+            {/* 5. 收銀機盤點數據 (即時計算確保報表數值一致) */}
+            {(() => {
+              const posCashSales = dailyData.orders
+                .filter(o => (o.source === 'pos' || o.note?.includes('收銀機交易')) && o.status === '現結')
+                .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+              const otherCashSales = dailyData.orders
+                .filter(o => !(o.source === 'pos' || o.note?.includes('收銀機交易')) && o.status === '現結')
+                .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+                
+              const currentCashSales = posCashSales + otherCashSales;
+              const currentExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
+              const currentExpected = shift.openingTotal + currentCashSales - currentExpenses;
+              const currentOverShort = (shift.closingTotal || 0) - currentExpected;
+
+              return (
+                <section className="space-y-4">
+                  <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">收銀機實體現金盤點 (Over/Short)</h3>
+                  <div className="grid grid-cols-2 gap-6 border border-gray-300 p-6">
+                    <div className="space-y-2">
+                      <div className="flex justify-between text-sm text-gray-500"><span>開帳現金:</span> <span className="font-mono">${fmt(shift.openingTotal)}</span></div>
+                      <div className="flex justify-between text-sm"><span>+ POS 現金收入:</span> <span className="font-mono">${fmt(posCashSales)}</span></div>
+                      {otherCashSales > 0 && (
+                        <div className="flex justify-between text-sm text-amber-600"><span>+ 其他現結 (匯入/手動):</span> <span className="font-mono">${fmt(otherCashSales)}</span></div>
+                      )}
+                      <div className="flex justify-between text-sm text-red-600"><span>- 現金支出紀錄:</span> <span className="font-mono">-${fmt(currentExpenses)}</span></div>
+                      <div className="border-t-2 border-gray-800 pt-2 flex justify-between font-bold text-lg">
+                        <span>應有現金金額:</span> 
+                        <span className="font-mono">${fmt(currentExpected)}</span>
+                      </div>
+                    </div>
+                    <div className="space-y-2 border-l border-gray-200 pl-6">
+                      <div className="flex justify-between text-sm"><span>實際盤點金額:</span> <span className="font-mono font-bold text-lg">${fmt(shift.closingTotal || 0)}</span></div>
+                      <div className={cn("flex justify-between items-center p-3 rounded-xl", currentOverShort >= 0 ? "bg-green-50 text-green-700" : "bg-red-50 text-red-700")}>
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold uppercase opacity-70">Over/Short</span>
+                          <span className="text-xl font-bold">溢短金</span>
+                        </div>
+                        <span className="text-2xl font-serif-brand font-bold">
+                          {currentOverShort >= 0 ? '+' : ''}{fmt(currentOverShort)}
+                        </span>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              </div>
-            </section>
+                  {otherCashSales > 0 && (
+                    <p className="text-[10px] text-amber-600 font-bold">
+                      ⚠️ 注意：應有現金包含了「非 POS 系統」產生的現結訂單。若這些款項未入收銀機，請檢查匯入清單。
+                    </p>
+                  )}
+                </section>
+              );
+            })()}
 
             {shift.editLogs && shift.editLogs.length > 0 && (
               <div className="p-4 bg-gray-50 border border-gray-200 text-xs text-gray-500 space-y-1">
