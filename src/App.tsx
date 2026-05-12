@@ -113,7 +113,7 @@ export default function App() {
   const [currentOperator, setCurrentOperator] = useState<Operator | null>(null);
   const [forceUnlocked, setForceUnlocked] = useState(false);
 
-  const shopId = user?.uid || '';
+  const [targetShopId, setTargetShopId] = useState<string | null>(null);
 
   useEffect(() => {
     return onAuthStateChanged(auth, (u) => {
@@ -123,45 +123,67 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!user) {
+      setTargetShopId(null);
+      return;
+    }
+    const unsub = onSnapshot(doc(db, 'user_shops', user.uid), (snap) => {
+      if (snap.exists() && snap.data()?.targetShopId) {
+        setTargetShopId(snap.data().targetShopId);
+      } else {
+        setTargetShopId(null);
+      }
+    }, (err) => {
+      console.error('Link snapshot error:', err);
+    });
+    return unsub;
+  }, [user]);
+
+  const shopId = targetShopId || user?.uid || '';
+
+  useEffect(() => {
     if (!user || !shopId) return;
 
-    (async () => {
-      try {
-        // 1) 建立此帳號專屬 shop root doc（doc id = uid）
-        await setDoc(
-          doc(db, 'shops', shopId),
-          {
-            id: shopId,
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            ownerUid: user.uid,
-          },
-          { merge: true }
-        );
+    // 只有當讀取自身原生店舖時，才執行預設初始化寫入，避免覆蓋目標主店舖的元數據
+    if (shopId === user.uid) {
+      (async () => {
+        try {
+          // 1) 建立此帳號專屬 shop root doc（doc id = uid）
+          await setDoc(
+            doc(db, 'shops', shopId),
+            {
+              id: shopId,
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+              ownerUid: user.uid,
+            },
+            { merge: true }
+          );
 
-        // 2) bootstrap doc（你原本那段）
-        await setDoc(
-          doc(db, 'shops', shopId, 'meta', 'bootstrap'),
-          {
-            at: new Date().toISOString(),
-            from: 'app-bootstrap',
-            uid: auth.currentUser?.uid ?? null,
-          },
-          { merge: true }
-        );
+          // 2) bootstrap doc
+          await setDoc(
+            doc(db, 'shops', shopId, 'meta', 'bootstrap'),
+            {
+              at: new Date().toISOString(),
+              from: 'app-bootstrap',
+              uid: auth.currentUser?.uid ?? null,
+            },
+            { merge: true }
+          );
 
-        // 3) settings init
-        const settingsRef = doc(db, 'shops', shopId, 'meta', 'settings');
-        const snap = await getDoc(settingsRef);
-        if (!snap.exists()) {
-          await setDoc(settingsRef, DEFAULT_SETTINGS);
+          // 3) settings init
+          const settingsRef = doc(db, 'shops', shopId, 'meta', 'settings');
+          const snap = await getDoc(settingsRef);
+          if (!snap.exists()) {
+            await setDoc(settingsRef, DEFAULT_SETTINGS);
+          }
+
+          console.log('[bootstrap] root/meta/settings ready');
+        } catch (e: any) {
+          console.error('[bootstrap] failed:', e?.code, e?.message, e);
         }
-
-        console.log('[bootstrap] root/meta/settings ready');
-      } catch (e: any) {
-        console.error('[bootstrap] failed:', e?.code, e?.message, e);
-      }
-    })();
+      })();
+    }
 
     const settingsRef = doc(db, 'shops', shopId, 'meta', 'settings');
     const unsubSettings = onSnapshot(settingsRef, (snap) => {
@@ -189,6 +211,9 @@ export default function App() {
     setLoginError(null);
     try {
       const provider = new GoogleAuthProvider();
+      provider.setCustomParameters({
+        prompt: 'select_account'
+      });
       await signInWithPopup(auth, provider);
     } catch (error: any) {
       console.error('Login failed:', error);

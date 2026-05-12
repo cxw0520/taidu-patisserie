@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
-import { db } from '../../lib/firebase';
-import { doc, setDoc, deleteDoc } from 'firebase/firestore';
+import React, { useState, useEffect } from 'react';
+import { db, auth } from '../../lib/firebase';
+import { doc, setDoc, deleteDoc, getDoc, onSnapshot } from 'firebase/firestore';
 import { Role, Operator, Permissions } from '../../types';
 import { uid, cn } from '../../lib/utils';
-import { Shield, Users, Key, Save, Plus, Trash2, Edit2, AlertCircle, Store, Image as ImageIcon, X, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Shield, Users, Key, Save, Plus, Trash2, Edit2, AlertCircle, Store, Image as ImageIcon, X, ChevronLeft, ChevronRight, Copy } from 'lucide-react';
 import { FundingSource, ExpenseCategory } from '../../types';
 
 interface Props {
@@ -41,7 +41,26 @@ const PERMISSION_LABELS: Record<keyof Permissions, string> = {
 
 export default function SettingsView({ shopId, roles, operators, settings }: Props) {
   const today = new Date();
-  const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators' | 'business_days' | 'operations' | 'hr_rules' | 'finance' | 'accounting'>('operators');
+  const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators' | 'business_days' | 'operations' | 'hr_rules' | 'finance' | 'accounting' | 'multi_account'>('operators');
+  
+  // Multi-account link state
+  const [targetShopIdInput, setTargetShopIdInput] = useState('');
+  const [currentLinkedShopId, setCurrentLinkedShopId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const unsub = onSnapshot(doc(db, 'user_shops', uid), (snap) => {
+      if (snap.exists() && snap.data()?.targetShopId) {
+        setCurrentLinkedShopId(snap.data().targetShopId);
+        setTargetShopIdInput(snap.data().targetShopId);
+      } else {
+        setCurrentLinkedShopId(null);
+        setTargetShopIdInput('');
+      }
+    });
+    return unsub;
+  }, []);
   
   // Shop Settings State
   const [shopName, setShopName] = useState(settings?.shopName || '態度貳貳甜點工作室');
@@ -108,6 +127,23 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
     await setDoc(doc(db, 'shops', shopId), { shopName, logo: logoBase64 }, { merge: true });
     await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), payload, { merge: true });
     alert('系統設定已全部儲存成功！');
+  };
+
+  const handleSaveMultiAccountLink = async () => {
+    const uid = auth.currentUser?.uid;
+    if (!uid) return;
+    const val = targetShopIdInput.trim();
+    if (!val) {
+      await deleteDoc(doc(db, 'user_shops', uid));
+      alert('已解除多帳號連動綁定，切換回您的獨立專屬店舖！');
+    } else {
+      if (val === uid) {
+        alert('不能輸入自己的帳號 ID！');
+        return;
+      }
+      await setDoc(doc(db, 'user_shops', uid), { targetShopId: val }, { merge: true });
+      alert('綁定成功！系統已即時連線至目標主店舖的資料庫。');
+    }
   };
 
   const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -219,6 +255,9 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
         <button onClick={() => setActiveTab('finance')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'finance' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
           💰 財務預估分攤
         </button>
+        <button onClick={() => setActiveTab('multi_account')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'multi_account' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
+          🔗 多帳號連動管理
+        </button>
       </div>
 
       <div className="mt-6">
@@ -251,6 +290,89 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
               <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2">
                 <Save className="w-5 h-5" /> 儲存店鋪設定
               </button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'multi_account' && (
+          <div className="space-y-6">
+            <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-coffee-100">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-xl font-bold text-coffee-800">多帳號連動管理 (多帳戶協同營運同一間店)</h2>
+                  <p className="text-xs text-coffee-500 mt-1">透過綁定主要店舖 ID，讓多個不同 Google 帳號共同檢視與編輯同一份商品、訂單與財會資料庫。</p>
+                </div>
+                {currentLinkedShopId && (
+                  <span className="px-3 py-1 bg-mint-brand/10 border border-mint-brand/30 text-mint-brand font-bold text-xs rounded-full">
+                    目前為連線共用模式
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-8 grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* 左側：原生 ID 資訊 */}
+                <div className="p-6 bg-coffee-50/50 rounded-2xl border border-coffee-100 space-y-4">
+                  <div>
+                    <span className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest block mb-1">您的專屬店舖 ID (供其他人綁定用)</span>
+                    <div className="flex items-center gap-2">
+                      <code className="text-sm font-mono font-bold bg-white px-3 py-2 rounded-xl border border-coffee-200 text-coffee-800 flex-1 select-all">
+                        {auth.currentUser?.uid || '尚未登入'}
+                      </code>
+                      <button
+                        onClick={() => {
+                          if (auth.currentUser?.uid) {
+                            navigator.clipboard.writeText(auth.currentUser.uid);
+                            alert('已複製您的店舖 ID！');
+                          }
+                        }}
+                        className="p-2 bg-white hover:bg-coffee-50 text-coffee-600 rounded-xl border border-coffee-200 shadow-sm transition"
+                        title="複製 ID"
+                      >
+                        <Copy className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-coffee-500 leading-relaxed">
+                    💡 <span className="font-bold text-coffee-700">如何邀請合夥人或員工加入？</span><br />
+                    請對方使用自己的 Google 帳號登入系統後，前往此頁面，並在右側欄位貼上上方這串專屬 ID 進行綁定即可。
+                  </p>
+                </div>
+
+                {/* 右側：連線至主店舖設定 */}
+                <div className="p-6 bg-white rounded-2xl border border-coffee-200 space-y-4 shadow-sm">
+                  <div>
+                    <label className="block text-xs font-bold text-coffee-700 uppercase tracking-widest mb-2">連線至目標主店舖 ID</label>
+                    <input
+                      type="text"
+                      value={targetShopIdInput}
+                      onChange={e => setTargetShopIdInput(e.target.value)}
+                      placeholder="請貼上主要店舖的專屬 ID 碼"
+                      className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none font-mono text-sm bg-gray-50/50 focus:bg-white transition"
+                    />
+                  </div>
+                  <p className="text-xs text-coffee-400">
+                    設定後，系統將自動覆蓋當前檢視空間，直接讀取與寫入目標店舖資料庫。若要還原為獨立空間，請將欄位清空後儲存。
+                  </p>
+                  <div className="pt-2 flex gap-3">
+                    <button
+                      onClick={handleSaveMultiAccountLink}
+                      className="flex-1 py-3 bg-coffee-800 hover:bg-coffee-900 text-white font-bold text-sm rounded-xl shadow-md transition"
+                    >
+                      {targetShopIdInput.trim() ? '儲存連動綁定' : '解除綁定 (還原獨立空間)'}
+                    </button>
+                    {currentLinkedShopId && (
+                      <button
+                        onClick={() => {
+                          setTargetShopIdInput('');
+                        }}
+                        className="px-4 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold text-sm rounded-xl transition"
+                      >
+                        清空
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         )}
