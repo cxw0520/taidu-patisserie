@@ -18,6 +18,7 @@ export default function AddOrderModal({ settings, shopId, customers, onClose, on
   onClose: () => void;
   onAdd: (order: Order) => void;
 }) {
+  const [selectedCust, setSelectedCust] = useState<Customer | null>(null);
   const [form, setForm] = useState<Order>({
     id: uid(), buyer: '', phone: '', address: '', items: {},
     prodAmt: 0, shipAmt: 0, discAmt: 0, actualAmt: 0, status: '匯款', note: ''
@@ -38,8 +39,10 @@ export default function AddOrderModal({ settings, shopId, customers, onClose, on
 
   const fillFromCustomer = (c: Customer) => {
     setPhoneInput(c.phone);
-    setForm(prev => ({ ...prev, buyer: c.name, phone: c.phone }));
+    setSelectedCust(c);
+    setForm(prev => ({ ...prev, buyer: c.name, phone: c.phone, customerId: c.id }));
   };
+
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
@@ -65,11 +68,40 @@ export default function AddOrderModal({ settings, shopId, customers, onClose, on
               onSelectCustomer={fillFromCustomer}
             />
           </div>
-          <div className="grid grid-cols-4 gap-2">
-            {(['匯款', '現結', '未結帳款', '公關品'] as const).map(s => (
-              <button key={s} onClick={() => setForm({ ...form, status: s })} className={cn("py-2 rounded-xl text-xs font-bold border transition-all", form.status === s ? "bg-rose-brand border-rose-brand text-white" : "bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300")}>{s}</button>
-            ))}
+          <div>
+            <div className="flex justify-between items-center mb-1.5">
+              <label className="text-xs font-bold text-coffee-400">付款狀態與方式</label>
+              {selectedCust && (
+                <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                  顧客儲值金餘額: ${fmt(selectedCust.creditBalance || 0)}
+                </span>
+              )}
+            </div>
+            <div className="grid grid-cols-5 gap-1.5">
+              {(['匯款', '現結', '未結帳款', '儲值金扣款', '公關品'] as const).map(s => (
+                <button
+                  key={s}
+                  onClick={() => {
+                    if (s === '儲值金扣款' && selectedCust) {
+                      const bal = Number(selectedCust.creditBalance || 0);
+                      if (form.actualAmt > bal) {
+                        alert(`提醒：當前顧客儲值金餘額 ($${bal}) 小於訂單應收總計 ($${form.actualAmt})`);
+                      }
+                    }
+                    setForm({ ...form, status: s });
+                  }}
+                  className={cn("py-2 rounded-xl text-[11px] font-bold border transition-all truncate px-1", 
+                    form.status === s 
+                      ? s === '儲值金扣款' ? "bg-emerald-600 border-emerald-600 text-white shadow-xs" : "bg-rose-brand border-rose-brand text-white shadow-xs" 
+                      : "bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300"
+                  )}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
           </div>
+
           <div>
             <label className="text-xs font-bold text-coffee-400 mb-2 block">訂購品項</label>
             <div className="space-y-2 max-h-52 overflow-y-auto pr-1">

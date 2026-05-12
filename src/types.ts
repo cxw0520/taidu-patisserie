@@ -115,7 +115,7 @@ export interface Order {
   shipAmt: number;
   discAmt: number;
   actualAmt: number;
-  status: string; // '匯款' | '現結' | '未結帳款' | '公關品' | '已收帳款' | '已付訂金' or custom payment methods
+  status: string; // '匯款' | '現結' | '未結帳款' | '公關品' | '已收帳款' | '已付訂金' | '儲值金扣款' or custom payment methods
   note: string;
   depositAmt?: number; // For deposit flow
   deliveryMethod?: '宅配' | '自取';
@@ -131,7 +131,9 @@ export interface Order {
   arCollectedRemit?: number;
   orderType?: 'normal' | 'prepayment' | 'pickup';
   pendingPickup?: boolean;
+  customerId?: string; // 連動 CRM 的顧客 ID
 }
+
 
 export interface JournalLine {
   id: string;
@@ -490,6 +492,16 @@ export interface CustomerPurchase {
   status: string;
 }
 
+export interface CreditLog {
+  id: string;
+  timestamp: string;
+  type: 'topup' | 'consume' | 'refund' | 'manual_adjust';
+  amount: number;
+  balanceAfter: number;
+  orderId?: string;
+  note?: string;
+}
+
 export interface Customer {
   id: string;
   name: string;
@@ -505,4 +517,8 @@ export interface Customer {
   purchases: CustomerPurchase[];
   totalPurchaseCount: number;
   totalPurchaseAmt: number;
+  creditBalance?: number; // 儲值金餘額
+  unpaidBalance?: number; // 未付帳款累計餘額
+  creditLogs?: CreditLog[]; // 異動紀錄
 }
+

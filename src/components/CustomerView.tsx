@@ -3,11 +3,11 @@ import { db } from '../lib/firebase';
 import {
   collection, doc, onSnapshot, setDoc, deleteDoc, query, orderBy, getDoc, getDocs
 } from 'firebase/firestore';
-import { uid, fmt, cn } from '../lib/utils';
-import { Customer, CustomerPurchase, Settings } from '../types';
+import { uid, fmt, cn, parseNum } from '../lib/utils';
+import { Customer, CustomerPurchase, Settings, CreditLog } from '../types';
 import {
   Users, Plus, Search, Trash2, ChevronDown, ChevronRight,
-  Phone, Mail, StickyNote, ShoppingBag, X, Edit2, Check, Star, User, Database, MessageCircle, Cake, Tag, AlertTriangle
+  Phone, Mail, StickyNote, ShoppingBag, X, Edit2, Check, Star, User, Database, MessageCircle, Cake, Tag, AlertTriangle, CreditCard, DollarSign, History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -41,6 +41,46 @@ export function findDuplicates(customers: Customer[], name: string, phone: strin
   });
 }
 
+export function calcOrderFinancialImpact(
+  customer: Partial<Customer>,
+  orderId: string,
+  newActualAmt: number,
+  newStatus: string
+): { creditBalance: number; unpaidBalance: number; creditLogs: CreditLog[] } {
+  let cred = Number(customer.creditBalance || 0);
+  let unp = Number(customer.unpaidBalance || 0);
+  let logs = [...(customer.creditLogs || [])];
+
+  // 1. Check previous purchase state to reverse previous impacts
+  const prevP = customer.purchases?.find(p => p.orderId === orderId);
+  if (prevP) {
+    if (prevP.status === '儲值金扣款') {
+      cred += Number(prevP.actualAmt || 0);
+      logs = logs.filter(l => l.orderId !== orderId);
+    } else if (prevP.status === '未結帳款') {
+      unp = Math.max(0, unp - Number(prevP.actualAmt || 0));
+    }
+  }
+
+  // 2. Apply new state impacts
+  if (newStatus === '儲值金扣款') {
+    cred = Math.max(0, cred - newActualAmt);
+    logs.push({
+      id: uid(),
+      timestamp: new Date().toISOString(),
+      type: 'consume',
+      amount: -newActualAmt,
+      balanceAfter: cred,
+      orderId,
+      note: 'POS 訂單儲值金扣款'
+    });
+  } else if (newStatus === '未結帳款') {
+    unp += newActualAmt;
+  }
+
+  return { creditBalance: cred, unpaidBalance: unp, creditLogs: logs };
+}
+
 /** Upsert a customer record from an order, returns the customer id */
 export async function upsertCustomerFromOrder(
   shopId: string,
@@ -56,8 +96,10 @@ export async function upsertCustomerFromOrder(
   const alreadyLinked = allCustomers.find(c => c.purchases.some(p => p.orderId === orderId));
   if (alreadyLinked) {
     // update amounts in place
+    const impact = calcOrderFinancialImpact(alreadyLinked, orderId, actualAmt, status);
     const updated: Customer = {
       ...alreadyLinked,
+      ...impact,
       purchases: alreadyLinked.purchases.map(p => p.orderId === orderId ? purchase : p),
       totalPurchaseCount: alreadyLinked.purchases.length,
       totalPurchaseAmt: alreadyLinked.purchases.reduce((s, p) => s + (p.orderId === orderId ? actualAmt : p.actualAmt), 0),
@@ -72,9 +114,11 @@ export async function upsertCustomerFromOrder(
   const exactMatch = dups.find(c => c.name === parsedName && normalizePhone(c.phone) === normalizePhone(phone));
   if (exactMatch) {
     // Auto-merge if exact match found
+    const impact = calcOrderFinancialImpact(exactMatch, orderId, actualAmt, status);
     const newPurchases = [...exactMatch.purchases, purchase];
     const updated: Customer = {
       ...exactMatch,
+      ...impact,
       email: email || exactMatch.email,
       gender: exactMatch.gender === '不選擇' && parsedGender !== '不選擇' ? parsedGender : exactMatch.gender,
       purchases: newPurchases,
@@ -92,9 +136,11 @@ export async function upsertCustomerFromOrder(
       onConflict(dups, async (action, targetId) => {
         if (action === 'merge' && targetId) {
           const existing = allCustomers.find(c => c.id === targetId)!;
+          const impact = calcOrderFinancialImpact(existing, orderId, actualAmt, status);
           const newPurchases = [...existing.purchases, purchase];
           const updated: Customer = {
             ...existing,
+            ...impact,
             name: existing.name !== '未知' && existing.name ? existing.name : parsedName,
             phone: phone || existing.phone,
             email: email || existing.email,
@@ -108,10 +154,12 @@ export async function upsertCustomerFromOrder(
         } else {
           // create new
           const newId = uid();
+          const impact = calcOrderFinancialImpact({}, orderId, actualAmt, status);
           const newCustomer: Customer = {
             id: newId, name: parsedName, phone, email, gender: parsedGender, createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(), purchases: [purchase],
             totalPurchaseCount: 1, totalPurchaseAmt: actualAmt,
+            ...impact
           };
           await setDoc(doc(db, 'shops', shopId, 'customers', newId), newCustomer);
         }
@@ -120,14 +168,17 @@ export async function upsertCustomerFromOrder(
     });
   } else {
     const newId = uid();
+    const impact = calcOrderFinancialImpact({}, orderId, actualAmt, status);
     const newCustomer: Customer = {
       id: newId, name: parsedName, phone, email: email || '', gender: parsedGender, createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(), purchases: [purchase],
       totalPurchaseCount: 1, totalPurchaseAmt: actualAmt,
+      ...impact
     };
     await setDoc(doc(db, 'shops', shopId, 'customers', newId), newCustomer);
   }
 }
+
 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function CustomerView({ shopId, settings }: { shopId: string; settings: Settings }) {
@@ -138,7 +189,10 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
   const [editModal, setEditModal] = useState<Customer | null>(null);
   const [addModal, setAddModal] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [subTab, setSubTab] = useState<'list' | 'credit'>('list');
+  const [creditAdjustModal, setCreditAdjustModal] = useState<Customer | null>(null);
   const [migrating, setMigrating] = useState(false);
+
 
   const handleMigrate = async () => {
     if (!window.confirm('確定要執行自動轉移嗎？這會讀取所有日報表的歷史訂單，為「有填寫電話或姓名」的訂購人自動建立或更新顧客資料。')) return;
@@ -243,6 +297,24 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
     );
   }, [customers, searchQ]);
 
+  const creditFiltered = useMemo(() => {
+    const q = searchQ.trim().toLowerCase();
+    const base = customers.filter(c => Number(c.creditBalance || 0) > 0 || Number(c.unpaidBalance || 0) > 0);
+    if (!q) return base;
+    return base.filter(c =>
+      c.name.toLowerCase().includes(q) ||
+      (c.phone || '').replace(/\D/g, '').includes(q.replace(/\D/g, ''))
+    );
+  }, [customers, searchQ]);
+
+  const totalCreditPool = useMemo(() => {
+    return customers.reduce((sum, c) => sum + Number(c.creditBalance || 0), 0);
+  }, [customers]);
+
+  const totalUnpaidPool = useMemo(() => {
+    return customers.reduce((sum, c) => sum + Number(c.unpaidBalance || 0), 0);
+  }, [customers]);
+
   const handleDelete = async (id: string) => {
     await deleteDoc(doc(db, 'shops', shopId, 'customers', id));
     setDeleteConfirmId(null);
@@ -295,15 +367,61 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
         </div>
       </div>
 
-      {/* Customer list */}
-      <div className="space-y-3">
-        {filtered.length === 0 && (
-          <div className="glass-panel p-12 text-center text-coffee-300 font-bold">
-            <Users className="w-12 h-12 mx-auto mb-3 opacity-30" />
-            {searchQ ? '查無符合顧客' : '尚未建立任何顧客資料'}
+      {/* Tabs */}
+      <div className="flex gap-2 border-b border-coffee-100 pb-2">
+        <button
+          onClick={() => setSubTab('list')}
+          className={cn("px-5 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2", subTab === 'list' ? "bg-coffee-800 text-white shadow-sm" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}
+        >
+          👥 顧客總覽清單
+        </button>
+        <button
+          onClick={() => setSubTab('credit')}
+          className={cn("px-5 py-2.5 rounded-xl font-bold text-sm transition flex items-center gap-2", subTab === 'credit' ? "bg-coffee-800 text-white shadow-sm" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}
+        >
+          💳 儲值金與未付帳款管理
+        </button>
+      </div>
+
+      {/* Main View Area */}
+      <div className="space-y-4">
+        {subTab === 'credit' && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+            <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 border border-emerald-200 p-6 rounded-3xl shadow-sm flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-emerald-700 uppercase tracking-wider mb-1 flex items-center gap-1">
+                  <CreditCard className="w-4 h-4" /> 總流通儲值金餘額
+                </div>
+                <div className="text-2xl font-bold font-mono text-emerald-800">${fmt(totalCreditPool)}</div>
+                <p className="text-[10px] text-emerald-600 mt-1">顧客預付且尚未消費的總額度 (預收負債)</p>
+              </div>
+              <div className="w-12 h-12 bg-emerald-600 text-white rounded-2xl flex items-center justify-center font-bold text-xl shadow-md">
+                💳
+              </div>
+            </div>
+
+            <div className="bg-gradient-to-br from-rose-50 to-rose-100/50 border border-rose-200 p-6 rounded-3xl shadow-sm flex items-center justify-between">
+              <div>
+                <div className="text-xs font-bold text-rose-700 uppercase tracking-wider mb-1 flex items-center gap-1">
+                  <DollarSign className="w-4 h-4" /> 累計應收未付帳款
+                </div>
+                <div className="text-2xl font-bold font-mono text-rose-800">${fmt(totalUnpaidPool)}</div>
+                <p className="text-[10px] text-rose-600 mt-1">顧客先取貨後付款待結清的總金額</p>
+              </div>
+              <div className="w-12 h-12 bg-rose-600 text-white rounded-2xl flex items-center justify-center font-bold text-xl shadow-md">
+                ⚠️
+              </div>
+            </div>
           </div>
         )}
-        {filtered.map(c => {
+
+        {(subTab === 'credit' ? creditFiltered : filtered).length === 0 && (
+          <div className="glass-panel p-12 text-center text-coffee-300 font-bold">
+            <Users className="w-12 h-12 mx-auto mb-3 opacity-30" />
+            {searchQ ? '查無符合顧客' : subTab === 'credit' ? '目前尚無儲值餘額或未付帳款的顧客紀錄' : '尚未建立任何顧客資料'}
+          </div>
+        )}
+        {(subTab === 'credit' ? creditFiltered : filtered).map(c => {
           const isExpanded = expandedId === c.id;
           return (
             <div key={c.id} className="glass-panel overflow-hidden shadow-sm hover:-translate-y-0.5 transition-transform duration-200">
@@ -334,26 +452,44 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
                     {c.phone && <span className="flex items-center gap-1"><Phone className="w-3 h-3" />{c.phone}</span>}
                     {c.lineId && <span className="flex items-center gap-1 text-[#06C755]"><MessageCircle className="w-3 h-3" />{c.lineId}</span>}
                     {c.email && <span className="flex items-center gap-1 truncate"><Mail className="w-3 h-3" />{c.email}</span>}
-                    {c.birthday && <span className="flex items-center gap-1 text-rose-400"><Cake className="w-3 h-3" />{c.birthday}</span>}
                   </div>
                 </div>
                 {/* Stats */}
                 <div className="hidden sm:flex items-center gap-6 text-center">
+                  {Number(c.creditBalance || 0) > 0 && (
+                    <div className="bg-emerald-50 px-3 py-1.5 rounded-xl border border-emerald-100">
+                      <div className="text-sm font-bold font-mono text-emerald-700">${fmt(c.creditBalance || 0)}</div>
+                      <div className="text-[9px] text-emerald-600 font-bold uppercase tracking-wider flex items-center gap-0.5 justify-center">
+                        <CreditCard className="w-2.5 h-2.5" /> 儲值金
+                      </div>
+                    </div>
+                  )}
+                  {Number(c.unpaidBalance || 0) > 0 && (
+                    <div className="bg-rose-50 px-3 py-1.5 rounded-xl border border-rose-100">
+                      <div className="text-sm font-bold font-mono text-rose-600">${fmt(c.unpaidBalance || 0)}</div>
+                      <div className="text-[9px] text-rose-500 font-bold uppercase tracking-wider flex items-center gap-0.5 justify-center">
+                        <DollarSign className="w-2.5 h-2.5" /> 未付帳款
+                      </div>
+                    </div>
+                  )}
                   <div>
-                    <div className="text-lg font-bold font-mono text-coffee-800">{c.totalPurchaseCount}</div>
-                    <div className="text-[10px] text-coffee-400 font-bold uppercase tracking-wider">購買次數</div>
+                    <div className="text-base font-bold font-mono text-coffee-800">{c.totalPurchaseCount}</div>
+                    <div className="text-[9px] text-coffee-400 font-bold uppercase tracking-wider">次數</div>
                   </div>
                   <div>
-                    <div className="text-lg font-bold font-mono text-rose-brand">${fmt(c.totalPurchaseAmt)}</div>
-                    <div className="text-[10px] text-coffee-400 font-bold uppercase tracking-wider">累計金額</div>
+                    <div className="text-base font-bold font-mono text-rose-brand">${fmt(c.totalPurchaseAmt)}</div>
+                    <div className="text-[9px] text-coffee-400 font-bold uppercase tracking-wider">累計</div>
                   </div>
                 </div>
                 {/* Actions */}
-                <div className="flex items-center gap-2">
-                  <button onClick={() => setEditModal(c)} className="p-2 text-coffee-300 hover:text-coffee-600 hover:bg-coffee-50 rounded-lg transition">
+                <div className="flex items-center gap-1.5">
+                  <button onClick={() => setCreditAdjustModal(c)} className="px-2.5 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 rounded-xl transition font-bold text-xs flex items-center gap-1 border border-emerald-200/60 shadow-sm" title="加值與餘額調整">
+                    <CreditCard className="w-3.5 h-3.5" /> <span className="hidden lg:inline">加值/扣款</span>
+                  </button>
+                  <button onClick={() => setEditModal(c)} className="p-2 text-coffee-300 hover:text-coffee-600 hover:bg-coffee-50 rounded-lg transition" title="編輯顧客">
                     <Edit2 className="w-4 h-4" />
                   </button>
-                  <button onClick={() => setDeleteConfirmId(c.id)} className="p-2 text-coffee-300 hover:text-danger-brand hover:bg-danger-brand/5 rounded-lg transition">
+                  <button onClick={() => setDeleteConfirmId(c.id)} className="p-2 text-coffee-300 hover:text-danger-brand hover:bg-danger-brand/5 rounded-lg transition" title="刪除顧客">
                     <Trash2 className="w-4 h-4" />
                   </button>
                   <button onClick={() => setExpandedId(isExpanded ? null : c.id)} className="p-2 text-coffee-300 hover:text-coffee-600 hover:bg-coffee-50 rounded-lg transition">
@@ -362,7 +498,7 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
                 </div>
               </div>
 
-              {/* Expanded purchases */}
+              {/* Expanded purchases & credit logs */}
               <AnimatePresence>
                 {isExpanded && (
                   <motion.div
@@ -372,41 +508,76 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
                     transition={{ duration: 0.2 }}
                     className="overflow-hidden"
                   >
-                    <div className="border-t border-coffee-50 px-6 py-4 bg-coffee-50/30 space-y-3">
+                    <div className="border-t border-coffee-50 px-6 py-4 bg-coffee-50/30 space-y-4">
                       {c.note && (
                         <div className="flex items-start gap-2 text-sm text-coffee-500 bg-white rounded-xl px-4 py-3 border border-coffee-100">
                           <StickyNote className="w-4 h-4 text-amber-500 flex-shrink-0 mt-0.5" />
                           <span>{c.note}</span>
                         </div>
                       )}
-                      <h4 className="text-xs font-bold text-coffee-400 uppercase tracking-wider flex items-center gap-2">
-                        <ShoppingBag className="w-3.5 h-3.5" /> 購買紀錄（{c.purchases.length} 筆）
-                      </h4>
-                      {c.purchases.length === 0 && (
-                        <p className="text-sm text-coffee-300 italic">尚無購買紀錄</p>
-                      )}
-                      <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                        {[...c.purchases].sort((a, b) => b.date.localeCompare(a.date)).map((p, i) => (
-                          <div key={i} className="bg-white rounded-xl px-4 py-3 border border-coffee-100 flex justify-between items-start gap-4">
-                            <div className="min-w-0">
-                              <div className="text-xs font-bold text-coffee-400 font-mono">{p.date}</div>
-                              <div className="text-sm text-coffee-600 font-bold mt-0.5">
-                                {Object.entries(p.items || {}).filter(([, q]) => Number(q) > 0).map(([id, q]) => `${getItemName(id)} ×${q}`).join('、') || '—'}
+
+                      {/* 儲值金與應收帳款異動明細 */}
+                      {c.creditLogs && c.creditLogs.length > 0 && (
+                        <div>
+                          <h4 className="text-xs font-bold text-emerald-700 uppercase tracking-wider flex items-center gap-1 mb-2">
+                            <History className="w-3.5 h-3.5" /> 儲值金與異動明細紀錄（{c.creditLogs.length} 筆）
+                          </h4>
+                          <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1 font-mono text-xs">
+                            {[...c.creditLogs].sort((a,b) => b.timestamp.localeCompare(a.timestamp)).map((l, idx) => (
+                              <div key={idx} className="bg-white rounded-xl p-2.5 border border-emerald-100/60 flex justify-between items-center gap-2 shadow-2xs">
+                                <div>
+                                  <span className="text-coffee-400 font-sans text-[10px]">{new Date(l.timestamp).toLocaleString()}</span>
+                                  <span className="ml-2 font-bold text-coffee-800">
+                                    {l.type === 'topup' && '➕ 現場加值'}
+                                    {l.type === 'consume' && '➖ 消費扣款'}
+                                    {l.type === 'refund' && '↩️ 儲值退款'}
+                                    {l.type === 'manual_adjust' && '✏️ 人工校正'}
+                                  </span>
+                                  {l.note && <span className="ml-2 text-coffee-500 font-sans text-xs">({l.note})</span>}
+                                </div>
+                                <div className="text-right">
+                                  <span className={cn("font-bold text-sm", l.amount >= 0 ? "text-emerald-600" : "text-rose-500")}>
+                                    {l.amount >= 0 ? `+${l.amount}` : l.amount}
+                                  </span>
+                                  <span className="text-coffee-400 text-[10px] ml-2 font-bold block sm:inline">餘額 ${l.balanceAfter}</span>
+                                </div>
                               </div>
-                              <div className="mt-1">
-                                <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full",
-                                  p.status === '匯款' && 'bg-blue-50 text-blue-600',
-                                  p.status === '現結' && 'bg-green-50 text-green-600',
-                                  p.status === '未結帳款' && 'bg-red-50 text-red-500',
-                                  p.status === '公關品' && 'bg-purple-50 text-purple-600',
-                                )}>{p.status}</span>
-                              </div>
-                            </div>
-                            <div className="text-right flex-shrink-0">
-                              <div className="font-bold font-mono text-rose-brand">${fmt(p.actualAmt)}</div>
-                            </div>
+                            ))}
                           </div>
-                        ))}
+                        </div>
+                      )}
+
+                      <div>
+                        <h4 className="text-xs font-bold text-coffee-400 uppercase tracking-wider flex items-center gap-2 mb-2">
+                          <ShoppingBag className="w-3.5 h-3.5" /> 購買紀錄（{c.purchases.length} 筆）
+                        </h4>
+                        {c.purchases.length === 0 && (
+                          <p className="text-sm text-coffee-300 italic">尚無購買紀錄</p>
+                        )}
+                        <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+                          {[...c.purchases].sort((a, b) => b.date.localeCompare(a.date)).map((p, i) => (
+                            <div key={i} className="bg-white rounded-xl px-4 py-3 border border-coffee-100 flex justify-between items-start gap-4">
+                              <div className="min-w-0">
+                                <div className="text-xs font-bold text-coffee-400 font-mono">{p.date}</div>
+                                <div className="text-sm text-coffee-600 font-bold mt-0.5">
+                                  {Object.entries(p.items || {}).filter(([, q]) => Number(q) > 0).map(([id, q]) => `${getItemName(id)} ×${q}`).join('、') || '—'}
+                                </div>
+                                <div className="mt-1">
+                                  <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full",
+                                    p.status === '匯款' && 'bg-blue-50 text-blue-600',
+                                    p.status === '現結' && 'bg-green-50 text-green-600',
+                                    p.status === '未結帳款' && 'bg-red-50 text-red-500',
+                                    p.status === '公關品' && 'bg-purple-50 text-purple-600',
+                                    p.status === '儲值金扣款' && 'bg-emerald-50 text-emerald-700 border border-emerald-200/60',
+                                  )}>{p.status}</span>
+                                </div>
+                              </div>
+                              <div className="text-right flex-shrink-0">
+                                <div className="font-bold font-mono text-rose-brand">${fmt(p.actualAmt)}</div>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
                       </div>
                     </div>
                   </motion.div>
@@ -416,6 +587,7 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
           );
         })}
       </div>
+
 
       {/* Add / Edit Modal */}
       <AnimatePresence>
@@ -445,9 +617,186 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
           </div>
         )}
       </AnimatePresence>
+
+      {/* 儲值金與帳款調整 Modal */}
+      <AnimatePresence>
+        {creditAdjustModal && (
+          <CreditAdjustModal
+            shopId={shopId}
+            customer={creditAdjustModal}
+            onClose={() => setCreditAdjustModal(null)}
+          />
+        )}
+      </AnimatePresence>
     </div>
   );
 }
+
+// ── Credit Adjust Modal ───────────────────────────────────────────────────────
+function CreditAdjustModal({ shopId, customer, onClose }: {
+  shopId: string;
+  customer: Customer;
+  onClose: () => void;
+}) {
+  const [mode, setMode] = useState<'topup' | 'consume' | 'repay_unpaid' | 'manual_adjust'>('topup');
+  const [amountStr, setAmountStr] = useState('');
+  const [note, setNote] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const amt = parseNum(amountStr);
+    if (amt <= 0 && mode !== 'manual_adjust') {
+      alert('請輸入大於零的有效金額');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      let newCredit = Number(customer.creditBalance || 0);
+      let newUnpaid = Number(customer.unpaidBalance || 0);
+      let logAmt = amt;
+      let logType: 'topup' | 'consume' | 'refund' | 'manual_adjust' = 'topup';
+
+      if (mode === 'topup') {
+        newCredit += amt;
+        logType = 'topup';
+      } else if (mode === 'consume') {
+        if (amt > newCredit) {
+          if (!confirm(`注意：扣款金額 ($${amt}) 大於當前儲值金餘額 ($${newCredit})，確定要透支扣除嗎？`)) {
+            setSaving(false);
+            return;
+          }
+        }
+        newCredit = Math.max(0, newCredit - amt);
+        logType = 'consume';
+        logAmt = -amt;
+      } else if (mode === 'repay_unpaid') {
+        newUnpaid = Math.max(0, newUnpaid - amt);
+        logType = 'manual_adjust';
+        logAmt = -amt;
+      } else if (mode === 'manual_adjust') {
+        const diff = amt - newCredit;
+        newCredit = amt;
+        logType = 'manual_adjust';
+        logAmt = diff;
+      }
+
+      const newLog = {
+        id: uid(),
+        timestamp: new Date().toISOString(),
+        type: logType,
+        amount: logAmt,
+        balanceAfter: mode === 'repay_unpaid' ? newUnpaid : newCredit,
+        note: note.trim() || (mode === 'repay_unpaid' ? '收回先取貨未結帳款' : mode === 'manual_adjust' ? '人工校正餘額' : '')
+      };
+
+      const updated: Customer = {
+        ...customer,
+        creditBalance: newCredit,
+        unpaidBalance: newUnpaid,
+        creditLogs: [...(customer.creditLogs || []), newLog],
+        updatedAt: new Date().toISOString()
+      };
+
+      await setDoc(doc(db, 'shops', shopId, 'customers', customer.id), updated);
+      alert('儲值金與帳款狀態已順利更新！');
+      onClose();
+    } catch (e: any) {
+      alert('操作失敗: ' + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative z-10 bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-emerald-100">
+        <div className="flex justify-between items-center px-8 pt-7 pb-5 bg-emerald-50/50 border-b border-emerald-100">
+          <div>
+            <h3 className="text-lg font-bold text-emerald-900 flex items-center gap-2">
+              <CreditCard className="w-5 h-5 text-emerald-600" /> 顧客儲值金與帳款作業
+            </h3>
+            <p className="text-xs text-emerald-700 font-bold mt-0.5">{customer.name} {customer.phone ? `(${customer.phone})` : ''}</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-emerald-100 rounded-full text-emerald-700"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="p-8 space-y-5">
+          {/* 當前額度狀態 */}
+          <div className="grid grid-cols-2 gap-3 bg-gray-50 p-4 rounded-2xl border border-gray-200 text-center">
+            <div>
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">儲值餘額</div>
+              <div className="text-lg font-bold font-mono text-emerald-700">${fmt(customer.creditBalance || 0)}</div>
+            </div>
+            <div>
+              <div className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">未付帳款</div>
+              <div className="text-lg font-bold font-mono text-rose-600">${fmt(customer.unpaidBalance || 0)}</div>
+            </div>
+          </div>
+
+          {/* 作業模式選擇 */}
+          <div>
+            <label className="text-xs font-bold text-coffee-400 mb-2 block">請選擇交易調整項目</label>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { id: 'topup', label: '➕ 現場加值儲值' },
+                { id: 'consume', label: '➖ 直接扣除餘額' },
+                { id: 'repay_unpaid', label: '💰 收取未付帳款' },
+                { id: 'manual_adjust', label: '✏️ 直接校正餘額' },
+              ].map(item => (
+                <button
+                  key={item.id}
+                  onClick={() => setMode(item.id as any)}
+                  className={cn("py-2.5 px-3 rounded-xl text-xs font-bold border text-left transition-all", mode === item.id ? "bg-emerald-600 border-emerald-600 text-white shadow-sm" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50")}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 輸入金額 */}
+          <div>
+            <label className="text-xs font-bold text-coffee-400 mb-1 block">
+              {mode === 'manual_adjust' ? '設定為目標絕對餘額 ($)' : '輸入交易金額 ($) *'}
+            </label>
+            <input
+              type="number"
+              value={amountStr}
+              onChange={e => setAmountStr(e.target.value)}
+              placeholder="如: 1000"
+              className="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-base font-bold font-mono text-coffee-800 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100"
+            />
+          </div>
+
+          {/* 備註說明 */}
+          <div>
+            <label className="text-xs font-bold text-coffee-400 mb-1 block">作業備註或原因</label>
+            <input
+              type="text"
+              value={note}
+              onChange={e => setNote(e.target.value)}
+              placeholder={mode === 'topup' ? '如: 門市現金儲值享95折優惠' : '選填'}
+              className="w-full bg-white border border-gray-300 rounded-xl px-4 py-2.5 text-sm font-bold text-coffee-700 outline-none focus:border-emerald-600"
+            />
+          </div>
+        </div>
+
+        <div className="px-8 pb-8 pt-2">
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-md transition flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            <Check className="w-4 h-4" /> {saving ? '處理中...' : '確認執行作業'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 
 // ── Customer Form Modal ───────────────────────────────────────────────────────
 function CustomerFormModal({ shopId, initial, onClose }: {
