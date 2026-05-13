@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, Suspense, lazy } from 'react';
 import {
   ClipboardList,
   CalendarDays,
@@ -32,19 +32,19 @@ import { doc, getDoc, setDoc, onSnapshot, collection, query, where, getDocs } fr
 import { todayISO, monthISO, cn, uid } from './lib/utils';
 import { Settings, DailyReport, JournalEntry, COAItem } from './types';
 import { handleFirestoreError } from './lib/firebase';
-// Components (Inline for now to ensure visibility)
-// We'll move these to separate chunks if it gets too large
-import JournalView from './components/JournalView';
-import DailyView from './components/DailyView';
-import MonthlyView from './components/MonthlyView';
-import CostView from './components/CostView';
-import InventoryView from './components/InventoryView';
-import CustomerView from './components/CustomerView';
-import SettingsView from './components/settings/SettingsView';
-import HRView from './components/hr/HRView';
 import OperatorLockScreen from './components/auth/OperatorLockScreen';
 import { Role, Operator, Permissions } from './types';
 import { Lock } from 'lucide-react';
+
+// Lazy load heavy components
+const JournalView = lazy(() => import('./components/JournalView'));
+const DailyView = lazy(() => import('./components/DailyView'));
+const MonthlyView = lazy(() => import('./components/MonthlyView'));
+const CostView = lazy(() => import('./components/CostView'));
+const InventoryView = lazy(() => import('./components/InventoryView'));
+const CustomerView = lazy(() => import('./components/CustomerView'));
+const SettingsView = lazy(() => import('./components/settings/SettingsView'));
+const HRView = lazy(() => import('./components/hr/HRView'));
 
 const DEFAULT_SETTINGS: Settings = {
   giftItems: [
@@ -548,15 +548,21 @@ export default function App() {
             transition={{ duration: 0.3 }}
             className="h-full"
           >
-            {activeTab === 'hr' && <HRView forcedSubTab={globalSubTabs['hr']} shopId={shopId} operators={operators} settings={settings} />}
-            {activeTab === 'journal' && <JournalView forcedSubTab={globalSubTabs['journal']} selectedYear={selectedYear} shopId={shopId} settings={settings} />}
-            {activeTab === 'daily' && <DailyView forcedSubTab={globalSubTabs['daily']} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
-            {activeTab === 'pos' && <DailyView forcedSubTab={'pos'} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
-            {activeTab === 'customers' && <CustomerView shopId={shopId} settings={settings} />}
-            {activeTab === 'inventory' && <InventoryView forcedSubTab={globalSubTabs['inventory']} selectedYear={selectedYear} shopId={shopId} />}
-            {activeTab === 'monthly' && <MonthlyView forcedSubTab={globalSubTabs['monthly']} settings={settings} shopId={shopId} />}
-            {activeTab === 'cost' && <CostView settings={settings} shopId={shopId} />}
-            {activeTab === 'settings' && <SettingsView shopId={shopId} roles={roles} operators={operators} settings={settings} />}
+            <Suspense fallback={
+              <div className="flex items-center justify-center h-[50vh]">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-coffee-800"></div>
+              </div>
+            }>
+              {activeTab === 'hr' && <HRView forcedSubTab={globalSubTabs['hr']} shopId={shopId} operators={operators} settings={settings} />}
+              {activeTab === 'journal' && <JournalView forcedSubTab={globalSubTabs['journal']} selectedYear={selectedYear} shopId={shopId} settings={settings} />}
+              {activeTab === 'daily' && <DailyView forcedSubTab={globalSubTabs['daily']} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
+              {activeTab === 'pos' && <DailyView forcedSubTab={'pos'} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
+              {activeTab === 'customers' && <CustomerView shopId={shopId} settings={settings} />}
+              {activeTab === 'inventory' && <InventoryView forcedSubTab={globalSubTabs['inventory']} selectedYear={selectedYear} shopId={shopId} />}
+              {activeTab === 'monthly' && <MonthlyView forcedSubTab={globalSubTabs['monthly']} settings={settings} shopId={shopId} />}
+              {activeTab === 'cost' && <CostView settings={settings} shopId={shopId} />}
+              {activeTab === 'settings' && <SettingsView shopId={shopId} roles={roles} operators={operators} settings={settings} />}
+            </Suspense>
           </motion.div>
         </AnimatePresence>
       </main>

@@ -37,7 +37,6 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import Papa from 'papaparse';
 import { cn, normalizeDateKey } from '../lib/utils';
 import CashRegisterTab from './daily/CashRegisterTab';
 import SettingsTab from './daily/SettingsTab';

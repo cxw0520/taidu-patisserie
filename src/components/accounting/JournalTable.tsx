@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
 import { doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { JournalEntry, COAItem } from '../../types';
-import * as XLSX from 'xlsx';
 import { cn, uid } from '../../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -274,7 +273,8 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
         <h2 className="text-lg md:text-xl font-semibold text-gray-700">{selectedYear} 年度 普通日記簿</h2>
         <div className="flex flex-wrap gap-2">
           <button 
-            onClick={() => {
+            onClick={async () => {
+              const XLSX = await import('xlsx');
               const workbook = XLSX.utils.book_new();
               const worksheet = XLSX.utils.json_to_sheet(entries.map(e => ({
                 日期: e.date, 傳票編號: e.voucherNo, 總摘要: e.description, 借方總額: e.debitTotal, 貸方總額: e.creditTotal,

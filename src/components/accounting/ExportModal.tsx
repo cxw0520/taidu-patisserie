@@ -1,8 +1,4 @@
 import React, { useState } from 'react';
-import * as XLSX from 'xlsx';
-// We use dynamic import for html2pdf to avoid SSR/bundle issues if any, but since it's Vite, regular import is fine too.
-// html2pdf is a default export module
-import html2pdf from 'html2pdf.js';
 import { JournalEntry, COAItem } from '../../types';
 
 interface AccountBalance extends COAItem {
@@ -39,29 +35,36 @@ const calculateBalances = (entries: JournalEntry[], coa: COAItem[], start: Date 
 export default function ExportModal({ onClose, entries, coa, selectedYear }: { onClose: () => void, entries: JournalEntry[], coa: COAItem[], selectedYear: number }) {
   const [contentType, setContentType] = useState('journal');
   const [format, setFormat] = useState('pdf');
+  const [isExporting, setIsExporting] = useState(false);
   const currentYear = selectedYear;
 
-  const handleExport = () => {
-    if (contentType === 'raw') {
-      const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `dessert_full_backup_${new Date().toISOString().split('T')[0]}.json`;
-      a.click();
-      onClose();
-      return;
-    }
+  const handleExport = async () => {
+    setIsExporting(true);
+    try {
+      if (contentType === 'raw') {
+        const blob = new Blob([JSON.stringify(entries, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `dessert_full_backup_${new Date().toISOString().split('T')[0]}.json`;
+        a.click();
+        onClose();
+        return;
+      }
 
-    if (format === 'excel') {
-      exportToExcel();
-    } else {
-      exportToPdf();
+      if (format === 'excel') {
+        await exportToExcel();
+      } else {
+        await exportToPdf();
+      }
+      onClose();
+    } finally {
+      setIsExporting(false);
     }
-    onClose();
   };
 
-  const exportToExcel = () => {
+  const exportToExcel = async () => {
+    const XLSX = await import('xlsx');
     let data: any[] = [];
     let filename = '';
 
@@ -128,7 +131,8 @@ export default function ExportModal({ onClose, entries, coa, selectedYear }: { o
     XLSX.writeFile(wb, `${filename}_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
-  const exportToPdf = () => {
+  const exportToPdf = async () => {
+    const html2pdf = (await import('html2pdf.js')).default;
     const element = document.createElement('div');
     element.className = 'p-8 bg-white text-gray-800 font-sans';
     
@@ -314,8 +318,8 @@ export default function ExportModal({ onClose, entries, coa, selectedYear }: { o
             </div>
           </section>
 
-          <button onClick={handleExport} className="w-full py-4 bg-coffee-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-coffee-700 transition-all active:scale-[0.98] mt-4">
-            開始匯出 🚀
+          <button disabled={isExporting} onClick={handleExport} className="w-full py-4 bg-coffee-600 text-white rounded-xl font-bold text-lg shadow-lg hover:bg-coffee-700 transition-all active:scale-[0.98] mt-4 disabled:opacity-50 flex justify-center items-center gap-2">
+            {isExporting ? <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div> : '開始匯出 🚀'}
           </button>
         </div>
       </div>

@@ -4,7 +4,6 @@ import { Settings, DailyReport, Order, Customer } from '../../types';
 import { uid, fmt, cn, parseNum, normalizeDateKey, copyText } from '../../lib/utils';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, writeBatch, collection, query, onSnapshot } from 'firebase/firestore';
-import Papa from 'papaparse';
 import { UploadCloud, CheckCircle, Copy, AlertCircle, CalendarDays, FileUp, Wand2 } from 'lucide-react';
 import { upsertCustomerFromOrder, MergeConflictModal } from '../CustomerView';
 
@@ -64,10 +63,11 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
     return `${m[1]}-${String(Number(m[2])).padStart(2, '0')}-${String(Number(m[3])).padStart(2, '0')}`;
   };
 
-  const processImport = () => {
+  const processImport = async () => {
     const raw = importText.trim();
     if (!raw) return alert("請貼上資料");
 
+    const Papa = (await import('papaparse')).default;
     const { data } = Papa.parse(raw, { skipEmptyLines: 'greedy' });
     const rows = data as string[][];
 
