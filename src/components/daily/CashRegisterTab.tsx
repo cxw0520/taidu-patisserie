@@ -724,12 +724,54 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               </div>
             </div>
 
-            {/* Preorder mode banner */}
-            {checkoutData.pickupDate !== dailyData.date && (
-              <div className="px-4 py-2 bg-amber-50 border border-amber-200 rounded-xl text-xs font-bold text-amber-700 flex items-center gap-2">
-                ⚡ 預購模式：取貨日 {checkoutData.pickupDate} — 庫存限制已解除，可自由選取商品
+            {/* ── 銷售模式選擇器 (現場現購 vs 未來預購) ── */}
+            <div className="bg-white border border-coffee-200 rounded-2xl p-3 flex flex-wrap items-center justify-between gap-3 shadow-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-coffee-400">當前開單模式：</span>
+                <div className="flex bg-coffee-50 p-1 rounded-xl gap-1">
+                  <button
+                    onClick={() => setCheckoutData(prev => ({ ...prev, pickupDate: dailyData.date }))}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                      checkoutData.pickupDate === dailyData.date
+                        ? "bg-white text-coffee-800 shadow-xs"
+                        : "text-coffee-400 hover:text-coffee-600"
+                    )}
+                  >
+                    現場取貨 (受庫存限制)
+                  </button>
+                  <button
+                    onClick={() => {
+                      // 預設切換至隔日預購
+                      const tomorrow = new Date();
+                      tomorrow.setDate(tomorrow.getDate() + 1);
+                      const tomorrowStr = tomorrow.toISOString().split('T')[0];
+                      setCheckoutData(prev => ({ ...prev, pickupDate: prev.pickupDate === dailyData.date ? tomorrowStr : prev.pickupDate }));
+                    }}
+                    className={cn(
+                      "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
+                      checkoutData.pickupDate !== dailyData.date
+                        ? "bg-amber-500 text-white shadow-xs"
+                        : "text-coffee-400 hover:text-coffee-600"
+                    )}
+                  >
+                    未來預購 (無庫存上限)
+                  </button>
+                </div>
               </div>
-            )}
+
+              {checkoutData.pickupDate !== dailyData.date && (
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-bold text-amber-700">取貨日期：</label>
+                  <input
+                    type="date"
+                    value={checkoutData.pickupDate}
+                    onChange={e => setCheckoutData(prev => ({ ...prev, pickupDate: e.target.value }))}
+                    className="bg-amber-50 border border-amber-200 rounded-xl px-2.5 py-1 text-xs font-bold text-amber-800 outline-none focus:border-amber-400"
+                  />
+                </div>
+              )}
+            </div>
 
             <div className="flex-1 overflow-y-auto pr-2 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 gap-3">
               {allItems.map(item => {
