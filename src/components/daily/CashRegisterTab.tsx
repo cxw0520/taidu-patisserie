@@ -54,7 +54,6 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   const [loadedOrders, setLoadedOrders] = useState<LoadedOrder[]>([]);
   const [orderSearchModal, setOrderSearchModal] = useState(false);
   const [checkoutModal, setCheckoutModal] = useState(false);
-  const [expenseModal, setExpenseModal] = useState(false);
   const [openShiftModal, setOpenShiftModal] = useState(false);
   const [closeShiftModal, setCloseShiftModal] = useState(false);
   const [editQtyModal, setEditQtyModal] = useState<{index: number, qty: string} | null>(null);
@@ -82,13 +81,6 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     receivedAmt: 0,
     pickupDate: dailyData.date
   });
-
-
-  const [expenseData, setExpenseData] = useState({
-    amount: 0,
-    reason: ''
-  });
-
   const [isEditing, setIsEditing] = useState(false);
   const [editMemo, setEditMemo] = useState('');
   const [isExporting, setIsExporting] = useState(false);
@@ -151,23 +143,6 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     });
     setOpenShiftModal(false);
     setCurrencyForm(DEFAULT_CURRENCY);
-  };
-
-  const handleAddExpense = () => {
-    const newExpense: CashExpense = {
-      id: uid(),
-      amount: expenseData.amount,
-      reason: expenseData.reason,
-      time: new Date().toLocaleTimeString()
-    };
-    updateDaily({
-      cashRegister: {
-        ...shift,
-        expenses: [...shift.expenses, newExpense]
-      }
-    });
-    setExpenseModal(false);
-    setExpenseData({ amount: 0, reason: '' });
   };
 
   const handleTopup = async () => {
@@ -710,7 +685,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                       {otherCashSales > 0 && (
                         <div className="flex justify-between text-sm text-amber-600"><span>+ 其他現結 (匯入/手動):</span> <span className="font-mono">${fmt(otherCashSales)}</span></div>
                       )}
-                      <div className="flex justify-between text-sm text-red-600"><span>- 現金支出紀錄:</span> <span className="font-mono">-${fmt(currentExpenses)}</span></div>
+                      {currentExpenses > 0 && (
+                        <div className="flex justify-between text-sm text-red-600"><span>- 現金支出紀錄:</span> <span className="font-mono">-${fmt(currentExpenses)}</span></div>
+                      )}
                       <div className="border-t-2 border-gray-800 pt-2 flex justify-between font-bold text-lg">
                         <span>應有現金金額:</span> 
                         <span className="font-mono">${fmt(currentExpected)}</span>
@@ -788,7 +765,6 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                   >
                     修改閉帳盤點
                   </button>
-                   <button onClick={() => setExpenseModal(true)} className="w-full py-3 bg-white border border-coffee-200 rounded-xl font-bold hover:bg-coffee-50">修改支出紀錄</button>
                 </div>
               </div>
               <div className="space-y-4">
@@ -830,12 +806,6 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     <Monitor className="w-4 h-4" /> 回戰情室
                   </button>
                 )}
-                <button
-                  onClick={() => setExpenseModal(true)}
-                  className="px-4 py-2 bg-amber-100 text-amber-700 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-amber-200 transition-all"
-                >
-                  <TrendingDown className="w-4 h-4" /> 支出紀錄
-                </button>
                 <button
                   onClick={() => setOrderSearchModal(true)}
                   className="px-4 py-2 bg-blue-50 text-blue-700 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-blue-100 transition-all border border-blue-100"
@@ -1409,47 +1379,6 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
         )}
       </AnimatePresence>
 
-      {/* Expense Modal */}
-      <AnimatePresence>
-        {expenseModal && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setExpenseModal(false)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel w-full max-w-sm bg-white border-0 shadow-2xl rounded-3xl relative z-10 p-8 space-y-6">
-              <h3 className="text-xl font-bold text-coffee-800 flex items-center gap-2">
-                <TrendingDown className="w-5 h-5 text-amber-500" /> 收銀機支出紀錄
-              </h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="text-xs font-bold text-coffee-400 mb-1 block">支出金額</label>
-                  <input 
-                    type="number" 
-                    value={expenseData.amount || ''} 
-                    onChange={e => setExpenseData({...expenseData, amount: Number(e.target.value)})}
-                    className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-3 text-xl font-bold text-rose-brand outline-none"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-bold text-coffee-400 mb-1 block">支出原因</label>
-                  <input 
-                    type="text" 
-                    placeholder="如：採買、雜支、退款"
-                    value={expenseData.reason} 
-                    onChange={e => setExpenseData({...expenseData, reason: e.target.value})}
-                    className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-3 text-sm font-bold text-coffee-700 outline-none"
-                  />
-                </div>
-              </div>
-              <button 
-                onClick={handleAddExpense}
-                className="w-full py-4 bg-amber-500 text-white rounded-2xl font-bold shadow-lg hover:bg-amber-600 transition-all active:scale-95"
-              >
-                儲存支出
-              </button>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       {/* ── Topup Modal ── */}
       <AnimatePresence>
         {topupModal && (
@@ -1734,10 +1663,12 @@ function CurrencyModal({ title, onClose, onSubmit, currency, setCurrency, isClos
                   <span className="opacity-60">本日現金銷售</span>
                   <span className="font-mono text-mint-brand">+${fmt(cashSales)}</span>
                 </div>
-                <div className="flex justify-between text-sm">
-                  <span className="opacity-60">合計支出</span>
-                  <span className="font-mono text-rose-brand">-${fmt(totalExpenses)}</span>
-                </div>
+                {totalExpenses > 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="opacity-60">合計支出</span>
+                    <span className="font-mono text-rose-brand">-${fmt(totalExpenses)}</span>
+                  </div>
+                )}
                 <div className="h-px bg-white/10 my-2" />
                 <div className="flex justify-between text-sm font-bold">
                   <span className="opacity-60">應有現金金額</span>
