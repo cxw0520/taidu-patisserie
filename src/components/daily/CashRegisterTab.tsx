@@ -52,6 +52,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   const [closeShiftModal, setCloseShiftModal] = useState(false);
   const [editQtyModal, setEditQtyModal] = useState<{index: number, qty: string} | null>(null);
   const [finalCheckModal, setFinalCheckModal] = useState<{order: Order, change: number, received: number} | null>(null);
+  const [selectedCust, setSelectedCust] = useState<import('../../types').Customer | null>(null);
   // Keypad state for checkout modal
   const [receivedInput, setReceivedInput] = useState('');
 
@@ -64,6 +65,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     receivedAmt: 0,
     pickupDate: dailyData.date
   });
+
 
   const [expenseData, setExpenseData] = useState({
     amount: 0,
@@ -169,7 +171,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
         note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨`,
         source: 'pos',
         orderType: 'prepayment',
-        pickupDate: checkoutData.pickupDate
+        pickupDate: checkoutData.pickupDate,
+        customerId: selectedCust ? selectedCust.id : undefined
       };
       onAddOrder(prepaymentOrder);
 
@@ -190,7 +193,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           source: 'pos',
           orderType: 'pickup',
           pendingPickup: true,
-          pickupDate: checkoutData.pickupDate
+          pickupDate: checkoutData.pickupDate,
+          customerId: selectedCust ? selectedCust.id : undefined
         };
         onAddFutureOrder(checkoutData.pickupDate, pickupOrder);
       }
@@ -210,7 +214,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
         note: `收銀機交易 - ${checkoutData.paymentMethod}`,
         source: 'pos',
         orderType: 'normal',
-        pickupDate: dailyData.date
+        pickupDate: dailyData.date,
+        customerId: selectedCust ? selectedCust.id : undefined
       };
       onAddOrder(newOrder);
     }
@@ -224,6 +229,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     setCart([]);
     setCheckoutModal(false);
     setReceivedInput('');
+    setSelectedCust(null);
     setCheckoutData({
       buyer: '現客',
       phone: '',
@@ -900,24 +906,46 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     customers={customers}
                     phoneInput={checkoutData.phone}
                     setPhoneInput={phone => setCheckoutData({ ...checkoutData, phone })}
-                    onSelectCustomer={c => setCheckoutData({ ...checkoutData, buyer: c.name, phone: c.phone })}
+                    onSelectCustomer={c => {
+                      setSelectedCust(c);
+                      setCheckoutData({ ...checkoutData, buyer: c.name, phone: c.phone });
+                    }}
                   />
 
-                  <div className="grid grid-cols-3 gap-2">
-                    {(settings.paymentMethods || ['現結', '匯款', '未結帳款']).map(m => (
-                      <button
-                        key={m}
-                        onClick={() => setCheckoutData({...checkoutData, paymentMethod: m as any})}
-                        className={cn(
-                          "py-2 rounded-xl text-xs font-bold border transition-all",
-                          checkoutData.paymentMethod === m
-                            ? "bg-rose-brand border-rose-brand text-white shadow-md shadow-rose-100"
-                            : "bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300"
-                        )}
-                      >
-                        {m}
-                      </button>
-                    ))}
+                  <div>
+                    <div className="flex justify-between items-center mb-1.5">
+                      <label className="text-xs font-bold text-coffee-400 block">付款方式</label>
+                      {selectedCust && (
+                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                          儲值餘額: ${fmt(selectedCust.creditBalance || 0)}
+                        </span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {Array.from(new Set([...(settings.paymentMethods || ['現結', '匯款', '未結帳款']), '儲值金扣款'])).map(m => (
+                        <button
+                          key={m}
+                          onClick={() => {
+                            if (m === '儲值金扣款' && selectedCust) {
+                              const bal = Number(selectedCust.creditBalance || 0);
+                              const targetAmt = totalCartAmt - checkoutData.discAmt;
+                              if (targetAmt > bal) {
+                                alert(`提醒：顧客儲值餘額 ($${bal}) 小於結帳應付總計 ($${targetAmt})`);
+                              }
+                            }
+                            setCheckoutData({...checkoutData, paymentMethod: m as any});
+                          }}
+                          className={cn(
+                            "py-2 rounded-xl text-[11px] font-bold border transition-all truncate px-1",
+                            checkoutData.paymentMethod === m
+                              ? m === '儲值金扣款' ? "bg-emerald-600 border-emerald-600 text-white shadow-xs" : "bg-rose-brand border-rose-brand text-white shadow-xs"
+                              : "bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300"
+                          )}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   <div className="flex flex-col">
