@@ -129,7 +129,7 @@ export interface Order {
   source?: 'pos' | 'manual' | 'import';
   arCollectedCash?: number;
   arCollectedRemit?: number;
-  orderType?: 'normal' | 'prepayment' | 'pickup';
+  orderType?: 'normal' | 'prepayment' | 'pickup' | 'topup';
   pendingPickup?: boolean;
   customerId?: string; // 連動 CRM 的顧客 ID
 }

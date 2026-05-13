@@ -61,6 +61,15 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   const [finalCheckModal, setFinalCheckModal] = useState<{order: Order, change: number, received: number, creditBalanceAfter?: number} | null>(null);
   const [selectedCust, setSelectedCust] = useState<Customer | null>(null);
   const [creditError, setCreditError] = useState<string | null>(null);
+  // Topup modal state
+  const [topupModal, setTopupModal] = useState(false);
+  const [topupPhone, setTopupPhone] = useState('');
+  const [topupCust, setTopupCust] = useState<Customer | null>(null);
+  const [topupAmt, setTopupAmt] = useState('');
+  const [topupMethod, setTopupMethod] = useState<'現結' | '匯款'>('現結');
+  const [topupLoading, setTopupLoading] = useState(false);
+  const [topupError, setTopupError] = useState<string | null>(null);
+  const [topupSuccess, setTopupSuccess] = useState<{name: string, amt: number, balAfter: number} | null>(null);
   // Keypad state for checkout modal
   const [receivedInput, setReceivedInput] = useState('');
 
@@ -159,6 +168,69 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     });
     setExpenseModal(false);
     setExpenseData({ amount: 0, reason: '' });
+  };
+
+  const handleTopup = async () => {
+    const amt = Number(topupAmt);
+    if (!topupCust || !topupCust.id) { setTopupError('請先搜尋並選擇顧客'); return; }
+    if (!amt || amt <= 0) { setTopupError('請輸入有效的儲值金額'); return; }
+    if (!shopId) { setTopupError('找不到店舖資訊'); return; }
+
+    setTopupLoading(true);
+    setTopupError(null);
+    try {
+      let balAfter = 0;
+      const custRef = doc(db, 'shops', shopId, 'customers', topupCust.id);
+      await runTransaction(db, async (tx) => {
+        const snap = await tx.get(custRef);
+        if (!snap.exists()) throw new Error('顧客資料不存在');
+        const data = snap.data();
+        const currentBal = Number(data.creditBalance || 0);
+        balAfter = currentBal + amt;
+        const log: CreditLog = {
+          id: uid(),
+          timestamp: new Date().toISOString(),
+          type: 'topup',
+          amount: amt,
+          balanceAfter: balAfter,
+          note: `POS 收銀機儲值 (${topupMethod})`
+        };
+        tx.update(custRef, {
+          creditBalance: balAfter,
+          creditLogs: [...(data.creditLogs || []), log],
+          updatedAt: new Date().toISOString()
+        });
+      });
+
+      // Write a topup order to daily report for cash register tracking
+      const topupOrder: Order = {
+        id: uid(),
+        buyer: topupCust.name || topupCust.phone,
+        phone: topupCust.phone,
+        address: '',
+        items: {},
+        prodAmt: 0,
+        shipAmt: 0,
+        discAmt: 0,
+        actualAmt: amt,
+        status: topupMethod,
+        note: `儲值金充值 - ${topupCust.name || topupCust.phone}`,
+        source: 'pos',
+        orderType: 'topup',
+        customerId: topupCust.id
+      };
+      onAddOrder(topupOrder);
+
+      setTopupSuccess({ name: topupCust.name || topupCust.phone, amt, balAfter });
+      setTopupPhone('');
+      setTopupCust(null);
+      setTopupAmt('');
+      setTopupMethod('現結');
+    } catch (err: any) {
+      setTopupError(err.message || '儲值失敗，請重試');
+    } finally {
+      setTopupLoading(false);
+    }
   };
 
   const handleLoadOrders = (loaded: LoadedOrder[]) => {
@@ -771,6 +843,12 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                   <Search className="w-4 h-4" /> 查詢訂單
                 </button>
                 <button
+                  onClick={() => { setTopupModal(true); setTopupSuccess(null); setTopupError(null); }}
+                  className="px-4 py-2 bg-emerald-50 text-emerald-700 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-emerald-100 transition-all border border-emerald-100"
+                >
+                  <DollarSign className="w-4 h-4" /> 儲值充值
+                </button>
+                <button
                   onClick={() => setCloseShiftModal(true)}
                   className="px-4 py-2 bg-coffee-800 text-white rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-coffee-900 transition-all"
                 >
@@ -1367,6 +1445,142 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               >
                 儲存支出
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Topup Modal ── */}
+      <AnimatePresence>
+        {topupModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setTopupModal(false)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel w-full max-w-sm bg-white border-0 shadow-2xl rounded-3xl relative z-10 overflow-hidden">
+              <div className="flex justify-between items-center px-7 pt-6 pb-4 border-b border-coffee-50">
+                <h3 className="text-lg font-bold text-coffee-800 flex items-center gap-2">
+                  <DollarSign className="w-5 h-5 text-emerald-500" /> 儲值充值
+                </h3>
+                <button onClick={() => setTopupModal(false)} className="p-2 hover:bg-coffee-50 rounded-full"><X className="w-5 h-5 text-coffee-400" /></button>
+              </div>
+
+              {topupSuccess ? (
+                <div className="p-8 text-center space-y-4">
+                  <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto">
+                    <CheckCircle2 className="w-8 h-8 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="font-bold text-coffee-800 text-lg">{topupSuccess.name}</p>
+                    <p className="text-emerald-600 font-bold text-2xl font-mono mt-1">+${fmt(topupSuccess.amt)}</p>
+                    <p className="text-xs text-coffee-400 mt-1">儲值後餘額：<span className="font-bold text-coffee-700">${fmt(topupSuccess.balAfter)}</span></p>
+                  </div>
+                  <div className="p-3 bg-emerald-50 rounded-xl text-xs font-bold text-emerald-700">
+                    ✓ 已記入當日收銀機帳目
+                  </div>
+                  <div className="flex gap-3">
+                    <button onClick={() => { setTopupSuccess(null); }} className="flex-1 py-3 bg-coffee-100 text-coffee-700 rounded-2xl font-bold hover:bg-coffee-200 transition-all">繼續儲值</button>
+                    <button onClick={() => setTopupModal(false)} className="flex-1 py-3 bg-emerald-600 text-white rounded-2xl font-bold hover:bg-emerald-700 transition-all">完成</button>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-7 space-y-4">
+                  {/* Phone search */}
+                  <div>
+                    <label className="text-xs font-bold text-coffee-400 mb-1.5 block">搜尋顧客電話</label>
+                    <input
+                      type="tel"
+                      value={topupPhone}
+                      onChange={e => {
+                        setTopupPhone(e.target.value);
+                        const found = customers.find(c => c.phone === e.target.value || c.phone?.includes(e.target.value));
+                        setTopupCust(e.target.value.length >= 4 && found ? found : null);
+                      }}
+                      placeholder="輸入電話號碼"
+                      className="w-full px-4 py-3 bg-coffee-50 border border-coffee-100 rounded-xl text-sm font-bold text-coffee-700 outline-none focus:border-emerald-400"
+                    />
+                    {/* Live results */}
+                    {topupPhone.length >= 4 && (
+                      <div className="mt-1.5 space-y-1">
+                        {customers.filter(c => (c.phone || '').includes(topupPhone)).slice(0, 4).map(c => (
+                          <button
+                            key={c.id}
+                            onClick={() => { setTopupCust(c); setTopupPhone(c.phone); }}
+                            className={cn(
+                              'w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all border',
+                              topupCust?.id === c.id ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-white border-coffee-100 text-coffee-700 hover:border-coffee-300'
+                            )}
+                          >
+                            <span>{c.name}</span>
+                            <span className="text-coffee-400 ml-2 font-mono">{c.phone}</span>
+                            <span className="ml-2 text-emerald-600">餘額 ${fmt(c.creditBalance || 0)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {topupCust && (
+                    <div className="p-3 bg-emerald-50 rounded-xl flex justify-between items-center">
+                      <span className="text-sm font-bold text-emerald-800">{topupCust.name}</span>
+                      <span className="text-sm font-bold text-emerald-600 font-mono">目前餘額 ${fmt(topupCust.creditBalance || 0)}</span>
+                    </div>
+                  )}
+
+                  {/* Amount */}
+                  <div>
+                    <label className="text-xs font-bold text-coffee-400 mb-1.5 block">儲值金額</label>
+                    <input
+                      type="number"
+                      value={topupAmt}
+                      onChange={e => setTopupAmt(e.target.value)}
+                      placeholder="例：500"
+                      className="w-full px-4 py-3 bg-coffee-50 border border-coffee-100 rounded-xl text-xl font-bold text-emerald-700 font-mono outline-none focus:border-emerald-400"
+                    />
+                    {/* Quick amounts */}
+                    <div className="flex gap-2 mt-2">
+                      {[500, 1000, 2000, 3000].map(q => (
+                        <button key={q} onClick={() => setTopupAmt(String(q))} className="flex-1 py-1.5 text-xs font-bold bg-coffee-50 border border-coffee-100 rounded-lg hover:bg-emerald-50 hover:border-emerald-200 hover:text-emerald-700 transition-all">
+                          ${q}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Payment method */}
+                  <div>
+                    <label className="text-xs font-bold text-coffee-400 mb-1.5 block">付款方式</label>
+                    <div className="flex gap-2">
+                      {(['現結', '匯款'] as const).map(m => (
+                        <button
+                          key={m}
+                          onClick={() => setTopupMethod(m)}
+                          className={cn(
+                            'flex-1 py-2.5 rounded-xl text-sm font-bold border transition-all',
+                            topupMethod === m ? 'bg-emerald-600 border-emerald-600 text-white shadow-sm' : 'bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300'
+                          )}
+                        >
+                          {m}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {topupError && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2">
+                      <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                      <span className="text-xs font-bold text-red-600">{topupError}</span>
+                    </div>
+                  )}
+
+                  <button
+                    onClick={handleTopup}
+                    disabled={topupLoading || !topupCust || !topupAmt}
+                    className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-700 transition-all active:scale-95 disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
+                  >
+                    {topupLoading ? '處理中...' : `確認儲值 ${topupAmt ? `$${fmt(Number(topupAmt))}` : ''}`}
+                    {!topupLoading && <CheckCircle2 className="w-5 h-5" />}
+                  </button>
+                </div>
+              )}
             </motion.div>
           </div>
         )}
