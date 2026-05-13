@@ -18,7 +18,7 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
   const [scrapQty, setScrapQty] = useState<number | ''>('');
 
   const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
-    name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: ''
+    name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '', vendors: []
   });
 
   const [vendors, setVendors] = useState<{id: string, name: string}[]>([]);
@@ -65,16 +65,18 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
     }
     await setDoc(doc(db, 'shops', shopId, 'materials', id), payload as Material, { merge: true });
     setIsAddingMode(false);
-    setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '' });
+    setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '', vendors: [] });
   };
 
   const openCreateMode = () => {
-    setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '' });
+    setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '', vendors: [] });
     setIsAddingMode(true);
   };
 
   const openEditMode = (m: Material) => {
-    setNewMaterial({ ...m });
+    // Forward-compatibility: ensure vendors array exists
+    const vendorsArray = m.vendors ? [...m.vendors] : (m.vendor ? [m.vendor] : []);
+    setNewMaterial({ ...m, vendors: vendorsArray });
     setIsAddingMode(true);
   };
 
@@ -203,11 +205,41 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                       </select>
                     </div>
                     <div>
-                      <label className="text-[10px] font-bold text-coffee-400 block mb-1">所屬廠商 (進貨來源)</label>
-                      <select value={newMaterial.vendor || ''} onChange={e => setNewMaterial({...newMaterial, vendor: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400">
-                        <option value="">無指定 / 共用</option>
-                        {vendors.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
-                      </select>
+                      <label className="text-[10px] font-bold text-coffee-400 block mb-1">所屬廠商 (可複選)</label>
+                      <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto p-2 border border-coffee-200 rounded-xl bg-white">
+                        {vendors.length === 0 && <span className="text-xs text-coffee-300 p-1">尚未建立廠商資料</span>}
+                        {vendors.map(v => {
+                          const isSelected = newMaterial.vendors?.includes(v.name) || newMaterial.vendor === v.name;
+                          return (
+                            <label key={v.id} className={cn(
+                              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors border",
+                              isSelected ? "bg-coffee-100 text-coffee-800 border-coffee-300" : "bg-gray-50 text-gray-500 border-transparent hover:bg-gray-100"
+                            )}>
+                              <input 
+                                type="checkbox" 
+                                className="hidden"
+                                checked={isSelected}
+                                onChange={(e) => {
+                                  const currentVendors = [...(newMaterial.vendors || [])];
+                                  if (newMaterial.vendor && !currentVendors.includes(newMaterial.vendor)) {
+                                    currentVendors.push(newMaterial.vendor);
+                                  }
+                                  
+                                  let nextVendors;
+                                  if (e.target.checked) {
+                                    nextVendors = [...new Set([...currentVendors, v.name])];
+                                  } else {
+                                    nextVendors = currentVendors.filter(name => name !== v.name);
+                                  }
+                                  setNewMaterial({ ...newMaterial, vendors: nextVendors, vendor: '' }); // Clear legacy vendor
+                                }} 
+                              />
+                              {isSelected && <CheckCircle2 className="w-3 h-3 text-coffee-600" />}
+                              {v.name}
+                            </label>
+                          );
+                        })}
+                      </div>
                     </div>
                     <div>
                       <label className="text-[10px] font-bold text-coffee-400 block mb-1">材料名稱 *</label>
@@ -331,7 +363,11 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
                       )}
                     </td>
                     <td className="py-4 px-6 font-bold text-coffee-800 text-base">
-                      {m.vendor ? <span className="text-coffee-400 font-normal mr-1 text-sm">[{m.vendor}]</span> : null}
+                      {m.vendors && m.vendors.length > 0 ? (
+                        <span className="text-coffee-400 font-normal mr-1 text-sm">[{m.vendors.join(', ')}]</span>
+                      ) : m.vendor ? (
+                        <span className="text-coffee-400 font-normal mr-1 text-sm">[{m.vendor}]</span>
+                      ) : null}
                       {m.name}
                     </td>
                     <td className="py-4 px-6"><span className="text-xs font-bold text-coffee-500 bg-coffee-100 px-2 py-1 rounded-lg">{m.category}</span></td>

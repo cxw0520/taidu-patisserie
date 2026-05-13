@@ -35,7 +35,7 @@ export default function PurchasingTab({
   }, [shopId]);
 
   const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
-    name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0
+    name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '', vendors: []
   });
 
   const [formData, setFormData] = useState<Partial<Purchase>>({
@@ -104,7 +104,7 @@ export default function PurchasingTab({
     }
     await setDoc(doc(db, 'shops', shopId, 'materials', id), payload);
     setIsMatModalOpen(false);
-    setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0 });
+    setNewMaterial({ name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '', vendors: [] });
   };
 
   const addLine = () => {
@@ -465,10 +465,15 @@ export default function PurchasingTab({
                         <select required value={line.materialId} onChange={e => updateLine(line.id, { materialId: e.target.value })} className="w-full bg-coffee-50 border border-coffee-50 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none">
                           <option value="">請選擇...</option>
                           {materials
-                            .filter(m => !formData.vendor || !m.vendor || m.vendor === formData.vendor)
+                            .filter(m => {
+                              if (!formData.vendor) return true;
+                              const hasVendors = m.vendors && m.vendors.length > 0;
+                              if (hasVendors) return m.vendors!.includes(formData.vendor);
+                              return !m.vendor || m.vendor === formData.vendor;
+                            })
                             .map(m => (
                               <option key={m.id} value={m.id}>
-                                [{m.category}] {m.vendor ? `[${m.vendor}] ` : ''}{m.name}
+                                [{m.category}] {m.vendors && m.vendors.length > 0 ? `[${m.vendors.join(', ')}] ` : (m.vendor ? `[${m.vendor}] ` : '')}{m.name}
                               </option>
                             ))}
                         </select>
@@ -582,11 +587,41 @@ export default function PurchasingTab({
                         </select>
                       </div>
                       <div>
-                        <label className="text-[10px] font-bold text-coffee-400 block mb-1">所屬廠商 (進貨來源)</label>
-                        <select value={newMaterial.vendor || ''} onChange={e => setNewMaterial({...newMaterial, vendor: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400">
-                          <option value="">無指定 / 共用</option>
-                          {vendors.map(v => <option key={v.id} value={v.name}>{v.name}</option>)}
-                        </select>
+                        <label className="text-[10px] font-bold text-coffee-400 block mb-1">所屬廠商 (可複選)</label>
+                        <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto p-2 border border-coffee-200 rounded-xl bg-white">
+                          {vendors.length === 0 && <span className="text-xs text-coffee-300 p-1">尚未建立廠商資料</span>}
+                          {vendors.map(v => {
+                            const isSelected = newMaterial.vendors?.includes(v.name) || newMaterial.vendor === v.name;
+                            return (
+                              <label key={v.id} className={cn(
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors border",
+                                isSelected ? "bg-coffee-100 text-coffee-800 border-coffee-300" : "bg-gray-50 text-gray-500 border-transparent hover:bg-gray-100"
+                              )}>
+                                <input 
+                                  type="checkbox" 
+                                  className="hidden"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    const currentVendors = [...(newMaterial.vendors || [])];
+                                    if (newMaterial.vendor && !currentVendors.includes(newMaterial.vendor)) {
+                                      currentVendors.push(newMaterial.vendor);
+                                    }
+                                    
+                                    let nextVendors;
+                                    if (e.target.checked) {
+                                      nextVendors = [...new Set([...currentVendors, v.name])];
+                                    } else {
+                                      nextVendors = currentVendors.filter(name => name !== v.name);
+                                    }
+                                    setNewMaterial({ ...newMaterial, vendors: nextVendors, vendor: '' }); // Clear legacy vendor
+                                  }} 
+                                />
+                                {isSelected && <CheckCircle2 className="w-3 h-3 text-coffee-600" />}
+                                {v.name}
+                              </label>
+                            );
+                          })}
+                        </div>
                       </div>
                       <div>
                         <label className="text-[10px] font-bold text-coffee-400 block mb-1">材料名稱 *</label>

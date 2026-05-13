@@ -90,6 +90,22 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
     }
   };
 
+  const fundSummaries = React.useMemo(() => {
+    const sums: Record<string, number> = {};
+    fundingSources.forEach(fs => sums[fs.id] = 0);
+    
+    records.forEach(r => {
+      if (!r.isTransfer && r.fundingSourceId && sums[r.fundingSourceId] !== undefined) {
+        sums[r.fundingSourceId] += r.totalAmount;
+      }
+    });
+    
+    return fundingSources.map(fs => ({
+      ...fs,
+      totalExpense: sums[fs.id] || 0
+    }));
+  }, [records, fundingSources]);
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center bg-white p-6 rounded-3xl shadow-sm border border-coffee-100">
@@ -124,6 +140,20 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
               </button>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* 資金來源支出總額摘要 */}
+      <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        {fundSummaries.map(fs => (
+          <div key={fs.id} className="bg-white p-4 rounded-3xl border border-coffee-100 shadow-sm flex flex-col justify-between items-start gap-1">
+            <span className="text-[11px] font-bold text-coffee-400 bg-coffee-50 px-2 py-0.5 rounded-md">{fs.name}</span>
+            <span className="text-xl font-serif-brand font-bold text-rose-brand">${fmt(fs.totalExpense)}</span>
+          </div>
+        ))}
+        <div className="bg-coffee-800 p-4 rounded-3xl shadow-sm flex flex-col justify-between items-start gap-1">
+          <span className="text-[11px] font-bold text-coffee-200 bg-coffee-900/50 px-2 py-0.5 rounded-md">年度總支出</span>
+          <span className="text-xl font-serif-brand font-bold text-white">${fmt(fundSummaries.reduce((sum, fs) => sum + fs.totalExpense, 0))}</span>
         </div>
       </div>
 
