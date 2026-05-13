@@ -800,7 +800,11 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                       if (checkoutData.pickupDate !== dailyData.date) return; // 已在預購模式，不重複切換
                       const tomorrow = new Date();
                       tomorrow.setDate(tomorrow.getDate() + 1);
-                      const tomorrowStr = tomorrow.toISOString().split('T')[0];
+                      // 用本地時間格式，避免 toISOString() 的 UTC 時區偏差
+                      const y = tomorrow.getFullYear();
+                      const m = String(tomorrow.getMonth() + 1).padStart(2, '0');
+                      const d = String(tomorrow.getDate()).padStart(2, '0');
+                      const tomorrowStr = `${y}-${m}-${d}`;
                       setCheckoutData(prev => ({ ...prev, pickupDate: tomorrowStr }));
                     }}
                     className={cn(
