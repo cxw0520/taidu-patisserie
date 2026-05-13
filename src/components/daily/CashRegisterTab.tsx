@@ -797,11 +797,11 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                   </button>
                   <button
                     onClick={() => {
-                      // 預設切換至隔日預購
+                      if (checkoutData.pickupDate !== dailyData.date) return; // 已在預購模式，不重複切換
                       const tomorrow = new Date();
                       tomorrow.setDate(tomorrow.getDate() + 1);
                       const tomorrowStr = tomorrow.toISOString().split('T')[0];
-                      setCheckoutData(prev => ({ ...prev, pickupDate: prev.pickupDate === dailyData.date ? tomorrowStr : prev.pickupDate }));
+                      setCheckoutData(prev => ({ ...prev, pickupDate: tomorrowStr }));
                     }}
                     className={cn(
                       "px-3 py-1.5 rounded-lg text-xs font-bold transition-all",
@@ -911,29 +911,46 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               {loadedOrders.length > 0 && (
                 <div className="space-y-2">
                   <div className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest px-1">已載入當日訂單</div>
-                  {loadedOrders.map(lo => (
-                    <div key={lo.order.id} className="p-3 bg-blue-50 border border-blue-100 rounded-2xl">
-                      <div className="flex justify-between items-start">
-                        <div className="flex-1 min-w-0">
-                          <div className="text-xs font-bold text-blue-800 truncate">{lo.order.buyer || '（無姓名）'}</div>
-                          <div className="text-[10px] text-blue-400 font-mono">{lo.order.phone}</div>
-                          {lo.order.note && <div className="text-[10px] text-blue-300 mt-0.5 truncate">{lo.order.note}</div>}
-                        </div>
-                        <div className="text-right shrink-0 ml-2">
-                          <div className={cn('text-sm font-bold font-mono', lo.collectAmt === 0 ? 'text-emerald-600' : 'text-rose-brand')}>
-                            {lo.collectAmt === 0 ? '$0 (免收)' : `$${fmt(lo.collectAmt)}`}
+                  {loadedOrders.map(lo => {
+                    // Resolve item names from order.items (Record<itemId, qty>)
+                    const orderLines = Object.entries(lo.order.items || {}).map(([id, qty]) => {
+                      const found = allItems.find(i => i.id === id);
+                      return { name: found?.name || id, qty: Number(qty) };
+                    });
+                    return (
+                      <div key={lo.order.id} className="p-3 bg-blue-50 border border-blue-100 rounded-2xl">
+                        <div className="flex justify-between items-start">
+                          <div className="flex-1 min-w-0">
+                            <div className="text-xs font-bold text-blue-800 truncate">{lo.order.buyer || '（無姓名）'}</div>
+                            <div className="text-[10px] text-blue-400 font-mono">{lo.order.phone}</div>
                           </div>
-                          <div className="text-[10px] text-blue-400">{lo.order.status}</div>
+                          <div className="text-right shrink-0 ml-2">
+                            <div className={cn('text-sm font-bold font-mono', lo.collectAmt === 0 ? 'text-emerald-600' : 'text-rose-brand')}>
+                              {lo.collectAmt === 0 ? '$0 (免收)' : `$${fmt(lo.collectAmt)}`}
+                            </div>
+                            <div className="text-[10px] text-blue-400">{lo.order.status}</div>
+                          </div>
+                          <button
+                            onClick={() => setLoadedOrders(prev => prev.filter(l => l.order.id !== lo.order.id))}
+                            className="ml-2 p-1 hover:bg-blue-100 rounded-lg text-blue-300 hover:text-blue-500 transition-colors"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
                         </div>
-                        <button
-                          onClick={() => setLoadedOrders(prev => prev.filter(l => l.order.id !== lo.order.id))}
-                          className="ml-2 p-1 hover:bg-blue-100 rounded-lg text-blue-300 hover:text-blue-500 transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
+                        {/* Item breakdown */}
+                        {orderLines.length > 0 && (
+                          <div className="mt-2 pt-2 border-t border-blue-100 space-y-0.5">
+                            {orderLines.map((line, i) => (
+                              <div key={i} className="flex justify-between text-[11px] text-blue-600 font-medium">
+                                <span className="truncate">{line.name}</span>
+                                <span className="font-mono font-bold shrink-0 ml-2">× {line.qty}</span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                   {cart.length > 0 && <div className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest px-1 pt-1">新增品項</div>}
                 </div>
               )}
