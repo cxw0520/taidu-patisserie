@@ -1,26 +1,30 @@
 import React, { useState, useMemo } from 'react';
-import { DailyReport, Settings, Order, CashRegisterShift, CurrencyBreakdown, CashExpense, Item } from '../../types';
+import { DailyReport, Settings, Order, CashRegisterShift, CurrencyBreakdown, CashExpense, Item, Customer, CreditLog } from '../../types';
 import { fmt, uid } from '../../lib/utils';
-import { 
-  Monitor, 
-  ShoppingBag, 
-  Plus, 
-  Minus, 
-  Trash2, 
-  DollarSign, 
-  ArrowRight, 
-  CheckCircle2, 
+import {
+  Monitor,
+  ShoppingBag,
+  Plus,
+  Minus,
+  Trash2,
+  DollarSign,
+  ArrowRight,
+  CheckCircle2,
   AlertCircle,
   X,
   History,
   TrendingDown,
   Calculator,
   Edit2,
-  FileText
+  FileText,
+  Search
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 import CustomerAutocomplete from './CustomerAutocomplete';
+import OrderSearchModal, { LoadedOrder, isPaidStatus } from './OrderSearchModal';
+import { db } from '../../lib/firebase';
+import { doc, runTransaction } from 'firebase/firestore';
 
 interface CashRegisterTabProps {
   dailyData: DailyReport;
@@ -44,15 +48,19 @@ const DEFAULT_CURRENCY: CurrencyBreakdown = {
   "1": 0
 };
 
-export default function CashRegisterTab({ dailyData, settings, updateDaily, metrics, customers, onAddOrder, onAddFutureOrder, onGoToDashboard }: CashRegisterTabProps) {
+export default function CashRegisterTab({ dailyData, settings, updateDaily, metrics, customers, onAddOrder, onAddFutureOrder, onGoToDashboard, shopId }: CashRegisterTabProps & { shopId?: string }) {
   const [cart, setCart] = useState<{item: Item, qty: number}[]>([]);
+  // Loaded pre-existing orders
+  const [loadedOrders, setLoadedOrders] = useState<LoadedOrder[]>([]);
+  const [orderSearchModal, setOrderSearchModal] = useState(false);
   const [checkoutModal, setCheckoutModal] = useState(false);
   const [expenseModal, setExpenseModal] = useState(false);
   const [openShiftModal, setOpenShiftModal] = useState(false);
   const [closeShiftModal, setCloseShiftModal] = useState(false);
   const [editQtyModal, setEditQtyModal] = useState<{index: number, qty: string} | null>(null);
-  const [finalCheckModal, setFinalCheckModal] = useState<{order: Order, change: number, received: number} | null>(null);
-  const [selectedCust, setSelectedCust] = useState<import('../../types').Customer | null>(null);
+  const [finalCheckModal, setFinalCheckModal] = useState<{order: Order, change: number, received: number, creditBalanceAfter?: number} | null>(null);
+  const [selectedCust, setSelectedCust] = useState<Customer | null>(null);
+  const [creditError, setCreditError] = useState<string | null>(null);
   // Keypad state for checkout modal
   const [receivedInput, setReceivedInput] = useState('');
 
@@ -85,9 +93,17 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     expenses: []
   };
 
-  const totalCartAmt = useMemo(() => {
-    return cart.reduce((sum, entry) => sum + (entry.item.price * entry.qty), 0);
-  }, [cart]);
+  const totalNewItemsAmt = useMemo(() =>
+    cart.reduce((sum, entry) => sum + (entry.item.price * entry.qty), 0)
+  , [cart]);
+
+  // Amount still owed from loaded orders (unpaid ones)
+  const totalLoadedUnpaid = useMemo(() =>
+    loadedOrders.reduce((s, lo) => s + lo.collectAmt, 0)
+  , [loadedOrders]);
+
+  // Grand total to collect
+  const totalCartAmt = totalNewItemsAmt + totalLoadedUnpaid;
 
   const addToCart = (item: Item) => {
     setCart(prev => {
@@ -145,99 +161,132 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     setExpenseData({ amount: 0, reason: '' });
   };
 
-  const handleCheckout = () => {
+  const handleLoadOrders = (loaded: LoadedOrder[]) => {
+    setLoadedOrders(prev => {
+      // Avoid duplicates
+      const existingIds = new Set(prev.map(lo => lo.order.id));
+      return [...prev, ...loaded.filter(lo => !existingIds.has(lo.order.id))];
+    });
+    // Auto-fill buyer/phone from first loaded order if not yet set
+    const first = loaded[0];
+    if (first && checkoutData.buyer === '現客') {
+      setCheckoutData(prev => ({
+        ...prev,
+        buyer: first.order.buyer || '現客',
+        phone: first.order.phone || ''
+      }));
+      // Try to find customer
+      const cust = customers.find(c => c.phone === first.order.phone);
+      if (cust) setSelectedCust(cust);
+    }
+  };
+
+  const handleCheckout = async () => {
     const orderId = uid();
     const orderItems: Record<string, number> = {};
-    cart.forEach(c => {
-      orderItems[c.item.id] = c.qty;
-    });
+    cart.forEach(c => { orderItems[c.item.id] = c.qty; });
 
-    const actualAmt = totalCartAmt - checkoutData.discAmt;
+    const newItemsAmt = totalNewItemsAmt - checkoutData.discAmt;
+    const grandTotal = Math.max(0, newItemsAmt) + totalLoadedUnpaid;
     const isFuturePickup = checkoutData.pickupDate !== dailyData.date;
+    const isCreditPayment = checkoutData.paymentMethod === '儲值金扣款';
+    let creditBalanceAfter: number | undefined;
 
-    if (isFuturePickup) {
-      // 1. Prepayment Order (Today) - For Cashflow only
-      const prepaymentOrder: Order = {
-        id: orderId,
-        buyer: checkoutData.buyer,
-        phone: checkoutData.phone,
-        address: '',
-        items: {}, // No items recognized today
-        prodAmt: 0, // No revenue today
-        shipAmt: 0,
-        discAmt: 0,
-        actualAmt: actualAmt, // Cash collected today
-        status: checkoutData.paymentMethod,
-        note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨`,
-        source: 'pos',
-        orderType: 'prepayment',
-        pickupDate: checkoutData.pickupDate,
-        customerId: selectedCust ? selectedCust.id : undefined
-      };
-      onAddOrder(prepaymentOrder);
-
-      // 2. Pickup Order (Future) - For Revenue and Inventory
-      if (onAddFutureOrder) {
-        const pickupOrder: Order = {
-          id: uid(),
-          buyer: checkoutData.buyer,
-          phone: checkoutData.phone,
-          address: '',
-          items: orderItems,
-          prodAmt: totalCartAmt,
-          shipAmt: 0,
-          discAmt: checkoutData.discAmt,
-          actualAmt: 0, // No cash expected tomorrow
-          status: '已收帳款', // Already paid
-          note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳付款`,
-          source: 'pos',
-          orderType: 'pickup',
-          pendingPickup: true,
-          pickupDate: checkoutData.pickupDate,
-          customerId: selectedCust ? selectedCust.id : undefined
-        };
-        onAddFutureOrder(checkoutData.pickupDate, pickupOrder);
+    // ── 1. Firestore Transaction for credit deduction ──────────────
+    if (isCreditPayment && selectedCust && shopId) {
+      try {
+        const custRef = doc(db, 'shops', shopId, 'customers', selectedCust.id);
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(custRef);
+          if (!snap.exists()) throw new Error('顧客資料不存在');
+          const data = snap.data();
+          const currentBal = Number(data.creditBalance || 0);
+          if (currentBal < grandTotal) {
+            throw new Error(`儲值金不足！目前餘額 $${currentBal}，需要 $${grandTotal}`);
+          }
+          const newBal = currentBal - grandTotal;
+          const log: CreditLog = {
+            id: uid(),
+            timestamp: new Date().toISOString(),
+            type: 'consume',
+            amount: -grandTotal,
+            balanceAfter: newBal,
+            orderId,
+            note: 'POS 儲值金結帳扣款'
+          };
+          tx.update(custRef, {
+            creditBalance: newBal,
+            creditLogs: [...(data.creditLogs || []), log],
+            updatedAt: new Date().toISOString()
+          });
+          creditBalanceAfter = newBal;
+        });
+      } catch (err: any) {
+        setCreditError(err.message || '儲值金扣款失敗');
+        return;
       }
-    } else {
-      // Normal Order
-      const newOrder: Order = {
-        id: orderId,
-        buyer: checkoutData.buyer,
-        phone: checkoutData.phone,
-        address: '',
-        items: orderItems,
-        prodAmt: totalCartAmt,
-        shipAmt: 0,
-        discAmt: checkoutData.discAmt,
-        actualAmt: actualAmt,
-        status: checkoutData.paymentMethod,
-        note: `收銀機交易 - ${checkoutData.paymentMethod}`,
-        source: 'pos',
-        orderType: 'normal',
-        pickupDate: dailyData.date,
-        customerId: selectedCust ? selectedCust.id : undefined
-      };
-      onAddOrder(newOrder);
+    }
+
+    // ── 2. Mark loaded orders as picked up ───────────────────────
+    if (loadedOrders.length > 0) {
+      const updatedOrders = dailyData.orders.map(o => {
+        const lo = loadedOrders.find(l => l.order.id === o.id);
+        if (!lo) return o;
+        return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
+      });
+      updateDaily({ orders: updatedOrders });
+    }
+
+    // ── 3. Create new order for new items (if any) ───────────────
+    if (cart.length > 0) {
+      if (isFuturePickup) {
+        const prepaymentOrder: Order = {
+          id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
+          address: '', items: {}, prodAmt: 0, shipAmt: 0, discAmt: 0,
+          actualAmt: Math.max(0, newItemsAmt),
+          status: checkoutData.paymentMethod,
+          note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨`,
+          source: 'pos', orderType: 'prepayment', pickupDate: checkoutData.pickupDate,
+          customerId: selectedCust?.id
+        };
+        onAddOrder(prepaymentOrder);
+        if (onAddFutureOrder) {
+          onAddFutureOrder(checkoutData.pickupDate, {
+            id: uid(), buyer: checkoutData.buyer, phone: checkoutData.phone,
+            address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
+            discAmt: checkoutData.discAmt, actualAmt: 0, status: '已收帳款',
+            note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳`,
+            source: 'pos', orderType: 'pickup', pendingPickup: true,
+            pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id
+          });
+        }
+      } else {
+        onAddOrder({
+          id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
+          address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
+          discAmt: checkoutData.discAmt, actualAmt: Math.max(0, newItemsAmt),
+          status: checkoutData.paymentMethod,
+          note: `收銀機交易 - ${checkoutData.paymentMethod}`,
+          source: 'pos', orderType: 'normal', pickupDate: dailyData.date,
+          customerId: selectedCust?.id
+        });
+      }
     }
 
     setFinalCheckModal({
-      order: { id: orderId, actualAmt, status: checkoutData.paymentMethod } as Order,
+      order: { id: orderId, actualAmt: grandTotal, status: checkoutData.paymentMethod } as Order,
       received: checkoutData.receivedAmt,
-      change: checkoutData.paymentMethod === '現結' ? checkoutData.receivedAmt - actualAmt : 0
+      change: checkoutData.paymentMethod === '現結' ? checkoutData.receivedAmt - grandTotal : 0,
+      creditBalanceAfter
     });
-    
+
     setCart([]);
+    setLoadedOrders([]);
     setCheckoutModal(false);
     setReceivedInput('');
     setSelectedCust(null);
-    setCheckoutData({
-      buyer: '現客',
-      phone: '',
-      discAmt: 0,
-      paymentMethod: '現結',
-      receivedAmt: 0,
-      pickupDate: dailyData.date
-    });
+    setCreditError(null);
+    setCheckoutData({ buyer: '現客', phone: '', discAmt: 0, paymentMethod: '現結', receivedAmt: 0, pickupDate: dailyData.date });
   };
 
   const handleCloseShift = () => {
@@ -709,13 +758,19 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     <Monitor className="w-4 h-4" /> 回戰情室
                   </button>
                 )}
-                <button 
+                <button
                   onClick={() => setExpenseModal(true)}
                   className="px-4 py-2 bg-amber-100 text-amber-700 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-amber-200 transition-all"
                 >
                   <TrendingDown className="w-4 h-4" /> 支出紀錄
                 </button>
-                <button 
+                <button
+                  onClick={() => setOrderSearchModal(true)}
+                  className="px-4 py-2 bg-blue-50 text-blue-700 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-blue-100 transition-all border border-blue-100"
+                >
+                  <Search className="w-4 h-4" /> 查詢訂單
+                </button>
+                <button
                   onClick={() => setCloseShiftModal(true)}
                   className="px-4 py-2 bg-coffee-800 text-white rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-coffee-900 transition-all"
                 >
@@ -852,10 +907,43 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             </div>
     
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {cart.length === 0 ? (
+              {/* Loaded existing orders */}
+              {loadedOrders.length > 0 && (
+                <div className="space-y-2">
+                  <div className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest px-1">已載入當日訂單</div>
+                  {loadedOrders.map(lo => (
+                    <div key={lo.order.id} className="p-3 bg-blue-50 border border-blue-100 rounded-2xl">
+                      <div className="flex justify-between items-start">
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs font-bold text-blue-800 truncate">{lo.order.buyer || '（無姓名）'}</div>
+                          <div className="text-[10px] text-blue-400 font-mono">{lo.order.phone}</div>
+                          {lo.order.note && <div className="text-[10px] text-blue-300 mt-0.5 truncate">{lo.order.note}</div>}
+                        </div>
+                        <div className="text-right shrink-0 ml-2">
+                          <div className={cn('text-sm font-bold font-mono', lo.collectAmt === 0 ? 'text-emerald-600' : 'text-rose-brand')}>
+                            {lo.collectAmt === 0 ? '$0 (免收)' : `$${fmt(lo.collectAmt)}`}
+                          </div>
+                          <div className="text-[10px] text-blue-400">{lo.order.status}</div>
+                        </div>
+                        <button
+                          onClick={() => setLoadedOrders(prev => prev.filter(l => l.order.id !== lo.order.id))}
+                          className="ml-2 p-1 hover:bg-blue-100 rounded-lg text-blue-300 hover:text-blue-500 transition-colors"
+                        >
+                          <X className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  {cart.length > 0 && <div className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest px-1 pt-1">新增品項</div>}
+                </div>
+              )}
+
+              {/* New items in cart */}
+              {cart.length === 0 && loadedOrders.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-coffee-300 space-y-2 opacity-50">
                   <ShoppingBag className="w-12 h-12" />
                   <p className="font-bold">尚無商品</p>
+                  <p className="text-xs">或點擊「查詢訂單」載入既有訂單</p>
                 </div>
               ) : (
                 cart.map((entry, idx) => (
@@ -867,7 +955,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     <div className="flex items-center gap-3">
                       <div className="flex items-center bg-white rounded-xl border border-coffee-100 p-1">
                         <button onClick={() => updateCartQty(idx, -1)} className="p-1 hover:bg-coffee-50 rounded-lg transition-colors"><Minus className="w-3 h-3" /></button>
-                        <button 
+                        <button
                           onClick={() => setEditQtyModal({ index: idx, qty: entry.qty.toString() })}
                           className="w-10 text-center font-bold font-mono text-sm text-coffee-700"
                         >
@@ -884,27 +972,56 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               )}
             </div>
     
-            <div className="p-6 border-t border-coffee-100 bg-white space-y-4">
+            <div className="p-4 border-t border-coffee-100 bg-white space-y-3">
+              {/* Breakdown if mixed */}
+              {loadedOrders.length > 0 && cart.length > 0 && (
+                <div className="space-y-1">
+                  <div className="flex justify-between text-xs font-bold text-coffee-400">
+                    <span>既有訂單應收</span>
+                    <span className="font-mono">${fmt(totalLoadedUnpaid)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs font-bold text-coffee-400">
+                    <span>新增品項小計</span>
+                    <span className="font-mono">${fmt(totalNewItemsAmt)}</span>
+                  </div>
+                </div>
+              )}
               <div className="flex justify-between items-end">
-                <div className="text-sm font-bold text-coffee-400">小計項目: {cart.length}</div>
+                <div className="text-sm font-bold text-coffee-400">合計應收</div>
                 <div className="text-right">
-                  <div className="text-xs text-coffee-400 font-bold uppercase tracking-widest mb-1">TOTAL AMOUNT</div>
                   <div className="text-3xl font-serif-brand font-bold text-rose-brand leading-none">
                     <span className="text-sm mr-1">$</span>{fmt(totalCartAmt)}
                   </div>
                 </div>
               </div>
-              <button 
-                disabled={cart.length === 0}
+              <button
+                disabled={cart.length === 0 && loadedOrders.length === 0}
                 onClick={() => setCheckoutModal(true)}
-                className="w-full py-4 bg-rose-brand text-white rounded-2xl font-bold shadow-xl shadow-rose-200 hover:bg-rose-600 transition-all active:scale-95 disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2"
+                className={cn(
+                  "w-full py-4 rounded-2xl font-bold shadow-xl transition-all active:scale-95 disabled:opacity-50 disabled:shadow-none flex items-center justify-center gap-2",
+                  loadedOrders.length > 0 && cart.length === 0
+                    ? "bg-blue-600 text-white hover:bg-blue-700 shadow-blue-100"
+                    : "bg-rose-brand text-white hover:bg-rose-600 shadow-rose-200"
+                )}
               >
-                結帳收款 <ArrowRight className="w-5 h-5" />
+                {loadedOrders.length > 0 && cart.length === 0 ? '確認取貨' : '結帳收款'}
+                <ArrowRight className="w-5 h-5" />
               </button>
             </div>
           </div>
         </>
       )}
+
+      {/* Order Search Modal */}
+      <AnimatePresence>
+        {orderSearchModal && (
+          <OrderSearchModal
+            todayOrders={dailyData.orders}
+            onClose={() => setOrderSearchModal(false)}
+            onLoad={handleLoadOrders}
+          />
+        )}
+      </AnimatePresence>
 
       {/* Checkout Modal */}
       <AnimatePresence>
@@ -914,12 +1031,38 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className={cn("glass-panel w-full bg-white border-0 shadow-2xl rounded-3xl relative z-10 overflow-hidden max-h-[90vh] flex flex-col", checkoutData.paymentMethod === '現結' ? "max-w-2xl" : "max-w-md")}>
               {/* Header */}
               <div className="flex justify-between items-center px-8 pt-7 pb-5 border-b border-coffee-50">
-                <h3 className="text-xl font-bold text-coffee-800">結帳收款</h3>
+                <h3 className="text-xl font-bold text-coffee-800">
+                  {loadedOrders.length > 0 && cart.length === 0 ? '確認取貨' : '結帳收款'}
+                </h3>
                 <button onClick={() => setCheckoutModal(false)} className="p-2 hover:bg-coffee-50 rounded-full"><X className="w-5 h-5 text-coffee-400" /></button>
               </div>
 
+              {/* Credit error banner */}
+              {creditError && (
+                <div className="mx-8 mt-4 p-3 bg-red-50 border border-red-200 rounded-xl flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0" />
+                  <span className="text-xs font-bold text-red-600">{creditError}</span>
+                  <button onClick={() => setCreditError(null)} className="ml-auto text-red-400 hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
+                </div>
+              )}
+              {/* Loaded orders summary */}
+              {loadedOrders.length > 0 && (
+                <div className="mx-8 mt-3 p-3 bg-blue-50 rounded-xl space-y-1">
+                  <div className="text-[10px] font-bold text-blue-500 uppercase tracking-widest">載入訂單明細</div>
+                  {loadedOrders.map(lo => (
+                    <div key={lo.order.id} className="flex justify-between text-xs font-bold">
+                      <span className="text-blue-700">{lo.order.buyer}</span>
+                      <span className={lo.collectAmt === 0 ? 'text-emerald-600' : 'text-rose-brand font-mono'}>
+                        {lo.collectAmt === 0 ? '免收' : `$${fmt(lo.collectAmt)}`}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Body — two columns when 現結 */}
               <div className={cn("flex-1 overflow-y-auto p-8 pt-6 gap-6", checkoutData.paymentMethod === '現結' ? "grid grid-cols-2 items-start" : "flex flex-col space-y-4")}>
+
 
                 {/* ── Left: form fields ── */}
                 <div className="space-y-4">
@@ -1088,6 +1231,19 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     <span className="text-coffee-400 font-bold">應收金額</span>
                     <span className="text-2xl font-serif-brand font-bold text-coffee-800">${fmt(finalCheckModal.order.actualAmt)}</span>
                   </div>
+                {finalCheckModal.order.status === '儲值金扣款' && finalCheckModal.creditBalanceAfter !== undefined && (
+                    <div className="p-4 bg-emerald-50 border border-emerald-100 rounded-2xl space-y-1">
+                      <div className="text-xs font-bold text-emerald-500">儲值金扣款明細</div>
+                      <div className="flex justify-between text-sm font-bold">
+                        <span className="text-coffee-500">扣款金額</span>
+                        <span className="text-rose-brand font-mono">-${fmt(finalCheckModal.order.actualAmt)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm font-bold">
+                        <span className="text-coffee-500">扣款後餘額</span>
+                        <span className="text-emerald-700 font-mono">${fmt(finalCheckModal.creditBalanceAfter)}</span>
+                      </div>
+                    </div>
+                  )}
                   {finalCheckModal.order.status === '現結' && (
                     <>
                       <div className="flex justify-between items-center text-sm">
