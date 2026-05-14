@@ -119,7 +119,7 @@ export interface Order {
   status: string; // '匯款' | '現結' | '未結帳款' | '公關品' | '已收帳款' | '已付訂金' | '儲值金扣款' or custom payment methods
   note: string;
   depositAmt?: number; // For deposit flow
-  deliveryMethod?: '宅配' | '自取';
+  deliveryMethod?: '宅配' | '自取' | '現場';
   pickupDate?: string;
   recipientName?: string;
   recipientPhone?: string;

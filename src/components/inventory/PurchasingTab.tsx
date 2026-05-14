@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { db } from '../../lib/firebase';
 import { collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
 import { Material, Purchase, PurchaseLine, Vendor } from '../../types';
-import { fmt, uid } from '../../lib/utils';
+import { fmt, uid, cn } from '../../lib/utils';
 import { Eye, Pencil, Plus, Search, Store, Trash2, Users, Phone, Mail, X, CheckCircle2 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 

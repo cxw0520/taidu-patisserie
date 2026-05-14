@@ -4,7 +4,7 @@ import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc } from 'fi
 import { ExpenseRecord, ExpenseLine, FundingSource, ExpenseCategory, COAItem, JournalEntry, JournalLine } from '../../types';
 import { Plus, Trash2, Edit2, FileText, ChevronDown, ChevronUp, ArrowRightLeft, X, BookOpen, CheckCircle } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { uid, todayISO } from '../../lib/utils';
+import { uid, todayISO, fmt } from '../../lib/utils';
 
 interface Props {
   shopId: string;

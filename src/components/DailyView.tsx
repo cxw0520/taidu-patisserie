@@ -456,8 +456,14 @@ export default function DailyView({
   };
 
   const handleNewOrder = async (order: Order) => {
-    if (!dailyData) return;
-    updateDaily({ orders: [...dailyData.orders, order] });
+    setDailyData(prev => {
+      if (!prev) return prev;
+      const currentKey = normalizeDateKey(currentDate);
+      if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
+      const updated = { ...prev, orders: [...(prev.orders || []), order], date: loadedDateKey };
+      lastSnapshotRef.current = JSON.stringify(updated);
+      return updated;
+    });
     
     // Auto-deduct packaging ONLY IF it's not a pending pickup order
     if (!order.pendingPickup) {

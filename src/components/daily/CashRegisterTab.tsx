@@ -315,7 +315,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           status: checkoutData.paymentMethod,
           note: `收銀機交易 - ${checkoutData.paymentMethod}`,
           source: 'pos', orderType: 'normal', pickupDate: dailyData.date,
-          customerId: selectedCust?.id
+          customerId: selectedCust?.id,
+          deliveryMethod: '現場',
+          isPickedUp: true
         });
       }
     }
