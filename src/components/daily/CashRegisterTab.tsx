@@ -241,7 +241,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
     const newItemsAmt = totalNewItemsAmt - checkoutData.discAmt;
     const grandTotal = Math.max(0, newItemsAmt) + totalLoadedUnpaid;
-    const isFuturePickup = checkoutData.pickupDate !== dailyData.date;
+    const isFuturePickup = !!checkoutData.pickupDate && checkoutData.pickupDate !== dailyData.date;
     const isCreditPayment = checkoutData.paymentMethod === '儲值金扣款';
     let creditBalanceAfter: number | undefined;
 
@@ -280,14 +280,17 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       }
     }
 
+    let nextOrders = [...dailyData.orders];
+    let needsUpdate = false;
+
     // ── 2. Mark loaded orders as picked up ───────────────────────
     if (loadedOrders.length > 0) {
-      const updatedOrders = dailyData.orders.map(o => {
+      nextOrders = nextOrders.map(o => {
         const lo = loadedOrders.find(l => l.order.id === o.id);
         if (!lo) return o;
         return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
       });
-      updateDaily({ orders: updatedOrders });
+      needsUpdate = true;
     }
 
     // ── 3. Create new order for new items (if any) ───────────────
@@ -302,7 +305,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           source: 'pos', orderType: 'prepayment', pickupDate: checkoutData.pickupDate,
           customerId: selectedCust?.id
         };
-        onAddOrder(prepaymentOrder);
+        nextOrders.push(prepaymentOrder);
+        needsUpdate = true;
+        onAddOrder(prepaymentOrder); // Trigger side effects (CRM, packaging)
         if (onAddFutureOrder) {
           onAddFutureOrder(checkoutData.pickupDate, {
             id: uid(), buyer: checkoutData.buyer, phone: checkoutData.phone,
@@ -314,18 +319,25 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           });
         }
       } else {
-        onAddOrder({
+        const normalOrder: Order = {
           id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
           address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
           discAmt: checkoutData.discAmt, actualAmt: Math.max(0, newItemsAmt),
           status: checkoutData.paymentMethod,
           note: `收銀機交易 - ${checkoutData.paymentMethod}`,
-          source: 'pos', orderType: 'normal', pickupDate: dailyData.date,
+          source: 'pos', orderType: 'normal', pickupDate: dailyData.date || checkoutData.pickupDate,
           customerId: selectedCust?.id,
           deliveryMethod: '現場',
           isPickedUp: true
-        });
+        };
+        nextOrders.push(normalOrder);
+        needsUpdate = true;
+        onAddOrder(normalOrder); // Trigger side effects (CRM, packaging)
       }
+    }
+
+    if (needsUpdate) {
+      updateDaily({ orders: nextOrders });
     }
 
     setFinalCheckModal({

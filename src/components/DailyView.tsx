@@ -460,6 +460,7 @@ export default function DailyView({
       if (!prev) return prev;
       const currentKey = normalizeDateKey(currentDate);
       if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
+      if ((prev.orders || []).some(o => o.id === order.id)) return prev;
       const updated = { ...prev, orders: [...(prev.orders || []), order], date: loadedDateKey };
       lastSnapshotRef.current = JSON.stringify(updated);
       return updated;
