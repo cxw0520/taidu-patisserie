@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { DailyReport, Settings, Order, CashRegisterShift, CurrencyBreakdown, CashExpense, Item, Customer, CreditLog } from '../../types';
 import { fmt, uid } from '../../lib/utils';
 import {
@@ -79,8 +79,14 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     discAmt: 0,
     paymentMethod: '現結' as Order['status'],
     receivedAmt: 0,
-    pickupDate: dailyData.date
+    pickupDate: dailyData?.date || ''
   });
+
+  useEffect(() => {
+    if (dailyData?.date && !checkoutData.pickupDate) {
+      setCheckoutData(prev => ({ ...prev, pickupDate: dailyData.date }));
+    }
+  }, [dailyData?.date, checkoutData.pickupDate]);
   const [isEditing, setIsEditing] = useState(false);
   const [editMemo, setEditMemo] = useState('');
   const [isExporting, setIsExporting] = useState(false);
