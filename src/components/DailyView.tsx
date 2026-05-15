@@ -413,37 +413,40 @@ export default function DailyView({
     updaterFn: (prev: DailyReport) => DailyReport,
     sideEffectOrders: Order[]
   ) => {
-    let finalData: DailyReport | null = null;
-
-    setDailyData(prev => {
-      if (!prev) return prev;
-      const currentKey = normalizeDateKey(currentDate);
-      if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
-      const updated = updaterFn(prev);
-      lastSnapshotRef.current = JSON.stringify(updated);
-      finalData = updated;
-      return updated;
-    });
-
-    // Give React a tick to flush the state, then write directly to Firestore
-    // This ensures the snapshot echo-back protection is set before any other write
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
-
-    if (finalData && loadedDateKey && shopId) {
-      try {
-        await setDoc(
-          doc(db, 'shops', shopId, 'daily', loadedDateKey),
-          { ...(finalData as DailyReport), date: loadedDateKey },
-          { merge: true }
-        );
-        // Update lastSnapshotRef AFTER write so the echo-back matches
-        lastSnapshotRef.current = JSON.stringify({ ...(finalData as DailyReport), date: loadedDateKey });
-      } catch (e) {
-        console.error('[POS] Firestore write failed:', e);
-      }
+    if (!dailyData || !loadedDateKey || !shopId) {
+      console.warn('[POS] handlePosCheckout aborted: missing dailyData/loadedDateKey/shopId');
+      return;
+    }
+    const currentKey = normalizeDateKey(currentDate);
+    if (loadedDateKey !== currentKey) {
+      console.warn('[POS] handlePosCheckout aborted: date key mismatch', loadedDateKey, currentKey);
+      return;
     }
 
-    // Side effects: packaging deduction + CRM (do NOT touch state)
+    // Compute new state directly using current dailyData (no setState callback timing issue)
+    const finalData: DailyReport = updaterFn(dailyData);
+
+    // 1. Update lastSnapshotRef FIRST to block any echo-back
+    const finalJson = JSON.stringify({ ...finalData, date: loadedDateKey });
+    lastSnapshotRef.current = finalJson;
+
+    // 2. Apply to React state
+    setDailyData({ ...finalData, date: loadedDateKey });
+
+    // 3. Write directly to Firestore immediately (don't wait for debounced save)
+    try {
+      await setDoc(
+        doc(db, 'shops', shopId, 'daily', loadedDateKey),
+        { ...finalData, date: loadedDateKey },
+        { merge: true }
+      );
+      // Re-apply lastSnapshotRef after write to match exactly what Firestore has
+      lastSnapshotRef.current = finalJson;
+    } catch (e) {
+      console.error('[POS] Firestore write failed:', e);
+    }
+
+    // 4. Side effects: packaging deduction + CRM (do NOT touch orders state)
     for (const order of sideEffectOrders) {
       if (!order.pendingPickup) {
         await deductPackagingForOrder(order);
@@ -463,6 +466,7 @@ export default function DailyView({
       }
     }
   };
+
 
   const handlePickup = async (orderId: string) => {
     if (!dailyData) return;
