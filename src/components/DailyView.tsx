@@ -140,8 +140,8 @@ export default function DailyView({
   const [dailyData, setDailyData] = useState<DailyReport | null>(null);
   const [loadedDateKey, setLoadedDateKey] = useState('');
   const [loading, setLoading] = useState(true);
-  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
-  const lastSnapshotRef = useRef<string>('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const localUpdateIdRef = useRef<string | null>(null);
   
   // Filters, Summary search, and Sort
   const [sourceFilter, setSourceFilter] = useState<'all' | 'pos' | 'manual' | 'import'>('all');
@@ -211,7 +211,6 @@ export default function DailyView({
     (async () => {
       const q = query(collection(db, 'shops', shopId, 'daily'), limit(20), orderBy('date', 'desc'));
       const s = await getDocs(q);
-      
     })();
   }, [shopId]);
 
@@ -243,11 +242,14 @@ export default function DailyView({
               packagingUsage: data.packagingUsage || {},
               ar: { ...defaultAr(), ...(data.ar || {}) } 
             };
-            const newString = JSON.stringify(newData);
-            if (lastSnapshotRef.current !== newString) {
-              lastSnapshotRef.current = newString;
-              setDailyData(newData);
+            
+            // Ignore echo-backs from our own local updates
+            if ((data as any).updateId && (data as any).updateId === localUpdateIdRef.current) {
+              return;
             }
+            
+            // It's a real external update or initial load
+            setDailyData(newData);
           } else {
             // ── 當天文件不存在，計算帶入值 ──────────────────────────
             const [cy, cm, cd] = normalizeDateKey(currentDate).split('-').map(Number);
@@ -283,8 +285,6 @@ export default function DailyView({
                     accumFromPrev = Math.max(0, (prevAr.accum || 0) + yesterdayUnpaid - (prevAr.collect || 0));
 
                     // ── 庫存帶入：從找到的最近一天往前算出貨 ──────────
-                    // 計算那天的出貨量（orders × recipe 展開）
-                    const prevMetrics: Record<string, number> = {};
                     const allItems = [
                       ...(baseSettings.giftItems || []),
                       ...(baseSettings.singleItems || []),
@@ -298,11 +298,9 @@ export default function DailyView({
                         if (item.recipe) {
                           Object.entries(item.recipe).forEach(([flavor, count]) => {
                             const norm = normalizeFlavorName(flavor);
-                            prevMetrics[norm] = (prevMetrics[norm] || 0) + qty * (Number(count) || 0);
                           });
                         } else {
                           const norm = normalizeFlavorName(item.name);
-                          prevMetrics[norm] = (prevMetrics[norm] || 0) + qty;
                         }
                       });
                     });
@@ -354,12 +352,8 @@ export default function DailyView({
               );
             } catch (err) {
               console.error('[帶入] 寫入 Firestore 失敗，使用 local state:', err);
-              const newString = JSON.stringify(newData);
-              if (lastSnapshotRef.current !== newString) {
-                lastSnapshotRef.current = newString;
-                setLoadedDateKey(targetDateKey);
-                setDailyData(newData);
-              }
+              setLoadedDateKey(targetDateKey);
+              setDailyData(newData);
             }
           }
           if (!cancelled) setLoading(false);
@@ -377,17 +371,19 @@ export default function DailyView({
 
   // Debounced Save
   useEffect(() => {
-    if (!dailyData || loading) return;
-    const dateKey = normalizeDateKey(currentDate);
-    const dataDateKey = normalizeDateKey(dailyData.date || '');
-    if (!loadedDateKey) return;
-    if (loadedDateKey !== dateKey) return;
-    if (dataDateKey !== loadedDateKey) return;
+    if (!dailyData || loading || !loadedDateKey || !shopId) return;
+    const currentKey = normalizeDateKey(currentDate);
+    if (loadedDateKey !== currentKey) return;
+
     const t = setTimeout(async () => {
       setSaveStatus('saving');
+      const dataToSave = { ...dailyData, date: loadedDateKey };
+      if (localUpdateIdRef.current) {
+        (dataToSave as any).updateId = localUpdateIdRef.current;
+      }
       await setDoc(
         doc(db, 'shops', shopId, 'daily', loadedDateKey),
-        { ...dailyData, date: loadedDateKey },
+        dataToSave,
         { merge: true }
       );
       setSaveStatus('saved');
@@ -402,8 +398,11 @@ export default function DailyView({
       const currentKey = normalizeDateKey(currentDate);
       if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
       const patch = typeof patchOrFn === 'function' ? patchOrFn(prev) : patchOrFn;
-      const updated = { ...prev, ...patch, date: loadedDateKey };
-      lastSnapshotRef.current = JSON.stringify(updated); // prevent echo back
+      
+      const newUpdateId = uid();
+      localUpdateIdRef.current = newUpdateId;
+      
+      const updated = { ...prev, ...patch, date: loadedDateKey, updateId: newUpdateId };
       return updated;
     });
   };
@@ -413,37 +412,36 @@ export default function DailyView({
     updaterFn: (prev: DailyReport) => DailyReport,
     sideEffectOrders: Order[]
   ) => {
-    if (!dailyData || !loadedDateKey || !shopId) {
-      console.warn('[POS] handlePosCheckout aborted: missing dailyData/loadedDateKey/shopId');
-      return;
-    }
-    const currentKey = normalizeDateKey(currentDate);
-    if (loadedDateKey !== currentKey) {
-      console.warn('[POS] handlePosCheckout aborted: date key mismatch', loadedDateKey, currentKey);
-      return;
-    }
+    let finalDataForDb: DailyReport | null = null;
+    let targetKey = '';
 
-    // Compute new state directly using current dailyData (no setState callback timing issue)
-    const finalData: DailyReport = updaterFn(dailyData);
+    setDailyData(prev => {
+      if (!prev) return prev;
+      targetKey = normalizeDateKey(currentDate);
+      if (!loadedDateKey || loadedDateKey !== targetKey) return prev;
+      
+      const updated = updaterFn(prev);
+      const newUpdateId = uid();
+      localUpdateIdRef.current = newUpdateId;
+      
+      finalDataForDb = { ...updated, date: targetKey, updateId: newUpdateId } as DailyReport & { updateId: string };
+      return finalDataForDb;
+    });
 
-    // 1. Update lastSnapshotRef FIRST to block any echo-back
-    const finalJson = JSON.stringify({ ...finalData, date: loadedDateKey });
-    lastSnapshotRef.current = finalJson;
+    // Give React a tick to commit the state update
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
 
-    // 2. Apply to React state
-    setDailyData({ ...finalData, date: loadedDateKey });
-
-    // 3. Write directly to Firestore immediately (don't wait for debounced save)
-    try {
-      await setDoc(
-        doc(db, 'shops', shopId, 'daily', loadedDateKey),
-        { ...finalData, date: loadedDateKey },
-        { merge: true }
-      );
-      // Re-apply lastSnapshotRef after write to match exactly what Firestore has
-      lastSnapshotRef.current = finalJson;
-    } catch (e) {
-      console.error('[POS] Firestore write failed:', e);
+    if (finalDataForDb && targetKey && shopId) {
+      // Write directly to Firestore immediately (don't wait for debounced save)
+      try {
+        await setDoc(
+          doc(db, 'shops', shopId, 'daily', targetKey),
+          finalDataForDb,
+          { merge: true }
+        );
+      } catch (e) {
+        console.error('[POS] Firestore write failed:', e);
+      }
     }
 
     // 4. Side effects: packaging deduction + CRM (do NOT touch orders state)
@@ -552,8 +550,10 @@ export default function DailyView({
       const currentKey = normalizeDateKey(currentDate);
       if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
       if ((prev.orders || []).some(o => o.id === order.id)) return prev;
-      const updated = { ...prev, orders: [...(prev.orders || []), order], date: loadedDateKey };
-      lastSnapshotRef.current = JSON.stringify(updated);
+      const newUpdateId = uid();
+      localUpdateIdRef.current = newUpdateId;
+      
+      const updated = { ...prev, orders: [...(prev.orders || []), order], date: loadedDateKey, updateId: newUpdateId };
       return updated;
     });
     
