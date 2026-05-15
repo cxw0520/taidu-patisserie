@@ -289,7 +289,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       status: checkoutData.paymentMethod,
       note: `收銀機交易 - ${checkoutData.paymentMethod}`,
       source: 'pos', orderType: 'normal', pickupDate: dailyData.date || checkoutData.pickupDate,
-      customerId: selectedCust?.id,
+      customerId: selectedCust?.id || null,
       deliveryMethod: '現場',
       isPickedUp: true,
       createdAt: new Date().toISOString()
@@ -302,7 +302,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       status: checkoutData.paymentMethod,
       note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨`,
       source: 'pos', orderType: 'prepayment', pickupDate: checkoutData.pickupDate,
-      customerId: selectedCust?.id,
+      customerId: selectedCust?.id || null,
       createdAt: new Date().toISOString()
     } : null;
 
@@ -346,7 +346,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           discAmt: checkoutData.discAmt, actualAmt: 0, status: '已收帳款',
           note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳`,
           source: 'pos', orderType: 'pickup', pendingPickup: true,
-          pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id
+          pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id || null
         });
       }
     } else {

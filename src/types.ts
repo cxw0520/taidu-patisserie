@@ -207,6 +207,7 @@ export interface DailyReport {
   losses: LossEntry[];
   packagingUsage: Record<string, number>;
   cashRegister?: CashRegisterShift;
+  updateId?: string;
 }
 
 export interface CurrencyBreakdown {

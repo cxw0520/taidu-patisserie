@@ -231,6 +231,7 @@ export default function DailyView({
       const targetDateKey = resolved.dateKey;
 
       unsub = onSnapshot(targetRef, (snap) => {
+        setLoading(false);
         (async () => {
           if (cancelled) return;
           if (snap.exists()) {
@@ -277,80 +278,48 @@ export default function DailyView({
 
               return mergedData;
             });
+            setLoading(false);
           } else {
             // ── 當天文件不存在，計算帶入值 ──────────────────────────
             const [cy, cm, cd] = normalizeDateKey(currentDate).split('-').map(Number);
             const targetDt = new Date(cy, cm - 1, cd);
-            const [_y, _m, _d] = targetDateKey.split('-').map(Number);
-            const isFirstOfMonth = _d === 1;
 
             let accumFromPrev = 0;
             let inventoryFromPrev: Record<string, any> = {};
 
-            // ── 輔助：將 Date 轉成 padded key ─────────────────
-            const toKey = (dt: Date) =>
-              `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
-
             try {
-              // ── AR 帶入：往前最多找 60 天，找到最近一份有資料的文件 ──
-              if (!isFirstOfMonth) {
-                let searchDt = new Date(targetDt);
-                for (let i = 0; i < 60; i++) {
-                  searchDt.setDate(searchDt.getDate() - 1);
-                  const searchKey = toKey(searchDt);
-                  // 月初不跨月累積
-                  if (searchDt.getMonth() !== targetDt.getMonth() - 1 &&
-                      searchDt.getFullYear() === targetDt.getFullYear() &&
-                      searchDt.getMonth() < targetDt.getMonth() - 1) break;
-                  if (searchDt.getFullYear() < targetDt.getFullYear()) break;
+              // ── 最佳化：直接向資料庫查詢最近的一份有資料的報表 ──
+              const q = query(
+                collection(db, 'shops', shopId, 'daily'),
+                where('date', '<', targetDateKey),
+                orderBy('date', 'desc'),
+                limit(1)
+              );
+              const prevSnaps = await getDocs(q);
+              
+              if (!prevSnaps.empty) {
+                const prev = prevSnaps.docs[0].data() as DailyReport;
+                const prevAr = { ...defaultAr(), ...(prev.ar || {}) };
+                const yesterdayUnpaid = calcDayUnpaid(prev.orders || []);
+                accumFromPrev = Math.max(0, (prevAr.accum || 0) + yesterdayUnpaid - (prevAr.collect || 0));
 
-                  const found = await getDailyDocRef(shopId, searchKey);
-                  if (found.snap.exists()) {
-                    const prev = found.snap.data() as DailyReport;
-                    const prevAr = { ...defaultAr(), ...(prev.ar || {}) };
-                    const yesterdayUnpaid = calcDayUnpaid(prev.orders || []);
-                    accumFromPrev = Math.max(0, (prevAr.accum || 0) + yesterdayUnpaid - (prevAr.collect || 0));
+                // ── 庫存帶入 ──
+                const flavorNames = Array.from(new Set([
+                  ...(baseSettings.singleItems || []).filter(i => i.active && !i.name.includes('綜合')).map(i => normalizeFlavorName(i.name)),
+                  ...Object.keys(prev.inventory || {}),
+                ]));
 
-                    // ── 庫存帶入：從找到的最近一天往前算出貨 ──────────
-                    const allItems = [
-                      ...(baseSettings.giftItems || []),
-                      ...(baseSettings.singleItems || []),
-                      ...(baseSettings.customCategories || []).flatMap(c => c.items || []),
-                    ];
-
-                    (prev.orders || []).forEach(o => {
-                      allItems.forEach(item => {
-                        const qty = o.items?.[item.id] || 0;
-                        if (qty <= 0) return;
-                        if (item.recipe) {
-                          Object.entries(item.recipe).forEach(([flavor, count]) => {
-                            const norm = normalizeFlavorName(flavor);
-                          });
-                        } else {
-                          const norm = normalizeFlavorName(item.name);
-                        }
-                      });
-                    });
-
-                    // 用 baseSettings 的口味清單為 key（保證與 UI 顯示一致）
-                    const flavorNames = Array.from(new Set([
-                      ...(baseSettings.singleItems || []).filter(i => i.active && !i.name.includes('綜合')).map(i => normalizeFlavorName(i.name)),
-                      ...Object.keys(prev.inventory || {}),
-                    ]));
-
-                      flavorNames.forEach(flavorKey => {
-                        inventoryFromPrev[flavorKey] = { org: 0, exp: 0, act: 0, los: 0 };
-                      });
-
-                    break; // 找到有資料的那天，停止往前搜尋
-                  }
-                }
+                flavorNames.forEach(flavorKey => {
+                  inventoryFromPrev[flavorKey] = { org: 0, exp: 0, act: 0, los: 0 };
+                });
               }
             } catch (err) {
               console.error('[帶入] 讀取前期日報失敗:', err);
+            } finally {
+              if (!cancelled) setLoading(false);
             }
 
-            // 確保所有啟用口味都有初始 org 欄位（即使前面找不到資料也顯示 0）
+            // 確保所有啟用口味都有初始 org 欄位
             (baseSettings.singleItems || []).filter(i => i.active && !i.name.includes('綜合')).forEach(item => {
               const key = normalizeFlavorName(item.name);
               if (!inventoryFromPrev[key]) {
@@ -368,17 +337,20 @@ export default function DailyView({
               inventory: inventoryFromPrev,
               losses: [],
               packagingUsage: {},
+              updateId: ''
             };
 
-            // 立即寫入 Firestore，不依賴 Debounced Save
+            // 立即寫入 Firestore 以防同步衝突
             try {
               await setDoc(
                 doc(db, 'shops', shopId, 'daily', targetDateKey),
-                { ...newData, date: targetDateKey },
+                newData,
                 { merge: false }
               );
+              setLoadedDateKey(targetDateKey);
+              setDailyData(newData);
             } catch (err) {
-              console.error('[帶入] 寫入 Firestore 失敗，使用 local state:', err);
+              console.error('[帶入] 寫入 Firestore 失敗:', err);
               setLoadedDateKey(targetDateKey);
               setDailyData(newData);
             }
