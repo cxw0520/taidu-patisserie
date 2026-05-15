@@ -608,12 +608,12 @@ export default function DailyView({
 
 
   const updateOrderInDb = (orderId: string, patch: Partial<Order>) => {
-    let targetKey = '';
+    const targetKey = normalizeDateKey(currentDate);
+    if (!loadedDateKey || loadedDateKey !== targetKey) return;
+
     // 1. Instant local update
     setDailyData(prev => {
       if (!prev) return prev;
-      targetKey = normalizeDateKey(currentDate);
-      if (!loadedDateKey || loadedDateKey !== targetKey) return prev;
       const nextOrders = [...(prev.orders || [])];
       const idx = nextOrders.findIndex(o => o.id === orderId);
       if (idx >= 0) {
@@ -655,14 +655,15 @@ export default function DailyView({
   };
 
   const deleteOrderInDb = (orderId: string) => {
-    let targetKey = '';
+    const targetKey = normalizeDateKey(currentDate);
+    if (!loadedDateKey || loadedDateKey !== targetKey) return;
+
     setDailyData(prev => {
       if (!prev) return prev;
-      targetKey = normalizeDateKey(currentDate);
       return { ...prev, orders: (prev.orders || []).filter(o => o.id !== orderId) };
     });
 
-    if (targetKey && shopId) {
+    if (shopId) {
       const newUpdateId = uid();
       localUpdateIdRef.current = newUpdateId;
 
