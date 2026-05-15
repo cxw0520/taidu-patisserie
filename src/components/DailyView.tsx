@@ -224,11 +224,9 @@ export default function DailyView({
     setDailyData(null);
     setLoadedDateKey('');
 
-    const start = async () => {
-      const resolved = await getDailyDocRef(shopId, currentDate);
-      if (cancelled) return;
-      const targetRef = resolved.ref;
-      const targetDateKey = resolved.dateKey;
+    const start = () => {
+      const targetDateKey = normalizeDateKey(currentDate);
+      const targetRef = doc(db, 'shops', shopId, 'daily', targetDateKey);
 
       unsub = onSnapshot(targetRef, (snap) => {
         setLoading(false);
@@ -280,7 +278,22 @@ export default function DailyView({
             });
             setLoading(false);
           } else {
-            // ── 當天文件不存在，計算帶入值 ──────────────────────────
+            // ── 當天文件不存在，先檢查是否有 Legacy Key 的資料 ──
+            const legacyKey = toLegacyDateKey(currentDate);
+            if (legacyKey !== targetDateKey) {
+              const legacyRef = doc(db, 'shops', shopId, 'daily', legacyKey);
+              const legacySnap = await getDoc(legacyRef);
+              if (legacySnap.exists() && !cancelled) {
+                // 如果有 Legacy 資料，提示用戶或自動遷移（這裡選擇自動顯示，並在下次存檔時存入 PadKey）
+                const data = legacySnap.data() as DailyReport;
+                setDailyData({ ...data, date: targetDateKey });
+                setLoadedDateKey(targetDateKey);
+                setLoading(false);
+                return;
+              }
+            }
+
+            // ── 真的沒有資料，計算帶入值 ──────────────────────────
             const [cy, cm, cd] = normalizeDateKey(currentDate).split('-').map(Number);
             const targetDt = new Date(cy, cm - 1, cd);
 
