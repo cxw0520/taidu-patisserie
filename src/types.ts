@@ -133,6 +133,7 @@ export interface Order {
   orderType?: 'normal' | 'prepayment' | 'pickup' | 'topup';
   pendingPickup?: boolean;
   customerId?: string; // 連動 CRM 的顧客 ID
+  createdAt?: string;  // ISO 時間戳，訂單建立時間
 }
 
 

@@ -251,6 +251,8 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
           recipientName: po.recipientName,
           recipientPhone: po.recipientPhone,
           deliveryMethod,
+          source: 'import' as const,
+          createdAt: new Date().toISOString(),
         });
         });
 

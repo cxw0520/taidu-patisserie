@@ -140,7 +140,7 @@ export default function AddOrderModal({ settings, shopId, customers, onClose, on
           </div>
         </div>
         <div className="px-8 pb-8 pt-4 border-t border-coffee-50">
-          <button onClick={() => onAdd({ ...form, id: uid() })} className="w-full py-4 bg-coffee-800 text-white rounded-2xl font-bold shadow-xl hover:bg-coffee-900 transition-all active:scale-95 flex items-center justify-center gap-2">
+          <button onClick={() => onAdd({ ...form, id: uid(), source: 'manual', createdAt: new Date().toISOString() })} className="w-full py-4 bg-coffee-800 text-white rounded-2xl font-bold shadow-xl hover:bg-coffee-900 transition-all active:scale-95 flex items-center justify-center gap-2">
             確認新增訂單 <Plus className="w-5 h-5" />
           </button>
         </div>

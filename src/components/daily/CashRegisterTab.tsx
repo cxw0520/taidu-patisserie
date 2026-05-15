@@ -290,7 +290,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       source: 'pos', orderType: 'normal', pickupDate: dailyData.date || checkoutData.pickupDate,
       customerId: selectedCust?.id,
       deliveryMethod: '現場',
-      isPickedUp: true
+      isPickedUp: true,
+      createdAt: new Date().toISOString()
     } : null;
 
     const newPrepayOrder: Order | null = (cart.length > 0 && isFuturePickup) ? {
@@ -300,7 +301,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       status: checkoutData.paymentMethod,
       note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨`,
       source: 'pos', orderType: 'prepayment', pickupDate: checkoutData.pickupDate,
-      customerId: selectedCust?.id
+      customerId: selectedCust?.id,
+      createdAt: new Date().toISOString()
     } : null;
 
     updateDaily(prev => {

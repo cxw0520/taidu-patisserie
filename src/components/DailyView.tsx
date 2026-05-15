@@ -143,21 +143,50 @@ export default function DailyView({
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved'>('idle');
   const lastSnapshotRef = useRef<string>('');
   
-  // Filters and Summary search
+  // Filters, Summary search, and Sort
   const [sourceFilter, setSourceFilter] = useState<'all' | 'pos' | 'manual' | 'import'>('all');
   const [pickupFilter, setPickupFilter] = useState<'all' | 'picked' | 'pending'>('all');
   const [summaryItemId, setSummaryItemId] = useState<string>('');
+  type SortField = 'time' | 'delivery' | 'status';
+  type SortDir = 'asc' | 'desc' | null;
+  const [sortConfig, setSortConfig] = useState<{ field: SortField; dir: SortDir }>({ field: 'time', dir: null });
+  const [sortDropdown, setSortDropdown] = useState<SortField | null>(null);
+  const sortDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Delivery method sort order
+  const deliveryOrder = (o: Order): number => {
+    if (o.deliveryMethod === '宅配') return 0;
+    if (o.deliveryMethod === '自取' && !o.isPickedUp) return 1;
+    if (o.deliveryMethod === '自取' && o.isPickedUp) return 2;
+    return 3; // 現場 or undefined
+  };
 
   const filteredOrders = useMemo(() => {
     if (!dailyData?.orders) return [];
-    return dailyData.orders.filter(o => {
+    const filtered = dailyData.orders.filter(o => {
       const matchSource = sourceFilter === 'all' || o.source === sourceFilter;
       const matchPickup = pickupFilter === 'all' || 
                          (pickupFilter === 'picked' && o.isPickedUp) || 
                          (pickupFilter === 'pending' && o.deliveryMethod === '自取' && !o.isPickedUp);
       return matchSource && matchPickup;
     });
-  }, [dailyData?.orders, sourceFilter, pickupFilter]);
+
+    if (!sortConfig.dir) return filtered; // default: preserve insertion order
+
+    return [...filtered].sort((a, b) => {
+      let cmp = 0;
+      if (sortConfig.field === 'time') {
+        const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        cmp = ta - tb;
+      } else if (sortConfig.field === 'delivery') {
+        cmp = deliveryOrder(a) - deliveryOrder(b);
+      } else if (sortConfig.field === 'status') {
+        cmp = (a.status || '').localeCompare(b.status || '', 'zh-TW');
+      }
+      return sortConfig.dir === 'asc' ? cmp : -cmp;
+    });
+  }, [dailyData?.orders, sourceFilter, pickupFilter, sortConfig]);
 
   const itemSummary = useMemo(() => {
     if (!summaryItemId || !dailyData?.orders) return null;
@@ -821,13 +850,13 @@ export default function DailyView({
                 <div className="flex flex-wrap items-center gap-3">
                   {/* Filters */}
                   <div className="flex bg-coffee-50 p-1 rounded-xl border border-coffee-100">
-                    {['all', 'pos', 'manual', 'import'].map(f => (
+                    {(['all', 'pos', 'manual', 'import'] as const).map(f => (
                       <button 
                         key={f}
-                        onClick={() => setSourceFilter(f as any)}
+                        onClick={() => setSourceFilter(f)}
                         className={cn("px-3 py-1.5 text-xs font-bold rounded-lg transition-all", sourceFilter === f ? "bg-white text-coffee-800 shadow-sm" : "text-coffee-400 hover:text-coffee-600")}
                       >
-                        {f === 'all' ? '全部' : f === 'pos' ? 'POS' : f === 'manual' ? '收銀' : '匯入'}
+                        {f === 'all' ? '全部' : f === 'pos' ? 'POS收銀' : f === 'manual' ? '手動新增' : '批量匯入'}
                       </button>
                     ))}
                   </div>
@@ -893,11 +922,48 @@ export default function DailyView({
             </div>
 
             {/* max-h + overflow-y-auto enables sticky thead inside a scrollable container */}
-            <div className="rounded-2xl border border-coffee-50 bg-white/50" style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '520px' }}>
+            <div className="rounded-2xl border border-coffee-50 bg-white/50" style={{ overflowX: 'auto', overflowY: 'auto', maxHeight: '520px' }}
+              onClick={(e) => {
+                // Close sort dropdown if click is not on a sort button
+                const target = e.target as HTMLElement;
+                if (!target.closest('[data-sort-btn]')) setSortDropdown(null);
+              }}
+            >
               <table className="w-full text-xs md:text-sm text-center border-collapse">
                 <thead className="bg-[#faf7f2] sticky top-0 z-30">
                   <tr className="text-coffee-400 font-bold uppercase tracking-wider">
-                    <th className="px-3 py-4 text-left border-b border-[#f0ede8] sticky left-0 z-20 bg-[#faf7f2]/90 backdrop-blur-md">購買人</th>
+                    {/* 購買人 — sortable by time */}
+                    <th className="px-3 py-4 text-left border-b border-[#f0ede8] sticky left-0 z-20 bg-[#faf7f2]/90 backdrop-blur-md">
+                      <div className="flex items-center gap-1 relative" data-sort-btn="true">
+                        <span>購買人</span>
+                        <button
+                          onClick={() => setSortDropdown(prev => prev === 'time' ? null : 'time')}
+                          className={cn("p-0.5 rounded hover:bg-coffee-100 transition-colors flex items-center",
+                            sortConfig.field === 'time' && sortConfig.dir ? "text-rose-brand" : "text-coffee-300")}
+                          title="依時間排序"
+                        >
+                          {sortConfig.field === 'time' && sortConfig.dir === 'asc' ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                          ) : sortConfig.field === 'time' && sortConfig.dir === 'desc' ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                          ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 9l4-4 4 4M16 15l-4 4-4-4"/></svg>
+                          )}
+                        </button>
+                        {sortDropdown === 'time' && (
+                          <div className="absolute top-full left-0 mt-1 bg-white border border-coffee-100 rounded-xl shadow-xl z-50 min-w-[140px] overflow-hidden">
+                            <div className="px-3 py-2 text-[10px] font-bold text-coffee-400 uppercase tracking-wider border-b border-coffee-50">依結帳/新增時間</div>
+                            {[{dir: null as SortDir, label: '預設（新增順序）'}, {dir: 'asc' as SortDir, label: '⬆ 舊 → 新'}, {dir: 'desc' as SortDir, label: '⬇ 新 → 舊'}].map(opt => (
+                              <button key={String(opt.dir)} onClick={() => { setSortConfig({ field: 'time', dir: opt.dir }); setSortDropdown(null); }}
+                                className={cn("w-full text-left px-3 py-2 text-xs font-bold hover:bg-coffee-50 transition-colors",
+                                  sortConfig.field === 'time' && sortConfig.dir === opt.dir ? "text-rose-brand bg-rose-50" : "text-coffee-700")}>
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </th>
                     {settings.giftItems.filter(i => i.active).length > 0 && (
                       <th colSpan={settings.giftItems.filter(i => i.active).length} className="px-2 py-4 border-b border-[#f0ede8] bg-[#ffcbf2]/30 border-r border-[#ffb3c1]/30">禮盒</th>
                    )}
@@ -905,8 +971,74 @@ export default function DailyView({
                      <th colSpan={settings.singleItems.filter(i => i.active).length} className="px-2 py-4 border-b border-[#f0ede8] bg-[#a2d2ff]/30 border-r border-[#83c5be]/30">單顆</th>
                    )}
                     <th colSpan={4} className="px-2 py-4 border-b border-[#f0ede8] bg-[#e2ece9]/30">金額結算</th>
-                    <th className="px-3 py-4 border-b border-[#f0ede8]">收款</th>
-                    <th className="px-3 py-4 border-b border-[#f0ede8]">配送</th>
+                    {/* 收款 — sortable by status */}
+                    <th className="px-3 py-4 border-b border-[#f0ede8]">
+                      <div className="flex items-center justify-center gap-1 relative" data-sort-btn="true">
+                        <span>收款</span>
+                        <button
+                          onClick={() => setSortDropdown(prev => prev === 'status' ? null : 'status')}
+                          className={cn("p-0.5 rounded hover:bg-coffee-100 transition-colors flex items-center",
+                            sortConfig.field === 'status' && sortConfig.dir ? "text-rose-brand" : "text-coffee-300")}
+                          title="依收款方式排序"
+                        >
+                          {sortConfig.field === 'status' && sortConfig.dir === 'asc' ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                          ) : sortConfig.field === 'status' && sortConfig.dir === 'desc' ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                          ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 9l4-4 4 4M16 15l-4 4-4-4"/></svg>
+                          )}
+                        </button>
+                        {sortDropdown === 'status' && (
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1 bg-white border border-coffee-100 rounded-xl shadow-xl z-50 min-w-[140px] overflow-hidden">
+                            <div className="px-3 py-2 text-[10px] font-bold text-coffee-400 uppercase tracking-wider border-b border-coffee-50">依收款方式</div>
+                            {[{dir: null as SortDir, label: '預設（新增順序）'}, {dir: 'asc' as SortDir, label: '⬆ A → Z'}, {dir: 'desc' as SortDir, label: '⬇ Z → A'}].map(opt => (
+                              <button key={String(opt.dir)} onClick={() => { setSortConfig({ field: 'status', dir: opt.dir }); setSortDropdown(null); }}
+                                className={cn("w-full text-left px-3 py-2 text-xs font-bold hover:bg-coffee-50 transition-colors",
+                                  sortConfig.field === 'status' && sortConfig.dir === opt.dir ? "text-rose-brand bg-rose-50" : "text-coffee-700")}>
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </th>
+                    {/* 配送 — sortable by delivery method */}
+                    <th className="px-3 py-4 border-b border-[#f0ede8]">
+                      <div className="flex items-center justify-center gap-1 relative" data-sort-btn="true">
+                        <span>配送</span>
+                        <button
+                          onClick={() => setSortDropdown(prev => prev === 'delivery' ? null : 'delivery')}
+                          className={cn("p-0.5 rounded hover:bg-coffee-100 transition-colors flex items-center",
+                            sortConfig.field === 'delivery' && sortConfig.dir ? "text-rose-brand" : "text-coffee-300")}
+                          title="依配送方式排序"
+                        >
+                          {sortConfig.field === 'delivery' && sortConfig.dir === 'asc' ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 19V5M5 12l7-7 7 7"/></svg>
+                          ) : sortConfig.field === 'delivery' && sortConfig.dir === 'desc' ? (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 5v14M5 12l7 7 7-7"/></svg>
+                          ) : (
+                            <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 9l4-4 4 4M16 15l-4 4-4-4"/></svg>
+                          )}
+                        </button>
+                        {sortDropdown === 'delivery' && (
+                          <div className="absolute top-full right-0 mt-1 bg-white border border-coffee-100 rounded-xl shadow-xl z-50 min-w-[160px] overflow-hidden">
+                            <div className="px-3 py-2 text-[10px] font-bold text-coffee-400 uppercase tracking-wider border-b border-coffee-50">依取貨方式</div>
+                            {[
+                              {dir: null as SortDir, label: '預設（新增順序）'},
+                              {dir: 'asc' as SortDir, label: '⬆ 宅配→待取→已取'},
+                              {dir: 'desc' as SortDir, label: '⬇ 已取→待取→宅配'},
+                            ].map(opt => (
+                              <button key={String(opt.dir)} onClick={() => { setSortConfig({ field: 'delivery', dir: opt.dir }); setSortDropdown(null); }}
+                                className={cn("w-full text-left px-3 py-2 text-xs font-bold hover:bg-coffee-50 transition-colors",
+                                  sortConfig.field === 'delivery' && sortConfig.dir === opt.dir ? "text-rose-brand bg-rose-50" : "text-coffee-700")}>
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </th>
                     <th className="px-3 py-4 border-b border-[#f0ede8]">電話</th>
                     <th className="px-3 py-4 border-b border-[#f0ede8]">備注</th>
                     <th className="px-3 py-4 border-b border-[#f0ede8] text-right sticky right-0 z-20 bg-[#faf7f2]/90 backdrop-blur-md">操作</th>
@@ -946,11 +1078,20 @@ export default function DailyView({
                             value={order.buyer}
                             onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].buyer = e.target.value; updateDaily({ orders }); }}
                           />
-                          <span className={cn("text-[9px] px-1.5 py-0.5 rounded-full font-bold uppercase tracking-tighter", 
-                            order.source === 'pos' ? "bg-coffee-100 text-coffee-500" : 
-                            order.source === 'import' ? "bg-blue-50 text-blue-500" : "bg-purple-50 text-purple-500")}>
-                            {order.source || 'manual'}
-                          </span>
+                          <div className="flex items-center gap-1 flex-wrap">
+                            <span className={cn("text-[9px] px-1.5 py-0.5 rounded-full font-bold tracking-tighter", 
+                              order.source === 'pos' ? "bg-coffee-100 text-coffee-600" : 
+                              order.source === 'import' ? "bg-blue-50 text-blue-500" :
+                              order.source === 'manual' ? "bg-purple-50 text-purple-500" :
+                              "bg-gray-100 text-gray-400")}>
+                              {order.source === 'pos' ? 'POS收銀' : order.source === 'import' ? '批量匯入' : order.source === 'manual' ? '手動新增' : '未知'}
+                            </span>
+                            {order.createdAt && (
+                              <span className="text-[9px] text-coffee-300 font-mono tabular-nums" title={order.createdAt}>
+                                {new Date(order.createdAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </td>
                       {(settings.giftItems || []).filter(i => i.active).map(i => (
