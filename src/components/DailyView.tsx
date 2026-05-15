@@ -451,23 +451,21 @@ export default function DailyView({
     updaterFn: (prev: DailyReport) => DailyReport,
     sideEffectOrders: Order[]
   ) => {
-    let targetKey = '';
+    const targetKey = normalizeDateKey(currentDate);
+    if (!loadedDateKey || loadedDateKey !== targetKey) return;
 
     // 1. Instant local update
     setDailyData(prev => {
       if (!prev) return prev;
-      targetKey = normalizeDateKey(currentDate);
-      if (!loadedDateKey || loadedDateKey !== targetKey) return prev;
       return updaterFn(prev);
     });
 
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    if (!shopId) return;
 
     // 2. Transaction update
-    if (targetKey && shopId) {
-      try {
-        await runTransaction(db, async (tx) => {
-          const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
+    try {
+      await runTransaction(db, async (tx) => {
+        const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
           const snap = await tx.get(docRef);
           if (snap.exists()) {
              const serverData = snap.data() as DailyReport;
@@ -481,7 +479,6 @@ export default function DailyView({
       } catch (e) {
         console.error('[POS] Firestore transaction failed:', e);
       }
-    }
 
     // 4. Side effects: packaging deduction + CRM (do NOT touch orders state)
     for (const order of sideEffectOrders) {
@@ -582,40 +579,35 @@ export default function DailyView({
   };
 
   const handleNewOrder = async (order: Order) => {
-    let targetKey = '';
+    const targetKey = normalizeDateKey(currentDate);
+    if (!loadedDateKey || loadedDateKey !== targetKey) return;
 
     // 1. Instant local update
     setDailyData(prev => {
       if (!prev) return prev;
-      const currentKey = normalizeDateKey(currentDate);
-      if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
       if ((prev.orders || []).some(o => o.id === order.id)) return prev;
-      
-      targetKey = loadedDateKey;
-      return { ...prev, orders: [...(prev.orders || []), order], date: loadedDateKey };
+      return { ...prev, orders: [...(prev.orders || []), order], date: targetKey };
     });
 
-    await new Promise<void>(resolve => setTimeout(resolve, 0));
+    if (!shopId) return;
 
     // 2. Transaction update
-    if (targetKey && shopId) {
-      try {
-        await runTransaction(db, async (tx) => {
-          const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
-          const snap = await tx.get(docRef);
-          if (snap.exists()) {
-             const serverData = snap.data() as DailyReport;
-             const sOrders = serverData.orders || [];
-             if (!sOrders.some(o => o.id === order.id)) {
-                tx.set(docRef, { orders: [...sOrders, order] }, { merge: true });
-             }
-          } else {
-             tx.set(docRef, { date: targetKey, orders: [order] }, { merge: true });
-          }
-        });
-      } catch (e) {
-        console.error('[Add Order] Firestore transaction failed:', e);
-      }
+    try {
+      await runTransaction(db, async (tx) => {
+        const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
+        const snap = await tx.get(docRef);
+        if (snap.exists()) {
+           const serverData = snap.data() as DailyReport;
+           const sOrders = serverData.orders || [];
+           if (!sOrders.some(o => o.id === order.id)) {
+              tx.set(docRef, { orders: [...sOrders, order] }, { merge: true });
+           }
+        } else {
+           tx.set(docRef, { date: targetKey, orders: [order] }, { merge: true });
+        }
+      });
+    } catch (e) {
+      console.error('[Add Order] Firestore transaction failed:', e);
     }
     
     // Auto-deduct packaging ONLY IF it's not a pending pickup order
