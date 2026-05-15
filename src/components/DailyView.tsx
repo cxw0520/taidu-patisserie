@@ -407,6 +407,63 @@ export default function DailyView({
       return updated;
     });
   };
+
+  // POS-specific checkout: updates state AND immediately writes to Firestore to avoid race conditions
+  const handlePosCheckout = async (
+    updaterFn: (prev: DailyReport) => DailyReport,
+    sideEffectOrders: Order[]
+  ) => {
+    let finalData: DailyReport | null = null;
+
+    setDailyData(prev => {
+      if (!prev) return prev;
+      const currentKey = normalizeDateKey(currentDate);
+      if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
+      const updated = updaterFn(prev);
+      lastSnapshotRef.current = JSON.stringify(updated);
+      finalData = updated;
+      return updated;
+    });
+
+    // Give React a tick to flush the state, then write directly to Firestore
+    // This ensures the snapshot echo-back protection is set before any other write
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    if (finalData && loadedDateKey && shopId) {
+      try {
+        await setDoc(
+          doc(db, 'shops', shopId, 'daily', loadedDateKey),
+          { ...(finalData as DailyReport), date: loadedDateKey },
+          { merge: true }
+        );
+        // Update lastSnapshotRef AFTER write so the echo-back matches
+        lastSnapshotRef.current = JSON.stringify({ ...(finalData as DailyReport), date: loadedDateKey });
+      } catch (e) {
+        console.error('[POS] Firestore write failed:', e);
+      }
+    }
+
+    // Side effects: packaging deduction + CRM (do NOT touch state)
+    for (const order of sideEffectOrders) {
+      if (!order.pendingPickup) {
+        await deductPackagingForOrder(order);
+      }
+      if (order.buyer && order.buyer !== '現客') {
+        upsertCustomerFromOrder(shopId, customers, {
+          orderId: order.id,
+          date: currentDate,
+          buyer: order.buyer,
+          phone: order.phone || '',
+          email: '',
+          prodAmt: order.prodAmt,
+          actualAmt: order.actualAmt,
+          items: order.items,
+          status: order.status
+        }, (candidates, resolve) => { setMergeConflict({ candidates, resolve }); });
+      }
+    }
+  };
+
   const handlePickup = async (orderId: string) => {
     if (!dailyData) return;
     const orderIndex = dailyData.orders.findIndex(o => o.id === orderId);
@@ -794,6 +851,7 @@ export default function DailyView({
                 handleNewOrder(order);
                 setSaveStatus('saving');
               }}
+              onPosCheckout={handlePosCheckout}
               onAddFutureOrder={handleAddFutureOrder}
               onGoToDashboard={() => setSubTab('dashboard')}
             />

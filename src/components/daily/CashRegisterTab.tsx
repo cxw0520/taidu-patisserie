@@ -34,6 +34,7 @@ interface CashRegisterTabProps {
   metrics: any;
   customers: import('../../types').Customer[];
   onAddOrder: (order: Order) => void;
+  onPosCheckout?: (updaterFn: (prev: DailyReport) => DailyReport, sideEffectOrders: Order[]) => Promise<void>;
   onAddFutureOrder?: (targetDate: string, order: Order) => void;
   onGoToDashboard?: () => void;
 }
@@ -48,7 +49,7 @@ const DEFAULT_CURRENCY: CurrencyBreakdown = {
   "1": 0
 };
 
-export default function CashRegisterTab({ dailyData, settings, updateDaily, metrics, customers, onAddOrder, onAddFutureOrder, onGoToDashboard, shopId }: CashRegisterTabProps & { shopId?: string }) {
+export default function CashRegisterTab({ dailyData, settings, updateDaily, metrics, customers, onAddOrder, onPosCheckout, onAddFutureOrder, onGoToDashboard, shopId }: CashRegisterTabProps & { shopId?: string }) {
   const [cart, setCart] = useState<{item: Item, qty: number}[]>([]);
   // Loaded pre-existing orders
   const [loadedOrders, setLoadedOrders] = useState<LoadedOrder[]>([]);
@@ -305,34 +306,39 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       createdAt: new Date().toISOString()
     } : null;
 
-    updateDaily(prev => {
-      let nextOrders = [...(prev.orders || [])];
+    if (onPosCheckout) {
+      // Atomic: update state + write Firestore immediately, no race condition
+      const ordersToProcess: Order[] = [];
+      if (newNormalOrder) ordersToProcess.push(newNormalOrder);
+      if (newPrepayOrder) ordersToProcess.push(newPrepayOrder);
 
-      // Mark loaded orders as picked up
-      if (loadedOrders.length > 0) {
-        nextOrders = nextOrders.map(o => {
-          const lo = loadedOrders.find(l => l.order.id === o.id);
-          if (!lo) return o;
-          return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
-        });
-      }
+      await onPosCheckout(
+        (prev) => {
+          let nextOrders = [...(prev.orders || [])];
 
-      // Append new orders (dedup by id)
-      if (newNormalOrder && !nextOrders.some(o => o.id === newNormalOrder.id)) {
-        nextOrders.push(newNormalOrder);
-      }
-      if (newPrepayOrder && !nextOrders.some(o => o.id === newPrepayOrder.id)) {
-        nextOrders.push(newPrepayOrder);
-      }
+          // Mark loaded orders as picked up
+          if (loadedOrders.length > 0) {
+            nextOrders = nextOrders.map(o => {
+              const lo = loadedOrders.find(l => l.order.id === o.id);
+              if (!lo) return o;
+              return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
+            });
+          }
 
-      return { orders: nextOrders };
-    });
+          // Append new orders (dedup by id)
+          if (newNormalOrder && !nextOrders.some(o => o.id === newNormalOrder.id)) {
+            nextOrders.push(newNormalOrder);
+          }
+          if (newPrepayOrder && !nextOrders.some(o => o.id === newPrepayOrder.id)) {
+            nextOrders.push(newPrepayOrder);
+          }
 
-    // Side effects (CRM, packaging) via onAddOrder - handleNewOrder will skip state update due to dedup
-    if (newNormalOrder) onAddOrder(newNormalOrder);
-    if (newPrepayOrder) {
-      onAddOrder(newPrepayOrder);
-      if (onAddFutureOrder) {
+          return { ...prev, orders: nextOrders };
+        },
+        ordersToProcess
+      );
+
+      if (newPrepayOrder && onAddFutureOrder) {
         onAddFutureOrder(checkoutData.pickupDate, {
           id: uid(), buyer: checkoutData.buyer, phone: checkoutData.phone,
           address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
@@ -341,6 +347,35 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           source: 'pos', orderType: 'pickup', pendingPickup: true,
           pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id
         });
+      }
+    } else {
+      // Fallback: legacy path
+      updateDaily(prev => {
+        let nextOrders = [...(prev.orders || [])];
+        if (loadedOrders.length > 0) {
+          nextOrders = nextOrders.map(o => {
+            const lo = loadedOrders.find(l => l.order.id === o.id);
+            if (!lo) return o;
+            return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
+          });
+        }
+        if (newNormalOrder && !nextOrders.some(o => o.id === newNormalOrder.id)) nextOrders.push(newNormalOrder);
+        if (newPrepayOrder && !nextOrders.some(o => o.id === newPrepayOrder.id)) nextOrders.push(newPrepayOrder);
+        return { orders: nextOrders };
+      });
+      if (newNormalOrder) onAddOrder(newNormalOrder);
+      if (newPrepayOrder) {
+        onAddOrder(newPrepayOrder);
+        if (onAddFutureOrder) {
+          onAddFutureOrder(checkoutData.pickupDate, {
+            id: uid(), buyer: checkoutData.buyer, phone: checkoutData.phone,
+            address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
+            discAmt: checkoutData.discAmt, actualAmt: 0, status: '已收帳款',
+            note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳`,
+            source: 'pos', orderType: 'pickup', pendingPickup: true,
+            pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id
+          });
+        }
       }
     }
 
