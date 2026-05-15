@@ -367,11 +367,12 @@ export default function DailyView({
     return () => clearTimeout(t);
   }, [dailyData, currentDate, loadedDateKey, loading, shopId]);
 
-  const updateDaily = (patch: Partial<DailyReport>) => {
+  const updateDaily = (patchOrFn: Partial<DailyReport> | ((prev: DailyReport) => Partial<DailyReport>)) => {
     setDailyData(prev => {
       if (!prev) return null;
       const currentKey = normalizeDateKey(currentDate);
       if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
+      const patch = typeof patchOrFn === 'function' ? patchOrFn(prev) : patchOrFn;
       const updated = { ...prev, ...patch, date: loadedDateKey };
       lastSnapshotRef.current = JSON.stringify(updated); // prevent echo back
       return updated;

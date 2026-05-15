@@ -29,7 +29,7 @@ import { doc, runTransaction } from 'firebase/firestore';
 interface CashRegisterTabProps {
   dailyData: DailyReport;
   settings: Settings;
-  updateDaily: (patch: Partial<DailyReport>) => void;
+  updateDaily: (patchOrFn: Partial<DailyReport> | ((prev: DailyReport) => Partial<DailyReport>)) => void;
   shopId: string;
   metrics: any;
   customers: import('../../types').Customer[];
@@ -280,64 +280,66 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       }
     }
 
-    let nextOrders = [...dailyData.orders];
-    let needsUpdate = false;
+    // ── 2 & 3. Atomically update orders based on the freshest prev state ─────
+    const newNormalOrder: Order | null = (cart.length > 0 && !isFuturePickup) ? {
+      id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
+      address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
+      discAmt: checkoutData.discAmt, actualAmt: Math.max(0, newItemsAmt),
+      status: checkoutData.paymentMethod,
+      note: `收銀機交易 - ${checkoutData.paymentMethod}`,
+      source: 'pos', orderType: 'normal', pickupDate: dailyData.date || checkoutData.pickupDate,
+      customerId: selectedCust?.id,
+      deliveryMethod: '現場',
+      isPickedUp: true
+    } : null;
 
-    // ── 2. Mark loaded orders as picked up ───────────────────────
-    if (loadedOrders.length > 0) {
-      nextOrders = nextOrders.map(o => {
-        const lo = loadedOrders.find(l => l.order.id === o.id);
-        if (!lo) return o;
-        return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
-      });
-      needsUpdate = true;
-    }
+    const newPrepayOrder: Order | null = (cart.length > 0 && isFuturePickup) ? {
+      id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
+      address: '', items: {}, prodAmt: 0, shipAmt: 0, discAmt: 0,
+      actualAmt: Math.max(0, newItemsAmt),
+      status: checkoutData.paymentMethod,
+      note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨`,
+      source: 'pos', orderType: 'prepayment', pickupDate: checkoutData.pickupDate,
+      customerId: selectedCust?.id
+    } : null;
 
-    // ── 3. Create new order for new items (if any) ───────────────
-    if (cart.length > 0) {
-      if (isFuturePickup) {
-        const prepaymentOrder: Order = {
-          id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
-          address: '', items: {}, prodAmt: 0, shipAmt: 0, discAmt: 0,
-          actualAmt: Math.max(0, newItemsAmt),
-          status: checkoutData.paymentMethod,
-          note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨`,
-          source: 'pos', orderType: 'prepayment', pickupDate: checkoutData.pickupDate,
-          customerId: selectedCust?.id
-        };
-        nextOrders.push(prepaymentOrder);
-        needsUpdate = true;
-        onAddOrder(prepaymentOrder); // Trigger side effects (CRM, packaging)
-        if (onAddFutureOrder) {
-          onAddFutureOrder(checkoutData.pickupDate, {
-            id: uid(), buyer: checkoutData.buyer, phone: checkoutData.phone,
-            address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
-            discAmt: checkoutData.discAmt, actualAmt: 0, status: '已收帳款',
-            note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳`,
-            source: 'pos', orderType: 'pickup', pendingPickup: true,
-            pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id
-          });
-        }
-      } else {
-        const normalOrder: Order = {
-          id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
-          address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
-          discAmt: checkoutData.discAmt, actualAmt: Math.max(0, newItemsAmt),
-          status: checkoutData.paymentMethod,
-          note: `收銀機交易 - ${checkoutData.paymentMethod}`,
-          source: 'pos', orderType: 'normal', pickupDate: dailyData.date || checkoutData.pickupDate,
-          customerId: selectedCust?.id,
-          deliveryMethod: '現場',
-          isPickedUp: true
-        };
-        nextOrders.push(normalOrder);
-        needsUpdate = true;
-        onAddOrder(normalOrder); // Trigger side effects (CRM, packaging)
+    updateDaily(prev => {
+      let nextOrders = [...(prev.orders || [])];
+
+      // Mark loaded orders as picked up
+      if (loadedOrders.length > 0) {
+        nextOrders = nextOrders.map(o => {
+          const lo = loadedOrders.find(l => l.order.id === o.id);
+          if (!lo) return o;
+          return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
+        });
       }
-    }
 
-    if (needsUpdate) {
-      updateDaily({ orders: nextOrders });
+      // Append new orders (dedup by id)
+      if (newNormalOrder && !nextOrders.some(o => o.id === newNormalOrder.id)) {
+        nextOrders.push(newNormalOrder);
+      }
+      if (newPrepayOrder && !nextOrders.some(o => o.id === newPrepayOrder.id)) {
+        nextOrders.push(newPrepayOrder);
+      }
+
+      return { orders: nextOrders };
+    });
+
+    // Side effects (CRM, packaging) via onAddOrder - handleNewOrder will skip state update due to dedup
+    if (newNormalOrder) onAddOrder(newNormalOrder);
+    if (newPrepayOrder) {
+      onAddOrder(newPrepayOrder);
+      if (onAddFutureOrder) {
+        onAddFutureOrder(checkoutData.pickupDate, {
+          id: uid(), buyer: checkoutData.buyer, phone: checkoutData.phone,
+          address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
+          discAmt: checkoutData.discAmt, actualAmt: 0, status: '已收帳款',
+          note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳`,
+          source: 'pos', orderType: 'pickup', pendingPickup: true,
+          pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id
+        });
+      }
     }
 
     setFinalCheckModal({
