@@ -143,6 +143,8 @@ export default function DailyView({
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const localUpdateIdRef = useRef<string | null>(null);
   const pendingPatchesRef = useRef<Record<string, boolean>>({});
+  const orderTxQueueRef = useRef<Record<string, Partial<Order>>>({});
+  const orderTxTimeoutRef = useRef<any>(null);
   
   // Filters, Summary search, and Sort
   const [sourceFilter, setSourceFilter] = useState<'all' | 'pos' | 'manual' | 'import'>('all');
@@ -249,8 +251,32 @@ export default function DailyView({
               return;
             }
             
-            // It's a real external update or initial load
-            setDailyData(newData);
+            // It's a real external update. Merge intelligently to preserve local unsaved edits.
+            setDailyData(prev => {
+              if (!prev) return newData;
+              const mergedData = { ...newData };
+
+              // 1. Preserve root fields that are currently debouncing
+              Object.keys(pendingPatchesRef.current).forEach(k => {
+                (mergedData as any)[k] = (prev as any)[k];
+              });
+
+              // 2. Preserve order edits that are currently debouncing
+              const pendingOrderIds = Object.keys(orderTxQueueRef.current);
+              if (pendingOrderIds.length > 0) {
+                const mergedOrders = [...(mergedData.orders || [])];
+                pendingOrderIds.forEach(oId => {
+                  const sIdx = mergedOrders.findIndex((o: any) => o.id === oId);
+                  const pIdx = prev.orders.findIndex(o => o.id === oId);
+                  if (sIdx >= 0 && pIdx >= 0) {
+                    mergedOrders[sIdx] = prev.orders[pIdx]; // Keep our local typing state
+                  }
+                });
+                mergedData.orders = mergedOrders;
+              }
+
+              return mergedData;
+            });
           } else {
             // ── 當天文件不存在，計算帶入值 ──────────────────────────
             const [cy, cm, cd] = normalizeDateKey(currentDate).split('-').map(Number);
@@ -488,9 +514,7 @@ export default function DailyView({
     // Auto-deduct packaging when picked up
     await deductPackagingForOrder(order);
     
-    const nextOrders = [...dailyData.orders];
-    nextOrders[orderIndex] = { ...order, pendingPickup: false };
-    updateDaily({ orders: nextOrders });
+    updateOrderInDb(orderId, { pendingPickup: false });
   };
 
   const deductPackagingForOrder = async (order: Order) => {
@@ -621,6 +645,7 @@ export default function DailyView({
 
   const updateOrderInDb = (orderId: string, patch: Partial<Order>) => {
     let targetKey = '';
+    // 1. Instant local update
     setDailyData(prev => {
       if (!prev) return prev;
       targetKey = normalizeDateKey(currentDate);
@@ -633,21 +658,36 @@ export default function DailyView({
       return { ...prev, orders: nextOrders };
     });
 
-    if (targetKey && shopId) {
+    if (!targetKey || !shopId) return;
+
+    // 2. Queue patch and debounce transaction
+    orderTxQueueRef.current[orderId] = { ...orderTxQueueRef.current[orderId], ...patch };
+
+    if (orderTxTimeoutRef.current) clearTimeout(orderTxTimeoutRef.current);
+    orderTxTimeoutRef.current = setTimeout(() => {
+      const patchesToApply = orderTxQueueRef.current;
+      orderTxQueueRef.current = {};
+      if (Object.keys(patchesToApply).length === 0) return;
+
+      const newUpdateId = uid();
+      localUpdateIdRef.current = newUpdateId;
+
       runTransaction(db, async (tx) => {
         const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
         const snap = await tx.get(docRef);
         if (snap.exists()) {
           const sData = snap.data() as any;
           const sOrders = sData.orders || [];
-          const idx = sOrders.findIndex((o: any) => o.id === orderId);
-          if (idx >= 0) {
-            sOrders[idx] = { ...sOrders[idx], ...patch };
-            tx.set(docRef, { orders: sOrders }, { merge: true });
-          }
+          Object.keys(patchesToApply).forEach(oId => {
+            const idx = sOrders.findIndex((o: any) => o.id === oId);
+            if (idx >= 0) {
+              sOrders[idx] = { ...sOrders[idx], ...patchesToApply[oId] };
+            }
+          });
+          tx.set(docRef, { orders: sOrders, updateId: newUpdateId }, { merge: true });
         }
       }).catch(e => console.error('Order update tx failed:', e));
-    }
+    }, 800);
   };
 
   const deleteOrderInDb = (orderId: string) => {
@@ -659,11 +699,14 @@ export default function DailyView({
     });
 
     if (targetKey && shopId) {
+      const newUpdateId = uid();
+      localUpdateIdRef.current = newUpdateId;
+
       runTransaction(db, async (tx) => {
         const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
         const snap = await tx.get(docRef);
         if (snap.exists()) {
-           tx.set(docRef, { orders: (snap.data().orders || []).filter((o: any) => o.id !== orderId) }, { merge: true });
+           tx.set(docRef, { orders: (snap.data().orders || []).filter((o: any) => o.id !== orderId), updateId: newUpdateId }, { merge: true });
         }
       }).catch(e => console.error('Delete order tx failed:', e));
     }

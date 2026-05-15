@@ -325,29 +325,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             });
           }
 
-          // Append or Merge new orders
-          if (newNormalOrder) {
-            if (checkoutData.buyer === '現客' && loadedOrders.length === 0) {
-              const existingIdx = nextOrders.findIndex(o => o.buyer === '現客' && (o.source === 'pos' || o.source === 'manual') && (o.deliveryMethod === '現場' || !o.deliveryMethod));
-              if (existingIdx >= 0) {
-                 const ex = nextOrders[existingIdx];
-                 const mergedItems = { ...ex.items };
-                 Object.entries(newNormalOrder.items || {}).forEach(([itemId, qty]) => {
-                   mergedItems[itemId] = (mergedItems[itemId] || 0) + Number(qty);
-                 });
-                 nextOrders[existingIdx] = {
-                   ...ex,
-                   items: mergedItems,
-                   prodAmt: (ex.prodAmt || 0) + newNormalOrder.prodAmt,
-                   actualAmt: (ex.actualAmt || 0) + newNormalOrder.actualAmt,
-                   discAmt: (ex.discAmt || 0) + newNormalOrder.discAmt,
-                 };
-              } else {
-                 if (!nextOrders.some(o => o.id === newNormalOrder.id)) nextOrders.push(newNormalOrder);
-              }
-            } else {
-               if (!nextOrders.some(o => o.id === newNormalOrder.id)) nextOrders.push(newNormalOrder);
-            }
+          // Append new orders (dedup by id)
+          if (newNormalOrder && !nextOrders.some(o => o.id === newNormalOrder.id)) {
+            nextOrders.push(newNormalOrder);
           }
 
           if (newPrepayOrder && !nextOrders.some(o => o.id === newPrepayOrder.id)) {
@@ -380,29 +360,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
           });
         }
-        if (newNormalOrder) {
-          if (checkoutData.buyer === '現客' && loadedOrders.length === 0) {
-            const existingIdx = nextOrders.findIndex(o => o.buyer === '現客' && (o.source === 'pos' || o.source === 'manual') && (o.deliveryMethod === '現場' || !o.deliveryMethod));
-            if (existingIdx >= 0) {
-               const ex = nextOrders[existingIdx];
-               const mergedItems = { ...ex.items };
-               Object.entries(newNormalOrder.items || {}).forEach(([itemId, qty]) => {
-                 mergedItems[itemId] = (mergedItems[itemId] || 0) + Number(qty);
-               });
-               nextOrders[existingIdx] = {
-                 ...ex,
-                 items: mergedItems,
-                 prodAmt: (ex.prodAmt || 0) + newNormalOrder.prodAmt,
-                 actualAmt: (ex.actualAmt || 0) + newNormalOrder.actualAmt,
-                 discAmt: (ex.discAmt || 0) + newNormalOrder.discAmt,
-               };
-            } else {
-               if (!nextOrders.some(o => o.id === newNormalOrder.id)) nextOrders.push(newNormalOrder);
-            }
-          } else {
-             if (!nextOrders.some(o => o.id === newNormalOrder.id)) nextOrders.push(newNormalOrder);
-          }
-        }
+        if (newNormalOrder && !nextOrders.some(o => o.id === newNormalOrder.id)) nextOrders.push(newNormalOrder);
         if (newPrepayOrder && !nextOrders.some(o => o.id === newPrepayOrder.id)) nextOrders.push(newPrepayOrder);
         return { orders: nextOrders };
       });
