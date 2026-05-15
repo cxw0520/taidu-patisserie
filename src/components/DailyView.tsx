@@ -142,6 +142,7 @@ export default function DailyView({
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const localUpdateIdRef = useRef<string | null>(null);
+  const pendingPatchesRef = useRef<Record<string, boolean>>({});
   
   // Filters, Summary search, and Sort
   const [sourceFilter, setSourceFilter] = useState<'all' | 'pos' | 'manual' | 'import'>('all');
@@ -376,10 +377,18 @@ export default function DailyView({
     if (loadedDateKey !== currentKey) return;
 
     const t = setTimeout(async () => {
+      const keysToSave = Object.keys(pendingPatchesRef.current);
+      if (keysToSave.length === 0) return; // Nothing to save via debounce
+
       setSaveStatus('saving');
-      const dataToSave = { ...dailyData, date: loadedDateKey };
+      const dataToSave: any = { date: loadedDateKey };
+      keysToSave.forEach(k => {
+        dataToSave[k] = (dailyData as any)[k];
+      });
+      pendingPatchesRef.current = {}; // Clear patches
+
       if (localUpdateIdRef.current) {
-        (dataToSave as any).updateId = localUpdateIdRef.current;
+        dataToSave.updateId = localUpdateIdRef.current;
       }
       await setDoc(
         doc(db, 'shops', shopId, 'daily', loadedDateKey),
@@ -402,45 +411,49 @@ export default function DailyView({
       const newUpdateId = uid();
       localUpdateIdRef.current = newUpdateId;
       
+      Object.keys(patch).forEach(k => {
+        pendingPatchesRef.current[k] = true;
+      });
+      
       const updated = { ...prev, ...patch, date: loadedDateKey, updateId: newUpdateId };
       return updated;
     });
   };
 
-  // POS-specific checkout: updates state AND immediately writes to Firestore to avoid race conditions
+  // POS-specific checkout: safely appends to server using runTransaction
   const handlePosCheckout = async (
     updaterFn: (prev: DailyReport) => DailyReport,
     sideEffectOrders: Order[]
   ) => {
-    let finalDataForDb: DailyReport | null = null;
     let targetKey = '';
 
+    // 1. Instant local update
     setDailyData(prev => {
       if (!prev) return prev;
       targetKey = normalizeDateKey(currentDate);
       if (!loadedDateKey || loadedDateKey !== targetKey) return prev;
-      
-      const updated = updaterFn(prev);
-      const newUpdateId = uid();
-      localUpdateIdRef.current = newUpdateId;
-      
-      finalDataForDb = { ...updated, date: targetKey, updateId: newUpdateId } as DailyReport & { updateId: string };
-      return finalDataForDb;
+      return updaterFn(prev);
     });
 
-    // Give React a tick to commit the state update
     await new Promise<void>(resolve => setTimeout(resolve, 0));
 
-    if (finalDataForDb && targetKey && shopId) {
-      // Write directly to Firestore immediately (don't wait for debounced save)
+    // 2. Transaction update
+    if (targetKey && shopId) {
       try {
-        await setDoc(
-          doc(db, 'shops', shopId, 'daily', targetKey),
-          finalDataForDb,
-          { merge: true }
-        );
+        await runTransaction(db, async (tx) => {
+          const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
+          const snap = await tx.get(docRef);
+          if (snap.exists()) {
+             const serverData = snap.data() as DailyReport;
+             const nextData = updaterFn(serverData);
+             tx.set(docRef, { orders: nextData.orders }, { merge: true });
+          } else {
+             const fallbackData = updaterFn({ orders: [], date: targetKey } as any);
+             tx.set(docRef, fallbackData, { merge: true });
+          }
+        });
       } catch (e) {
-        console.error('[POS] Firestore write failed:', e);
+        console.error('[POS] Firestore transaction failed:', e);
       }
     }
 
@@ -545,17 +558,41 @@ export default function DailyView({
   };
 
   const handleNewOrder = async (order: Order) => {
+    let targetKey = '';
+
+    // 1. Instant local update
     setDailyData(prev => {
       if (!prev) return prev;
       const currentKey = normalizeDateKey(currentDate);
       if (!loadedDateKey || loadedDateKey !== currentKey) return prev;
       if ((prev.orders || []).some(o => o.id === order.id)) return prev;
-      const newUpdateId = uid();
-      localUpdateIdRef.current = newUpdateId;
       
-      const updated = { ...prev, orders: [...(prev.orders || []), order], date: loadedDateKey, updateId: newUpdateId };
-      return updated;
+      targetKey = loadedDateKey;
+      return { ...prev, orders: [...(prev.orders || []), order], date: loadedDateKey };
     });
+
+    await new Promise<void>(resolve => setTimeout(resolve, 0));
+
+    // 2. Transaction update
+    if (targetKey && shopId) {
+      try {
+        await runTransaction(db, async (tx) => {
+          const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
+          const snap = await tx.get(docRef);
+          if (snap.exists()) {
+             const serverData = snap.data() as DailyReport;
+             const sOrders = serverData.orders || [];
+             if (!sOrders.some(o => o.id === order.id)) {
+                tx.set(docRef, { orders: [...sOrders, order] }, { merge: true });
+             }
+          } else {
+             tx.set(docRef, { date: targetKey, orders: [order] }, { merge: true });
+          }
+        });
+      } catch (e) {
+        console.error('[Add Order] Firestore transaction failed:', e);
+      }
+    }
     
     // Auto-deduct packaging ONLY IF it's not a pending pickup order
     if (!order.pendingPickup) {
@@ -581,7 +618,59 @@ export default function DailyView({
     });
   };
 
+
+  const updateOrderInDb = (orderId: string, patch: Partial<Order>) => {
+    let targetKey = '';
+    setDailyData(prev => {
+      if (!prev) return prev;
+      targetKey = normalizeDateKey(currentDate);
+      if (!loadedDateKey || loadedDateKey !== targetKey) return prev;
+      const nextOrders = [...(prev.orders || [])];
+      const idx = nextOrders.findIndex(o => o.id === orderId);
+      if (idx >= 0) {
+        nextOrders[idx] = { ...nextOrders[idx], ...patch };
+      }
+      return { ...prev, orders: nextOrders };
+    });
+
+    if (targetKey && shopId) {
+      runTransaction(db, async (tx) => {
+        const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
+        const snap = await tx.get(docRef);
+        if (snap.exists()) {
+          const sData = snap.data() as any;
+          const sOrders = sData.orders || [];
+          const idx = sOrders.findIndex((o: any) => o.id === orderId);
+          if (idx >= 0) {
+            sOrders[idx] = { ...sOrders[idx], ...patch };
+            tx.set(docRef, { orders: sOrders }, { merge: true });
+          }
+        }
+      }).catch(e => console.error('Order update tx failed:', e));
+    }
+  };
+
+  const deleteOrderInDb = (orderId: string) => {
+    let targetKey = '';
+    setDailyData(prev => {
+      if (!prev) return prev;
+      targetKey = normalizeDateKey(currentDate);
+      return { ...prev, orders: (prev.orders || []).filter(o => o.id !== orderId) };
+    });
+
+    if (targetKey && shopId) {
+      runTransaction(db, async (tx) => {
+        const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
+        const snap = await tx.get(docRef);
+        if (snap.exists()) {
+           tx.set(docRef, { orders: (snap.data().orders || []).filter((o: any) => o.id !== orderId) }, { merge: true });
+        }
+      }).catch(e => console.error('Delete order tx failed:', e));
+    }
+  };
+
   const metrics = useMemo(() => {
+
     if (!dailyData) return null;
     let m = {
         rev: 0, ship: 0, prShip: 0, disc: 0, prVal: 0, recv: 0, act: 0, remit: 0, cash: 0, unpaid: 0,
@@ -1138,7 +1227,7 @@ export default function DailyView({
                             className="w-20 md:w-28 bg-transparent font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
                             placeholder="姓名"
                             value={order.buyer}
-                            onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].buyer = e.target.value; updateDaily({ orders }); }}
+                            onChange={(e) => { updateOrderInDb(order.id, { buyer: e.target.value }); }}
                           />
                           <div className="flex items-center gap-1 flex-wrap">
                             <span className={cn("text-[9px] px-1.5 py-0.5 rounded-full font-bold tracking-tighter", 
@@ -1161,16 +1250,7 @@ export default function DailyView({
                           <input type="number"
                             className="w-12 bg-transparent text-center font-bold text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
                             value={order.items?.[i.id] || ''} placeholder="0"
-                            onChange={(e) => {
-                              const orders = [...dailyData.orders];
-                              if (!orders[idx].items) orders[idx].items = {};
-                              orders[idx].items[i.id] = parseNum(e.target.value);
-                              let pAmt = 0;
-                              [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => { pAmt += (orders[idx].items?.[item.id] || 0) * item.price; });
-                              orders[idx].prodAmt = pAmt;
-                              orders[idx].actualAmt = pAmt + (orders[idx].shipAmt || 0) - (orders[idx].discAmt || 0);
-                              updateDaily({ orders });
-                            }}
+                            onChange={(e) => { const num = parseNum(e.target.value); const newItems = { ...(order.items || {}), [i.id]: num }; let pAmt = 0; [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => { pAmt += (newItems[item.id] || 0) * item.price; }); updateOrderInDb(order.id, { items: newItems, prodAmt: pAmt, actualAmt: pAmt + (order.shipAmt || 0) - (order.discAmt || 0) }); }}
                           />
                         </td>
                       ))}
@@ -1179,16 +1259,7 @@ export default function DailyView({
                           <input type="number"
                             className="w-12 bg-transparent text-center font-bold text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
                             value={order.items?.[i.id] || ''} placeholder="0"
-                            onChange={(e) => {
-                              const orders = [...dailyData.orders];
-                              if (!orders[idx].items) orders[idx].items = {};
-                              orders[idx].items[i.id] = parseNum(e.target.value);
-                              let pAmt = 0;
-                              [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => { pAmt += (orders[idx].items?.[item.id] || 0) * item.price; });
-                              orders[idx].prodAmt = pAmt;
-                              orders[idx].actualAmt = pAmt + (orders[idx].shipAmt || 0) - (orders[idx].discAmt || 0);
-                              updateDaily({ orders });
-                            }}
+                            onChange={(e) => { const num = parseNum(e.target.value); const newItems = { ...(order.items || {}), [i.id]: num }; let pAmt = 0; [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => { pAmt += (newItems[item.id] || 0) * item.price; }); updateOrderInDb(order.id, { items: newItems, prodAmt: pAmt, actualAmt: pAmt + (order.shipAmt || 0) - (order.discAmt || 0) }); }}
                           />
                         </td>
                       ))}
@@ -1197,21 +1268,21 @@ export default function DailyView({
                         <input type="number"
                           className="w-14 bg-transparent text-center font-mono font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
                           value={order.shipAmt || ''} placeholder="0"
-                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].shipAmt = parseNum(e.target.value); orders[idx].actualAmt = orders[idx].prodAmt + orders[idx].shipAmt - orders[idx].discAmt; updateDaily({ orders }); }}
+                          onChange={(e) => { const num = parseNum(e.target.value); updateOrderInDb(order.id, { shipAmt: num, actualAmt: (order.prodAmt || 0) + (order.shipAmt || 0) - (order.discAmt || 0) + (num - (order.shipAmt || 0)) }); }}
                         />
                       </td>
                       <td className="px-2 py-3 bg-[#e2ece9]/5">
                         <input type="number"
                           className="w-14 bg-transparent text-center font-mono font-bold text-rose-brand outline-none border-b border-transparent focus:border-rose-brand"
                           value={order.discAmt || ''} placeholder="0"
-                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].discAmt = parseNum(e.target.value); orders[idx].actualAmt = orders[idx].prodAmt + orders[idx].shipAmt - orders[idx].discAmt; updateDaily({ orders }); }}
+                          onChange={(e) => { const num = parseNum(e.target.value); updateOrderInDb(order.id, { discAmt: num, actualAmt: (order.prodAmt || 0) + (order.shipAmt || 0) - (order.discAmt || 0) + (num - (order.discAmt || 0)) }); }}
                         />
                       </td>
                       <td className="px-2 py-3 font-mono font-bold text-mint-brand bg-[#e2ece9]/10">${fmt(order.actualAmt)}</td>
                       {/* 收款狀態 */}
                       <td className="px-3 py-3">
                         <select value={order.status}
-                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].status = e.target.value as any; updateDaily({ orders }); }}
+                          onChange={(e) => { updateOrderInDb(order.id, { status: e.target.value as any }); }}
                           className={cn("text-xs font-bold px-2 py-1.5 rounded-lg outline-none",
                             order.status === '匯款' && "bg-blue-50 text-blue-600",
                             order.status === '現結' && "bg-green-50 text-green-600",
@@ -1233,18 +1304,18 @@ export default function DailyView({
                           {/* 宅配/自取 toggle */}
                           <div className="flex rounded-lg overflow-hidden border border-coffee-100 text-[10px] font-bold">
                             <button
-                              onClick={() => { const orders = [...dailyData.orders]; orders[idx].deliveryMethod = '宅配'; updateDaily({ orders }); }}
+                              onClick={() => { updateOrderInDb(order.id, { deliveryMethod: '宅配' }); }}
                               className={cn("px-2 py-1 transition-colors flex items-center gap-0.5", isDelivery ? "bg-blue-500 text-white" : "bg-white text-coffee-400 hover:bg-coffee-50")}
                             ><Truck className="w-3 h-3"/>宅</button>
                             <button
-                              onClick={() => { const orders = [...dailyData.orders]; orders[idx].deliveryMethod = '自取'; updateDaily({ orders }); }}
+                              onClick={() => { updateOrderInDb(order.id, { deliveryMethod: '自取' }); }}
                               className={cn("px-2 py-1 transition-colors flex items-center gap-0.5", isPickup ? "bg-mint-brand text-white" : "bg-white text-coffee-400 hover:bg-coffee-50")}
                             ><MapPin className="w-3 h-3"/>取</button>
                           </div>
                           {/* 自取：已取/未取 toggle */}
                           {isPickup && (
                             <button
-                              onClick={() => { const orders = [...dailyData.orders]; orders[idx].isPickedUp = !orders[idx].isPickedUp; updateDaily({ orders }); }}
+                              onClick={() => { updateOrderInDb(order.id, { isPickedUp: !order.isPickedUp }); }}
                               className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors w-full text-center",
                                 order.isPickedUp ? "bg-mint-brand text-white" : "bg-amber-50 text-amber-600 border border-amber-200"
                               )}
@@ -1258,7 +1329,7 @@ export default function DailyView({
                                   className="text-[10px] w-full bg-transparent text-coffee-700 font-bold outline-none border-b border-transparent focus:border-blue-300 placeholder-coffee-200"
                                   placeholder="收件人姓名"
                                   value={order.recipientName || ''}
-                                  onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].recipientName = e.target.value; updateDaily({ orders }); }}
+                                  onChange={(e) => { updateOrderInDb(order.id, { recipientName: e.target.value }); }}
                                 />
                               </div>
                               <div className="flex items-center gap-1">
@@ -1266,7 +1337,7 @@ export default function DailyView({
                                   className="text-[10px] w-full bg-transparent text-coffee-600 outline-none border-b border-transparent focus:border-blue-300 placeholder-coffee-200"
                                   placeholder="收件人電話"
                                   value={order.recipientPhone || ''}
-                                  onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].recipientPhone = e.target.value; updateDaily({ orders }); }}
+                                  onChange={(e) => { updateOrderInDb(order.id, { recipientPhone: e.target.value }); }}
                                 />
                               </div>
                               <div className="flex items-center gap-1">
@@ -1274,7 +1345,7 @@ export default function DailyView({
                                   className="text-[10px] w-full bg-transparent text-coffee-600 outline-none border-b border-transparent focus:border-blue-300 placeholder-coffee-200"
                                   placeholder="地址"
                                   value={order.address || ''}
-                                  onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].address = e.target.value; updateDaily({ orders }); }}
+                                  onChange={(e) => { updateOrderInDb(order.id, { address: e.target.value }); }}
                                 />
                                 <button
                                   onClick={copyRecipient}
@@ -1293,7 +1364,7 @@ export default function DailyView({
                           className="w-24 bg-transparent text-xs text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
                           placeholder="電話"
                           value={order.phone || ''}
-                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].phone = e.target.value; updateDaily({ orders }); }}
+                          onChange={(e) => { updateOrderInDb(order.id, { phone: e.target.value }); }}
                         />
                       </td>
                       {/* 文字備注 */}
@@ -1302,7 +1373,7 @@ export default function DailyView({
                           className="w-28 bg-transparent text-xs text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
                           placeholder="備注說明"
                           value={order.note || ''}
-                          onChange={(e) => { const orders = [...dailyData.orders]; orders[idx].note = e.target.value; updateDaily({ orders }); }}
+                          onChange={(e) => { updateOrderInDb(order.id, { note: e.target.value }); }}
                         />
                       </td>
                       {/* 刪除（含確認） */}
@@ -1310,7 +1381,7 @@ export default function DailyView({
                         <button
                           onClick={() => {
                             if (window.confirm(`確定要刪除「${order.buyer || '此筆'}」的訂單嗎？`)) {
-                              updateDaily({ orders: dailyData.orders.filter(o => o.id !== order.id) });
+                              deleteOrderInDb(order.id);
                             }
                           }}
                           className="p-2 text-coffee-300 hover:text-danger-brand hover:bg-danger-brand/5 rounded-lg transition-all"
@@ -1345,8 +1416,7 @@ export default function DailyView({
                 settings={settings}
                 onClose={() => setPhoneSearchModal(false)}
                 onUpdateOrder={(updated) => {
-                  const orders = dailyData.orders.map(o => o.id === updated.id ? updated : o);
-                  updateDaily({ orders });
+                  updateOrderInDb(updated.id, updated);
                 }}
               />
             )}
