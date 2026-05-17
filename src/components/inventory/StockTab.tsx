@@ -56,6 +56,19 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
     return materials.reduce((s, m) => s + (m.stock * m.avgCost), 0);
   }, [materials]);
 
+  const categoryTotals = useMemo(() => {
+    const totals: Record<string, number> = { '食材': 0, '包材': 0, '裝飾品': 0 };
+    materials.forEach(m => {
+      const cat = m.category || '食材';
+      if (totals[cat] !== undefined) {
+        totals[cat] += (m.stock || 0) * (m.avgCost || 0);
+      } else {
+        totals[cat] = (m.stock || 0) * (m.avgCost || 0);
+      }
+    });
+    return totals;
+  }, [materials]);
+
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const id = newMaterial.id || uid();
@@ -167,14 +180,30 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
           <h2 className="text-xl font-bold text-coffee-800">庫存與盤點管理</h2>
           <p className="text-sm text-coffee-400">登錄原物料與包材，掌握即時庫存，設定安全水位警示。</p>
         </div>
-        <div className="flex gap-4">
-          <div className="bg-coffee-50 border border-coffee-100 rounded-2xl px-6 py-2 shadow-sm text-right">
-            <div className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest">目前庫存總值</div>
-            <div className="text-xl font-serif-brand font-bold text-coffee-800">${fmt(totalInvValue)}</div>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
+          <div className="flex flex-wrap gap-2">
+            <div className="bg-emerald-50/60 border border-emerald-100/80 rounded-2xl px-4 py-1.5 text-right shadow-sm">
+              <div className="text-[8px] font-extrabold text-emerald-600 uppercase tracking-widest">食材庫存價值</div>
+              <div className="text-sm font-serif-brand font-bold text-emerald-800">${fmt(categoryTotals['食材'] || 0)}</div>
+            </div>
+            <div className="bg-sky-50/60 border border-sky-100/80 rounded-2xl px-4 py-1.5 text-right shadow-sm">
+              <div className="text-[8px] font-extrabold text-sky-600 uppercase tracking-widest">包材庫存價值</div>
+              <div className="text-sm font-serif-brand font-bold text-sky-800">${fmt(categoryTotals['包材'] || 0)}</div>
+            </div>
+            {(categoryTotals['裝飾品'] || 0) > 0 && (
+              <div className="bg-amber-50/60 border border-amber-100/80 rounded-2xl px-4 py-1.5 text-right shadow-sm">
+                <div className="text-[8px] font-extrabold text-amber-600 uppercase tracking-widest">裝飾品庫存價值</div>
+                <div className="text-sm font-serif-brand font-bold text-amber-800">${fmt(categoryTotals['裝飾品'] || 0)}</div>
+              </div>
+            )}
+            <div className="bg-coffee-50 border border-coffee-100 rounded-2xl px-5 py-1.5 text-right shadow-sm">
+              <div className="text-[8px] font-extrabold text-coffee-400 uppercase tracking-widest">目前庫存總值</div>
+              <div className="text-sm font-serif-brand font-bold text-coffee-800">${fmt(totalInvValue)}</div>
+            </div>
           </div>
           <button
             onClick={isAddingMode ? () => setIsAddingMode(false) : openCreateMode}
-            className="bg-coffee-600 text-white px-6 py-2 rounded-2xl font-bold flex items-center gap-2 hover:bg-coffee-700 transition shadow-lg active:scale-95"
+            className="bg-coffee-600 text-white px-6 py-2.5 rounded-2xl font-bold flex items-center gap-2 hover:bg-coffee-700 transition shadow-lg active:scale-95 shrink-0 self-stretch sm:self-auto justify-center"
           >
             <Plus className="w-5 h-5" /> 新增材料
           </button>

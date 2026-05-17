@@ -32,9 +32,10 @@ const calculateBalances = (entries: JournalEntry[], coa: COAItem[], start: Date 
   return balances;
 };
 
-export default function ExportModal({ onClose, entries, coa, selectedYear }: { onClose: () => void, entries: JournalEntry[], coa: COAItem[], selectedYear: number }) {
+export default function ExportModal({ onClose, entries, coa, selectedYear, purchases = [] }: { onClose: () => void, entries: JournalEntry[], coa: COAItem[], selectedYear: number, purchases?: any[] }) {
   const [contentType, setContentType] = useState('journal');
   const [format, setFormat] = useState('pdf');
+  const [costMode, setCostMode] = useState<'cogs' | 'purchases'>('cogs');
   const [isExporting, setIsExporting] = useState(false);
   const currentYear = selectedYear;
 
@@ -84,7 +85,8 @@ export default function ExportModal({ onClose, entries, coa, selectedYear }: { o
         });
       });
     } else if (contentType === 'is') {
-      filename = `${currentYear}年度_損益表`;
+      const displayModeName = costMode === 'purchases' ? '即期採購成本制' : '實際消耗成本制';
+      filename = `${currentYear}年度_損益表_${displayModeName}`;
       const balances = calculateBalances(entries, coa, new Date(currentYear, 0, 1), new Date(currentYear, 11, 31));
       const revenue = Object.values(balances).filter(a => a.type === '收入');
       const cost = Object.values(balances).filter(a => a.type === '成本');
@@ -92,21 +94,38 @@ export default function ExportModal({ onClose, entries, coa, selectedYear }: { o
       const nonOpRev = Object.values(balances).filter(a => a.type === '營業外收入');
       const nonOpExp = Object.values(balances).filter(a => a.type === '營業外費損');
 
+      // Calculate annual purchase total from database
+      const purchaseTotal = purchases
+        .filter(p => {
+          const d = new Date(p.date);
+          return d.getFullYear() === currentYear;
+        })
+        .reduce((sum, p) => sum + (Number(p.totalAmount) || 0), 0);
+
       const totalRev = revenue.reduce((s, a) => s + a.balance, 0);
       const totalCost = cost.reduce((s, a) => s + a.balance, 0);
+      const displayCost = costMode === 'purchases' ? purchaseTotal : totalCost;
       const totalExp = expense.reduce((s, a) => s + a.balance, 0);
       const totalNonOp = nonOpRev.reduce((s, a) => s + a.balance, 0) - nonOpExp.reduce((s, a) => s + a.balance, 0);
 
+      data.push({ '項目': '計算模式', '金額': displayModeName });
       data.push({ '項目': '營業收入', '金額': totalRev });
       revenue.forEach(a => data.push({ '項目': `  ${a.name}`, '金額': a.balance }));
-      data.push({ '項目': '營業成本', '金額': totalCost });
-      cost.forEach(a => data.push({ '項目': `  ${a.name}`, '金額': a.balance }));
-      data.push({ '項目': '營業毛利', '金額': totalRev - totalCost });
+      
+      if (costMode === 'cogs') {
+        data.push({ '項目': '營業成本', '金額': totalCost });
+        cost.forEach(a => data.push({ '項目': `  ${a.name}`, '金額': a.balance }));
+      } else {
+        data.push({ '項目': '營業成本 (當期進貨總額)', '金額': purchaseTotal });
+        data.push({ '項目': '  進貨單累計總額 (進貨管理)', '金額': purchaseTotal });
+      }
+
+      data.push({ '項目': '營業毛利', '金額': totalRev - displayCost });
       data.push({ '項目': '營業費用', '金額': totalExp });
       expense.forEach(a => data.push({ '項目': `  ${a.name}`, '金額': a.balance }));
-      data.push({ '項目': '營業利益', '金額': totalRev - totalCost - totalExp });
+      data.push({ '項目': '營業利益', '金額': totalRev - displayCost - totalExp });
       data.push({ '項目': '營業外收支', '金額': totalNonOp });
-      data.push({ '項目': '本期淨利', '金額': totalRev - totalCost - totalExp + totalNonOp });
+      data.push({ '項目': '本期淨利', '金額': totalRev - displayCost - totalExp + totalNonOp });
     } else {
       filename = `${currentYear}年度_資產負債表`;
       const balances = calculateBalances(entries, coa, null, new Date(currentYear, 11, 31), true);
@@ -180,6 +199,9 @@ export default function ExportModal({ onClose, entries, coa, selectedYear }: { o
         </table>
       `;
     } else if (contentType === 'is') {
+      const displayModeName = costMode === 'purchases' ? '即期採購成本制' : '實際消耗成本制';
+      title = `損益表 (${displayModeName})`;
+      
       const balances = calculateBalances(entries, coa, new Date(currentYear, 0, 1), new Date(currentYear, 11, 31));
       const revenue = Object.values(balances).filter(a => a.type === '收入');
       const cost = Object.values(balances).filter(a => a.type === '成本');
@@ -187,8 +209,17 @@ export default function ExportModal({ onClose, entries, coa, selectedYear }: { o
       const nonOpRev = Object.values(balances).filter(a => a.type === '營業外收入');
       const nonOpExp = Object.values(balances).filter(a => a.type === '營業外費損');
 
+      // Calculate annual purchase total from database
+      const purchaseTotal = purchases
+        .filter(p => {
+          const d = new Date(p.date);
+          return d.getFullYear() === currentYear;
+        })
+        .reduce((sum, p) => sum + (Number(p.totalAmount) || 0), 0);
+
       const totalRev = revenue.reduce((s, a) => s + a.balance, 0);
       const totalCost = cost.reduce((s, a) => s + a.balance, 0);
+      const displayCost = costMode === 'purchases' ? purchaseTotal : totalCost;
       const totalExp = expense.reduce((s, a) => s + a.balance, 0);
       const totalNonOp = nonOpRev.reduce((s, a) => s + a.balance, 0) - nonOpExp.reduce((s, a) => s + a.balance, 0);
 
@@ -210,14 +241,21 @@ export default function ExportModal({ onClose, entries, coa, selectedYear }: { o
           <tbody>
             ${row('營業收入', totalRev, true)}
             ${revenue.map(a => row(a.name, a.balance, false, true)).join('')}
-            ${row('營業成本', totalCost, true)}
-            ${cost.map(a => row(a.name, a.balance, false, true)).join('')}
-            ${row('營業毛利', totalRev - totalCost, true)}
+            
+            ${costMode === 'cogs' ? `
+              ${row('營業成本', totalCost, true)}
+              ${cost.map(a => row(a.name, a.balance, false, true)).join('')}
+            ` : `
+              ${row('營業成本 (當期進貨總額)', purchaseTotal, true)}
+              ${row('進貨單累計總額 (進貨管理)', purchaseTotal, false, true)}
+            `}
+            
+            ${row('營業毛利', totalRev - displayCost, true)}
             ${row('營業費用', totalExp, true)}
             ${expense.map(a => row(a.name, a.balance, false, true)).join('')}
-            ${row('營業利益', totalRev - totalCost - totalExp, true)}
+            ${row('營業利益', totalRev - displayCost - totalExp, true)}
             ${row('營業外收支淨額', totalNonOp, true)}
-            ${row('本期淨利', totalRev - totalCost - totalExp + totalNonOp, true)}
+            ${row('本期淨利', totalRev - displayCost - totalExp + totalNonOp, true)}
           </tbody>
         </table>
       `;
@@ -297,6 +335,27 @@ export default function ExportModal({ onClose, entries, coa, selectedYear }: { o
               ))}
             </div>
           </section>
+
+          
+          {contentType === 'is' && (
+            <section className="animate-in slide-in-from-top-2 duration-200">
+              <label className="block text-sm font-bold text-gray-500 mb-3 uppercase tracking-widest">成本計算模式</label>
+              <div className="flex bg-coffee-50 p-1 rounded-xl">
+                <button
+                  onClick={() => setCostMode('cogs')}
+                  className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${costMode === 'cogs' ? 'bg-white text-coffee-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                >
+                  📈 實際消耗成本 (COGS)
+                </button>
+                <button
+                  onClick={() => setCostMode('purchases')}
+                  className={`flex-1 py-2.5 text-xs font-bold rounded-lg transition-all ${costMode === 'purchases' ? 'bg-white text-coffee-800 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
+                >
+                  🛒 即期採購成本 (Purchases)
+                </button>
+              </div>
+            </section>
+          )}
 
           <section>
             <label className="block text-sm font-bold text-gray-500 mb-3 uppercase tracking-widest">2. 選擇檔案格式</label>

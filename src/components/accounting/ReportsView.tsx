@@ -61,9 +61,10 @@ const calculateBalances = (entries: JournalEntry[], coa: COAItem[], start: Date 
   return balances;
 };
 
-export default function ReportsView({ entries, coa, selectedYear }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number }) {
+export default function ReportsView({ entries, coa, selectedYear, purchases = [] }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number, purchases?: any[] }) {
   const [activeReport, setActiveReport] = useState<'is' | 'bs' | 'cf'>('is');
   const [hideZero, setHideZero] = useState(false);
+  const [costMode, setCostMode] = useState<'cogs' | 'purchases'>('cogs');
   
   // IS Filters
   const [isFilter, setIsFilter] = useState<FilterState>({ type: 'month', value: String(new Date().getMonth() + 1) });
@@ -82,6 +83,43 @@ export default function ReportsView({ entries, coa, selectedYear }: { entries: J
     const { start, end } = getFilterRange(isFilter, isCustomDates, selectedYear);
     return calculateBalances(entries, coa, start, end);
   }, [entries, coa, isFilter, isCustomDates, selectedYear]);
+
+  // purchases total in selected range
+  const purchaseTotal = useMemo(() => {
+    const { start, end } = getFilterRange(isFilter, isCustomDates, selectedYear);
+    return purchases
+      .filter(p => {
+        const d = new Date(p.date);
+        if (start && d < start) return false;
+        if (end && d > end) return false;
+        return true;
+      })
+      .reduce((sum, p) => sum + (Number(p.totalAmount) || 0), 0);
+  }, [purchases, isFilter, isCustomDates, selectedYear]);
+
+  const revenueTotal = useMemo(() => {
+    return (Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '收入').reduce((s, a) => s + a.balance, 0);
+  }, [isLedger]);
+
+  const costTotal = useMemo(() => {
+    return (Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '成本').reduce((s, a) => s + a.balance, 0);
+  }, [isLedger]);
+
+  const expenseTotal = useMemo(() => {
+    return (Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '費用').reduce((s, a) => s + a.balance, 0);
+  }, [isLedger]);
+
+  const nonOpTotal = useMemo(() => {
+    return (Object.values(isLedger) as AccountBalance[]).reduce((s, a) => {
+      if (a.type === '營業外收入') return s + a.balance;
+      if (a.type === '營業外費損') return s - a.balance;
+      return s;
+    }, 0);
+  }, [isLedger]);
+
+  const displayCost = costMode === 'purchases' ? purchaseTotal : costTotal;
+  const grossProfit = revenueTotal - displayCost;
+  const netIncomeVal = grossProfit - expenseTotal + nonOpTotal;
 
   // BS Calculation (Requires all historical entries up to date)
   const bsLedger = useMemo<Record<string, AccountBalance>>(() => {
@@ -211,14 +249,52 @@ export default function ReportsView({ entries, coa, selectedYear }: { entries: J
             
             <PeriodSelector label="計算期間" filter={isFilter} setFilter={setIsFilter} customDates={isCustomDates} setCustomDates={setIsCustomDates} />
 
+            {/* Cost Mode Toggle Switch */}
+            <div className="mb-6 flex flex-col sm:flex-row sm:items-center justify-between bg-rose-50/20 p-3 rounded-2xl border border-rose-100/30 gap-3">
+              <span className="text-xs font-bold text-coffee-600">成本計算模式：</span>
+              <div className="flex bg-coffee-50 p-1 rounded-xl shrink-0">
+                <button
+                  onClick={() => setCostMode('cogs')}
+                  className={cn(
+                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    costMode === 'cogs' ? "bg-white text-coffee-850 shadow-sm" : "text-coffee-400 hover:text-coffee-600"
+                  )}
+                >
+                  📈 實際消耗成本制 (COGS)
+                </button>
+                <button
+                  onClick={() => setCostMode('purchases')}
+                  className={cn(
+                    "px-4 py-1.5 rounded-lg text-xs font-bold transition-all",
+                    costMode === 'purchases' ? "bg-white text-coffee-850 shadow-sm" : "text-coffee-400 hover:text-coffee-600"
+                  )}
+                >
+                  🛒 即期採購成本制 (Purchases)
+                </button>
+              </div>
+            </div>
+
             <div className="flex-1 space-y-6">
               <ReportSection label="營業收入" items={(Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '收入')} hideZero={hideZero} />
-              <ReportSection label="營業成本" items={(Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '成本')} hideZero={hideZero} />
+              
+              {costMode === 'cogs' ? (
+                <ReportSection label="營業成本" items={(Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '成本')} hideZero={hideZero} />
+              ) : (
+                <div className="space-y-2 animate-fade-in">
+                  <div className="text-[10px] font-bold text-coffee-300 uppercase tracking-widest mb-1 ml-2">營業成本 (當期進貨總額)</div>
+                  <div className="space-y-1">
+                    <div className="flex justify-between items-center py-2 px-4 hover:bg-coffee-50/50 rounded-xl transition-colors group">
+                      <span className="text-sm font-bold text-coffee-700 group-hover:text-coffee-950">進貨單累計總額 (進貨管理)</span>
+                      <span className="font-mono font-bold text-lg text-coffee-600/80">${fmt(purchaseTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
               
               <div className="flex justify-between items-center py-4 px-4 bg-coffee-50/30 rounded-2xl border-l-4 border-mint-brand">
                 <span className="font-bold text-coffee-800">營業毛利</span>
                 <span className="font-serif-brand font-bold text-2xl text-mint-brand">
-                  ${fmt((Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '收入').reduce((s, a) => s + a.balance, 0) - (Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '成本').reduce((s, a) => s + a.balance, 0))}
+                  ${fmt(grossProfit)}
                 </span>
               </div>
 
@@ -227,12 +303,7 @@ export default function ReportsView({ entries, coa, selectedYear }: { entries: J
               <div className="flex justify-between items-center py-4 px-4 bg-coffee-50/30 rounded-2xl border-l-4 border-rose-brand">
                 <span className="font-bold text-coffee-800">本期淨利 (EBIT)</span>
                 <span className="font-serif-brand font-bold text-2xl text-rose-brand">
-                  ${fmt((Object.values(isLedger) as AccountBalance[]).reduce((s, a) => {
-                    if (['收入', '成本', '費用', '營業外收入', '營業外費損'].includes(a.type)) {
-                      return s + (a.side === 'credit' ? a.balance : -a.balance);
-                    }
-                    return s;
-                  }, 0))}
+                  ${fmt(netIncomeVal)}
                 </span>
               </div>
             </div>
