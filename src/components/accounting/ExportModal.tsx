@@ -6,10 +6,23 @@ interface AccountBalance extends COAItem {
 }
 
 const calculateBalances = (entries: JournalEntry[], coa: COAItem[], start: Date | null, end: Date | null, isCutoff = false): Record<string, AccountBalance> => {
+  const formatDateToYMD = (date: Date) => {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  };
+
+  const startStr = start ? formatDateToYMD(start) : '';
+  const endStr = end ? formatDateToYMD(end) : '';
+
   const filtered = entries.filter(e => {
-    const d = new Date(e.date);
-    if (!isCutoff && start && d < start) return false;
-    if (end && d > end) return false;
+    if (!e.date) return false;
+    // Normalize date format from '2026/05/18' to '2026-05-18'
+    const entryStr = e.date.replace(/\//g, '-');
+    
+    if (!isCutoff && startStr && entryStr < startStr) return false;
+    if (endStr && entryStr > endStr) return false;
     return true;
   });
 
