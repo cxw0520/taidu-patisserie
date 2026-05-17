@@ -111,7 +111,8 @@ export default function RosterTab({
 
   // Estimated payroll cost (Simulated to align with PayrollTab.tsx formulas)
   const estimatedCost = useMemo(() => {
-    let total = 0;
+    let totalGross = 0;
+    let totalCompany = 0;
     
     const ot1H = settings.overtimeTier1Hours || 8;
     const ot2H = settings.overtimeTier2Hours || 10;
@@ -125,12 +126,15 @@ export default function RosterTab({
       let totalOt1Minutes = 0;
       let totalOt2Minutes = 0;
       let holidayMinutes = 0;
+      let scheduledWorkDays = 0;
 
       days.forEach(day => {
         const entry = getCellEntry(op.id, day);
         if (!entry || entry.isOff) return;
         const tpl = shiftTemplates.find(t => t.id === entry.shiftTemplateId);
         if (!tpl) return;
+
+        scheduledWorkDays++;
 
         // Parse start and end times defensively
         const startParts = (tpl.startTime || '00:00').split(':');
@@ -170,12 +174,15 @@ export default function RosterTab({
       let hPay = 0;
 
       if (op.payrollType === 'monthly') {
-        basePay = baseRate;
-        const dailyRate = baseRate / 30;
-        const minuteRate = dailyRate / 8 / 60;
-        ot1Pay = totalOt1Minutes * minuteRate * ot1Rate;
-        ot2Pay = totalOt2Minutes * minuteRate * ot2Rate;
-        hPay = holidayMinutes * minuteRate * holidayRate;
+        // Only include base salary if they actually have scheduled shifts this month!
+        if (scheduledWorkDays > 0) {
+          basePay = baseRate;
+          const dailyRate = baseRate / 30;
+          const minuteRate = dailyRate / 8 / 60;
+          ot1Pay = totalOt1Minutes * minuteRate * ot1Rate;
+          ot2Pay = totalOt2Minutes * minuteRate * ot2Rate;
+          hPay = holidayMinutes * minuteRate * holidayRate;
+        }
       } else {
         basePay = (totalRegularMinutes / 60) * baseRate;
         ot1Pay = (totalOt1Minutes / 60) * baseRate * ot1Rate;
@@ -187,7 +194,7 @@ export default function RosterTab({
 
       // Simulate the exact company cost logic (including labor & health insurance + pension)
       let opCost = grossPay;
-      if (settings.enableInsurance) {
+      if (settings.enableInsurance && op.enableInsurance !== false && scheduledWorkDays > 0) {
         const laborInsEmp = Math.round(grossPay * 0.021);
         const healthInsEmp = Math.round(grossPay * 0.0252 * 0.3);
         const netPay = Math.max(0, grossPay - laborInsEmp - healthInsEmp);
@@ -199,10 +206,14 @@ export default function RosterTab({
         opCost = netPay + laborInsComp + healthInsComp + pensionComp;
       }
 
-      total += opCost;
+      totalGross += grossPay;
+      totalCompany += opCost;
     });
 
-    return Math.round(total);
+    return {
+      grossPay: Math.round(totalGross),
+      companyCost: Math.round(totalCompany)
+    };
   }, [roster, operators, shiftTemplates, days, settings, ymKey]);
 
   const handleSaveTemplate = () => {
@@ -312,8 +323,20 @@ export default function RosterTab({
           <button onClick={nextMonth} className="p-2 bg-white border border-coffee-100 rounded-xl hover:bg-coffee-50 transition"><ChevronRight className="w-4 h-4" /></button>
         </div>
         <div className="flex items-center gap-3">
-          <div className="bg-coffee-50 px-4 py-2 rounded-xl border border-coffee-100 text-sm font-bold text-coffee-700">
-            💰 本月預估薪資成本：<span className="text-rose-brand font-mono">${estimatedCost.toLocaleString()}</span>
+          <div className="bg-coffee-50/70 px-4 py-2 rounded-xl border border-coffee-100 flex items-center gap-3.5 text-xs font-bold text-coffee-700 shadow-sm">
+            <div className="flex items-center gap-1.5">
+              <span>💰 預估應發薪資：</span>
+              <span className="text-rose-brand font-mono text-sm">${estimatedCost.grossPay.toLocaleString()}</span>
+            </div>
+            {settings.enableInsurance && (
+              <>
+                <span className="text-coffee-200">|</span>
+                <div className="flex items-center gap-1.5">
+                  <span>🏢 預估公司總成本：</span>
+                  <span className="text-coffee-800 font-mono text-sm">${estimatedCost.companyCost.toLocaleString()}</span>
+                </div>
+              </>
+            )}
           </div>
           <button
             onClick={handleManualSave}

@@ -26,6 +26,7 @@ export interface Operator {
   // HR & Payroll
   payrollType?: 'hourly' | 'monthly';
   baseRate?: number; // Hourly rate or Monthly salary
+  enableInsurance?: boolean; // Whether to calculate labor/health insurance for this operator
 }
 
 export interface Material {

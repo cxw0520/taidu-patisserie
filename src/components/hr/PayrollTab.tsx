@@ -111,9 +111,9 @@ function calcPayroll(
 
   const grossPay = Math.round(basePay + ot1Pay + ot2Pay + hPay - lateDeduction);
 
-  // Insurance (when enabled)
+  // Insurance (when enabled globally AND for this specific employee)
   let laborInsEmp = 0, healthInsEmp = 0, pensionEmp = 0;
-  if (settings.enableInsurance) {
+  if (settings.enableInsurance && op.enableInsurance !== false) {
     laborInsEmp = Math.round(grossPay * 0.021);
     healthInsEmp = Math.round(grossPay * 0.0252 * 0.3);
     pensionEmp = 0; // pension is employer-only
@@ -124,7 +124,7 @@ function calcPayroll(
   const netPay = Math.max(0, grossPay - laborInsEmp - healthInsEmp - pensionEmp);
 
   let laborInsComp = 0, healthInsComp = 0, pensionComp = 0;
-  if (settings.enableInsurance) {
+  if (settings.enableInsurance && op.enableInsurance !== false) {
     laborInsComp = Math.round(grossPay * 0.1);
     healthInsComp = Math.round(grossPay * 0.0252 * 0.7);
     pensionComp = Math.round(grossPay * 0.06);
@@ -151,7 +151,7 @@ function calcPayroll(
     healthInsuranceCompany: healthInsComp,
     pensionCompany: pensionComp,
     netPay,
-    companyCost: settings.enableInsurance ? netPay + laborInsComp + healthInsComp + pensionComp : undefined,
+    companyCost: settings.enableInsurance ? (op.enableInsurance !== false ? netPay + laborInsComp + healthInsComp + pensionComp : netPay) : undefined,
     lineItems,
   };
 }
@@ -194,6 +194,16 @@ export default function PayrollTab({
   const totalNetPay = payrollResults.reduce((s, r) => s + r.result.netPay, 0);
   const totalCompanyCost = payrollResults.reduce((s, r) => s + (r.result.companyCost || r.result.netPay), 0);
 
+  const totalLaborInsEmp = payrollResults.reduce((s, r) => s + (r.result.laborInsuranceEmployee || 0), 0);
+  const totalLaborInsComp = payrollResults.reduce((s, r) => s + (r.result.laborInsuranceCompany || 0), 0);
+  const totalPensionComp = payrollResults.reduce((s, r) => s + (r.result.pensionCompany || 0), 0);
+
+  const totalHealthInsEmp = payrollResults.reduce((s, r) => s + (r.result.healthInsuranceEmployee || 0), 0);
+  const totalHealthInsComp = payrollResults.reduce((s, r) => s + (r.result.healthInsuranceCompany || 0), 0);
+
+  const totalToLaborBureau = totalLaborInsEmp + totalLaborInsComp + totalPensionComp;
+  const totalToHealthBureau = totalHealthInsEmp + totalHealthInsComp;
+
   const prevMonth = () => { if (viewMonth === 1) { setViewMonth(12); setViewYear(v => v - 1); } else setViewMonth(m => m - 1); };
   const nextMonth = () => { if (viewMonth === 12) { setViewMonth(1); setViewYear(v => v + 1); } else setViewMonth(m => m + 1); };
 
@@ -222,6 +232,60 @@ export default function PayrollTab({
           <div className="text-3xl font-bold text-coffee-700 font-mono">${fmt(totalCompanyCost)}</div>
         </div>
       </div>
+
+      {/* Insurance Bureau Payments (Taiwan labor and health bureau sum billing) */}
+      {settings.enableInsurance && (totalToLaborBureau > 0 || totalToHealthBureau > 0) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-coffee-50/50 p-5 rounded-2xl border border-coffee-100 shadow-inner">
+          <div className="md:col-span-2">
+            <h3 className="text-sm font-bold text-coffee-800 flex items-center gap-2 mb-1.5">
+              🏢 本月勞健保與勞退金【申報應繳費用】匯總
+            </h3>
+            <p className="text-[10px] text-coffee-400">
+              💡 提示：本月需分別繳納給「勞工保險局」與「中央健康保險署」的帳單實付總金額（包含員工自付額與店鋪負擔額）。
+            </p>
+          </div>
+
+          {/* 勞保局繳納 */}
+          <div className="bg-white p-4 rounded-xl border border-coffee-100 space-y-3">
+            <div className="flex justify-between items-center pb-2 border-b border-coffee-50">
+              <span className="font-bold text-xs text-coffee-700 flex items-center gap-1.5">📮 應繳給【勞工保險局】</span>
+              <span className="font-mono font-black text-rose-brand text-lg">${fmt(totalToLaborBureau)}</span>
+            </div>
+            <div className="space-y-1.5 text-xs text-coffee-500">
+              <div className="flex justify-between">
+                <span>· 勞工保險費 (員工扣繳自付部分)</span>
+                <span className="font-mono">${fmt(totalLaborInsEmp)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>· 勞工保險費 (店鋪提撥負擔部分)</span>
+                <span className="font-mono">${fmt(totalLaborInsComp)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>· 勞工退休金 (店鋪提繳 6% 部分)</span>
+                <span className="font-mono">${fmt(totalPensionComp)}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* 健保署繳納 */}
+          <div className="bg-white p-4 rounded-xl border border-coffee-100 space-y-3">
+            <div className="flex justify-between items-center pb-2 border-b border-coffee-50">
+              <span className="font-bold text-xs text-coffee-700 flex items-center gap-1.5">🏥 應繳給【中央健康保險署】</span>
+              <span className="font-mono font-black text-coffee-800 text-lg">${fmt(totalToHealthBureau)}</span>
+            </div>
+            <div className="space-y-1.5 text-xs text-coffee-500">
+              <div className="flex justify-between">
+                <span>· 全民健康保險費 (員工扣繳自付部分)</span>
+                <span className="font-mono">${fmt(totalHealthInsEmp)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>· 全民健康保險費 (店鋪提撥負擔部分)</span>
+                <span className="font-mono">${fmt(totalHealthInsComp)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Insurance note */}
       {!settings.enableInsurance && (

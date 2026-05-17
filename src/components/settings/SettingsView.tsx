@@ -515,13 +515,27 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
                       <input type="number" value={editingOp.baseRate || ''} onChange={e => setEditingOp({...editingOp, baseRate: Number(e.target.value)})} className="w-full pl-8 pr-3 py-3 border border-coffee-200 bg-white rounded-xl focus:ring-2 focus:ring-mint-brand outline-none font-mono" placeholder={editingOp.payrollType === 'monthly' ? '例如 36000' : '例如 190'} />
                     </div>
                   </div>
+                  <div className="flex items-center h-full md:pt-6">
+                    <label className="flex items-center gap-2.5 cursor-pointer p-3 border border-coffee-200 rounded-xl w-full bg-white select-none hover:bg-coffee-50 transition-all">
+                      <input 
+                        type="checkbox" 
+                        checked={editingOp.enableInsurance ?? true} 
+                        onChange={e => setEditingOp({...editingOp, enableInsurance: e.target.checked})} 
+                        className="w-5 h-5 text-coffee-600 rounded focus:ring-coffee-500 cursor-pointer" 
+                      />
+                      <div>
+                        <span className="font-bold text-xs text-coffee-800 block">計算勞健保</span>
+                        <span className="text-[9px] text-coffee-400 font-normal">若免保請取消勾選</span>
+                      </div>
+                    </label>
+                  </div>
                 </div>
                 <div className="mt-6">
                   <button onClick={handleSaveOperator} className="px-8 py-3 bg-coffee-800 text-white font-bold rounded-xl shadow-md hover:bg-coffee-900 transition w-full md:w-auto">儲存員工資料</button>
                 </div>
               </div>
             )}
-
+ 
             <div className="bg-white rounded-3xl shadow-sm border border-coffee-100 overflow-hidden">
               <table className="w-full text-left border-collapse">
                 <thead className="bg-coffee-50/50 text-coffee-700 text-sm">
@@ -542,7 +556,12 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
                         <tr key={op.id} className="border-b border-gray-50 hover:bg-gray-50/50 group">
                           <td className="p-4 font-bold text-gray-800 flex items-center gap-3">
                             <div className="w-8 h-8 rounded-full bg-coffee-100 text-coffee-600 flex items-center justify-center text-xs">{op.name.charAt(0)}</div>
-                            {op.name}
+                            <div>
+                              <div className="text-sm font-bold text-coffee-800">{op.name}</div>
+                              <div className="text-[10px] text-coffee-400 font-normal mt-0.5">
+                                {op.payrollType === 'monthly' ? '月薪制' : '時薪制'} · {op.enableInsurance !== false ? '🛡️ 計勞健保' : '❌ 不計勞健保'}
+                              </div>
+                            </div>
                           </td>
                           <td className="p-4">
                             <span className={cn("text-xs font-bold px-3 py-1 rounded-full", role?.isOwner ? "bg-red-50 text-red-700 border border-red-200" : "bg-coffee-50 text-coffee-700 border border-coffee-200")}>
