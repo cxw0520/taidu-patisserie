@@ -109,30 +109,101 @@ export default function RosterTab({
     return d.getDay(); // 0=Sun, 6=Sat
   };
 
-  // Estimated payroll cost
+  // Estimated payroll cost (Simulated to align with PayrollTab.tsx formulas)
   const estimatedCost = useMemo(() => {
     let total = 0;
+    
+    const ot1H = settings.overtimeTier1Hours || 8;
+    const ot2H = settings.overtimeTier2Hours || 10;
+    const ot1Rate = settings.overtimeTier1Rate || 1.34;
+    const ot2Rate = settings.overtimeTier2Rate || 1.67;
+    const holidayRate = settings.holidayPayRate || 2.0;
+
     operators.forEach(op => {
-      if (op.payrollType === 'monthly') {
-        total += op.baseRate || 0;
-      } else if (op.payrollType === 'hourly') {
-        let totalMinutes = 0;
-        days.forEach(day => {
-          const entry = getCellEntry(op.id, day);
-          if (!entry || entry.isOff) return;
-          const tpl = shiftTemplates.find(t => t.id === entry.shiftTemplateId);
-          if (tpl) {
-            const start = tpl.startTime.split(':').map(Number);
-            const end = tpl.endTime.split(':').map(Number);
-            const mins = (end[0] * 60 + end[1]) - (start[0] * 60 + start[1]) - tpl.breakMinutes;
-            totalMinutes += Math.max(0, mins);
+      const baseRate = op.baseRate || 0;
+      let totalRegularMinutes = 0;
+      let totalOt1Minutes = 0;
+      let totalOt2Minutes = 0;
+      let holidayMinutes = 0;
+
+      days.forEach(day => {
+        const entry = getCellEntry(op.id, day);
+        if (!entry || entry.isOff) return;
+        const tpl = shiftTemplates.find(t => t.id === entry.shiftTemplateId);
+        if (!tpl) return;
+
+        // Parse start and end times defensively
+        const startParts = (tpl.startTime || '00:00').split(':');
+        const endParts = (tpl.endTime || '00:00').split(':');
+        const startMin = (Number(startParts[0]) || 0) * 60 + (Number(startParts[1]) || 0);
+        const endMin = (Number(endParts[0]) || 0) * 60 + (Number(endParts[1]) || 0);
+        
+        let diff = endMin - startMin;
+        if (diff < 0) diff += 24 * 60; // Midnight crossover corrected!
+        
+        const effMin = Math.max(0, diff - (tpl.breakMinutes || 0));
+
+        const dateKey = `${ymKey}-${String(day).padStart(2, '0')}`;
+        const isHoliday = entry.isHoliday || settings.exceptionCalendar?.[dateKey] === 'holiday';
+
+        if (isHoliday) {
+          holidayMinutes += effMin;
+        } else {
+          const ot1MinLimit = ot1H * 60;
+          const ot2MinLimit = ot2H * 60;
+          if (effMin <= ot1MinLimit) {
+            totalRegularMinutes += effMin;
+          } else if (effMin <= ot2MinLimit) {
+            totalRegularMinutes += ot1MinLimit;
+            totalOt1Minutes += effMin - ot1MinLimit;
+          } else {
+            totalRegularMinutes += ot1MinLimit;
+            totalOt1Minutes += ot2MinLimit - ot1MinLimit;
+            totalOt2Minutes += effMin - ot2MinLimit;
           }
-        });
-        total += ((op.baseRate || 0) * totalMinutes) / 60;
+        }
+      });
+
+      let basePay = 0;
+      let ot1Pay = 0;
+      let ot2Pay = 0;
+      let hPay = 0;
+
+      if (op.payrollType === 'monthly') {
+        basePay = baseRate;
+        const dailyRate = baseRate / 30;
+        const minuteRate = dailyRate / 8 / 60;
+        ot1Pay = totalOt1Minutes * minuteRate * ot1Rate;
+        ot2Pay = totalOt2Minutes * minuteRate * ot2Rate;
+        hPay = holidayMinutes * minuteRate * holidayRate;
+      } else {
+        basePay = (totalRegularMinutes / 60) * baseRate;
+        ot1Pay = (totalOt1Minutes / 60) * baseRate * ot1Rate;
+        ot2Pay = (totalOt2Minutes / 60) * baseRate * ot2Rate;
+        hPay = (holidayMinutes / 60) * baseRate * holidayRate;
       }
+
+      const grossPay = Math.round(basePay + ot1Pay + ot2Pay + hPay);
+
+      // Simulate the exact company cost logic (including labor & health insurance + pension)
+      let opCost = grossPay;
+      if (settings.enableInsurance) {
+        const laborInsEmp = Math.round(grossPay * 0.021);
+        const healthInsEmp = Math.round(grossPay * 0.0252 * 0.3);
+        const netPay = Math.max(0, grossPay - laborInsEmp - healthInsEmp);
+
+        const laborInsComp = Math.round(grossPay * 0.1);
+        const healthInsComp = Math.round(grossPay * 0.0252 * 0.7);
+        const pensionComp = Math.round(grossPay * 0.06);
+
+        opCost = netPay + laborInsComp + healthInsComp + pensionComp;
+      }
+
+      total += opCost;
     });
+
     return Math.round(total);
-  }, [roster, operators, shiftTemplates, days]);
+  }, [roster, operators, shiftTemplates, days, settings, ymKey]);
 
   const handleSaveTemplate = () => {
     if (!templateForm.name || !templateForm.startTime || !templateForm.endTime) return;
