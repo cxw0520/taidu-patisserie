@@ -171,7 +171,7 @@ export default function JournalView({ selectedYear, shopId, forcedSubTab, settin
             {activeSubTab === 'ledger' && <LedgerView entries={entries} coa={coa} />}
             {activeSubTab === 'coa' && <CoaView coa={coa} shopId={shopId} />}
             {activeSubTab === 'assets' && <AssetsView shopId={shopId} selectedYear={selectedYear} />}
-            {activeSubTab === 'expenses' && <ExpenseLogView shopId={shopId} selectedYear={selectedYear} fundingSources={settings?.fundingSources || []} expenseCategories={settings?.expenseCategories || []} coa={coa} />}
+            {activeSubTab === 'expenses' && <ExpenseLogView shopId={shopId} selectedYear={selectedYear} fundingSources={settings?.fundingSources || []} expenseCategories={settings?.expenseCategories || []} coa={coa} entries={entries} />}
           </motion.div>
         </AnimatePresence>
       </div>

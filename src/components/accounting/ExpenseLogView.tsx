@@ -12,9 +12,10 @@ interface Props {
   fundingSources: FundingSource[];
   expenseCategories: ExpenseCategory[];
   coa?: COAItem[];
+  entries?: JournalEntry[];
 }
 
-export default function ExpenseLogView({ shopId, selectedYear, fundingSources, expenseCategories, coa = [] }: Props) {
+export default function ExpenseLogView({ shopId, selectedYear, fundingSources, expenseCategories, coa = [], entries = [] }: Props) {
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<ExpenseRecord | null>(null);
@@ -269,6 +270,7 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
           fundingSources={fundingSources} 
           expenseCategories={expenseCategories} 
           coa={coa}
+          entries={entries}
           onClose={handleVoucherClose} 
           onNext={batchQueue.length > 0 ? handleVoucherNext : undefined}
           remainingCount={batchQueue.length > 0 ? batchQueue.length - 1 : 0}
@@ -458,10 +460,91 @@ function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClo
   );
 }
 
-function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, onClose, onNext, remainingCount }: { shopId: string, record: ExpenseRecord, fundingSources: FundingSource[], expenseCategories: ExpenseCategory[], coa: COAItem[], onClose: () => void, onNext?: () => void, remainingCount?: number }) {
+function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, entries = [], onClose, onNext, remainingCount }: { shopId: string, record: ExpenseRecord, fundingSources: FundingSource[], expenseCategories: ExpenseCategory[], coa: COAItem[], entries?: JournalEntry[], onClose: () => void, onNext?: () => void, remainingCount?: number }) {
   const [date, setDate] = useState(record.dateKey);
   const [description, setDescription] = useState(record.vendor || '雜支支出');
   const [lines, setLines] = useState<JournalLine[]>([]);
+
+  // Correct Voucher sequence generation following the existing sequence format
+  const generateVoucherId = (selectedDate: string) => {
+    const d = new Date(selectedDate);
+    const yy = String(d.getFullYear()).slice(-2);
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const datePrefix = `${yy}${mm}${dd}`;
+
+    const todayVouchers = (entries || [])
+      .filter(e => e.date === selectedDate)
+      .map(e => e.id)
+      .filter(id => id.startsWith(datePrefix));
+    
+    let nextSeq = 1;
+    if (todayVouchers.length > 0) {
+      const maxSeq = Math.max(...todayVouchers.map(id => parseInt(id.slice(-2), 10) || 0));
+      nextSeq = maxSeq + 1;
+    }
+    return `${datePrefix}${String(nextSeq).padStart(2, '0')}`;
+  };
+
+  // Smart recommendation mapping algorithm matching descriptions to appropriate accounts
+  const findBestCoa = (name: string, type: 'debit' | 'credit') => {
+    const clean = (name || '').toLowerCase().trim();
+    if (!clean) return null;
+
+    // 1. Precise exact matches or ID match
+    let match = coa.find(c => c.name === name || c.id === name);
+    if (match) return match;
+
+    // 2. Keyword mapping
+    if (type === 'credit') {
+      if (clean.includes('零用')) return coa.find(c => c.id === '1103') || coa.find(c => c.name === '零用金');
+      if (clean.includes('銀行') || clean.includes('轉帳') || clean.includes('匯款') || clean.includes('存款')) {
+        return coa.find(c => c.id === '1102') || coa.find(c => c.name === '銀行存款');
+      }
+      if (clean.includes('現') || clean.includes('收銀')) {
+        return coa.find(c => c.id === '1101') || coa.find(c => c.name === '現金');
+      }
+    } else {
+      if (clean.includes('食材') || clean.includes('原料') || clean.includes('食品') || clean.includes('水果') || clean.includes('奶')) {
+        return coa.find(c => c.id === '5101') || coa.find(c => c.name === '食材成本');
+      }
+      if (clean.includes('包材') || clean.includes('包裝') || clean.includes('紙盒') || clean.includes('袋')) {
+        return coa.find(c => c.id === '5102') || coa.find(c => c.name === '包材成本');
+      }
+      if (clean.includes('物流') || clean.includes('宅配') || clean.includes('運費') || clean.includes('郵')) {
+        return coa.find(c => c.id === '5103') || coa.find(c => c.name === '物流成本');
+      }
+      if (clean.includes('租金') || clean.includes('房租') || clean.includes('店租')) {
+        return coa.find(c => c.id === '6101') || coa.find(c => c.name === '租金支出');
+      }
+      if (clean.includes('水電') || clean.includes('瓦斯') || clean.includes('天然') || clean.includes('電費') || clean.includes('水費')) {
+        return coa.find(c => c.id === '6102') || coa.find(c => c.name === '水電瓦斯費');
+      }
+      if (clean.includes('維修') || clean.includes('保養') || clean.includes('修繕')) {
+        return coa.find(c => c.id === '6105') || coa.find(c => c.name === '維修費');
+      }
+      if (clean.includes('廣告')) {
+        return coa.find(c => c.id === '6302') || coa.find(c => c.name === '廣告費');
+      }
+      if (clean.includes('行銷') || clean.includes('宣傳')) {
+        return coa.find(c => c.id === '6301') || coa.find(c => c.name === '行銷費');
+      }
+      if (clean.includes('雜支') || clean.includes('雜項') || clean.includes('五金') || clean.includes('文具') || clean.includes('清潔')) {
+        return coa.find(c => c.id === '6104') || coa.find(c => c.name === '店舖雜項');
+      }
+    }
+
+    // 3. Substring matching as robust fallback
+    match = coa.find(c => c.name.includes(name) || name.includes(c.name));
+    if (match) return match;
+
+    // 4. Default type fallback
+    if (type === 'credit') {
+      return coa.find(c => c.type === '資產') || coa[0];
+    } else {
+      return coa.find(c => c.type === '費用' || c.type === '成本') || coa[0];
+    }
+  };
 
   useEffect(() => {
     const newLines: JournalLine[] = [];
@@ -472,9 +555,13 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
     if (!record.isTransfer) {
       record.lines.forEach(rl => {
         const cat = expenseCategories.find(c => c.id === rl.categoryId);
-        let debitCoa = coa.find(c => c.id === cat?.defaultCoaId);
-        if (!debitCoa) debitCoa = coa.find(c => c.name === cat?.name);
-        if (!debitCoa) debitCoa = coa.find(c => c.type === '費用' || c.type === '成本'); // fallback
+        let debitCoa = cat?.defaultCoaId ? coa.find(c => c.id === cat.defaultCoaId) : null;
+        if (!debitCoa && cat?.name) {
+          debitCoa = findBestCoa(cat.name, 'debit');
+        }
+        if (!debitCoa) {
+          debitCoa = coa.find(c => c.type === '費用' || c.type === '成本'); // fallback
+        }
 
         newLines.push({
           id: uid(),
@@ -488,9 +575,13 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
 
     // Auto map CREDIT line (from fundingSource)
     const fs = fundingSources.find(f => f.id === record.fundingSourceId);
-    let creditCoa = coa.find(c => c.id === fs?.defaultCoaId);
-    if (!creditCoa) creditCoa = coa.find(c => c.name.includes(fs?.name || '')) || coa.find(c => c.name === fs?.name);
-    if (!creditCoa) creditCoa = coa.find(c => c.type === '資產'); // fallback
+    let creditCoa = fs?.defaultCoaId ? coa.find(c => c.id === fs.defaultCoaId) : null;
+    if (!creditCoa && fs?.name) {
+      creditCoa = findBestCoa(fs.name, 'credit');
+    }
+    if (!creditCoa) {
+      creditCoa = coa.find(c => c.type === '資產'); // fallback
+    }
 
     newLines.push({
       id: uid(),
@@ -503,9 +594,13 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
     // If it's a transfer, map DEBIT line (target funding source)
     if (record.isTransfer && record.targetFundingSourceId) {
       const targetFs = fundingSources.find(f => f.id === record.targetFundingSourceId);
-      let targetCoa = coa.find(c => c.id === targetFs?.defaultCoaId);
-      if (!targetCoa) targetCoa = coa.find(c => c.name.includes(targetFs?.name || '')) || coa.find(c => c.name === targetFs?.name);
-      if (!targetCoa) targetCoa = coa.find(c => c.type === '資產');
+      let targetCoa = targetFs?.defaultCoaId ? coa.find(c => c.id === targetFs.defaultCoaId) : null;
+      if (!targetCoa && targetFs?.name) {
+        targetCoa = findBestCoa(targetFs.name, 'credit'); // Target account is asset (debit for transfer in)
+      }
+      if (!targetCoa) {
+        targetCoa = coa.find(c => c.type === '資產');
+      }
 
       newLines.push({
         id: uid(),
@@ -528,9 +623,14 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
     if (debitTotal !== creditTotal) return alert('借貸必須平衡！');
     if (lines.some(l => !l.accountId)) return alert('請為所有明細選擇會計科目！');
 
-    const entryId = uid();
+    const entryId = generateVoucherId(date);
     const year = parseInt(date.split('-')[0]);
-    const vNo = date.replace(/-/g, '') + '-' + Math.floor(Math.random() * 1000).toString().padStart(3, '0');
+    const vNo = entryId;
+
+    const mappedLines = lines.map(l => ({
+      ...l,
+      accountName: coa.find(a => a.id === l.accountId)?.name || '未知名稱'
+    }));
 
     const entry: JournalEntry = {
       id: entryId,
@@ -538,7 +638,7 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
       year,
       voucherNo: vNo,
       description,
-      lines,
+      lines: mappedLines,
       debitTotal,
       creditTotal
     };
