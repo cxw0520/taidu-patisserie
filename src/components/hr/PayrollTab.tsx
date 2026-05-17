@@ -151,7 +151,7 @@ function calcPayroll(
     healthInsuranceCompany: healthInsComp,
     pensionCompany: pensionComp,
     netPay,
-    companyCost: settings.enableInsurance ? (op.enableInsurance !== false ? netPay + laborInsComp + healthInsComp + pensionComp : netPay) : undefined,
+    companyCost: settings.enableInsurance ? (op.enableInsurance !== false ? grossPay + laborInsComp + healthInsComp + pensionComp : grossPay) : grossPay,
     lineItems,
   };
 }
@@ -170,9 +170,16 @@ export default function PayrollTab({
 
   const ymKey = fmtYM(viewYear, viewMonth);
 
+  const operatorsRef = React.useRef(operators);
   useEffect(() => {
-    if (!shopId || operators.length === 0) return;
-    const unsubs = operators.map(op => {
+    operatorsRef.current = operators;
+  }, [operators]);
+
+  const opIdsString = useMemo(() => operators.map(o => o.id).sort().join(','), [operators]);
+
+  useEffect(() => {
+    if (!shopId || operatorsRef.current.length === 0) return;
+    const unsubs = operatorsRef.current.map(op => {
       const ref = doc(db, 'shops', shopId, 'hr', `attendance_${op.id}_${ymKey}`);
       return onSnapshot(ref, snap => {
         setAllAttendance(prev => ({
@@ -182,7 +189,7 @@ export default function PayrollTab({
       });
     });
     return () => unsubs.forEach(u => u());
-  }, [shopId, operators, ymKey]);
+  }, [shopId, opIdsString, ymKey]);
 
   const payrollResults = useMemo(() => {
     return operators.map(op => ({

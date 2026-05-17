@@ -192,6 +192,11 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
   const [subTab, setSubTab] = useState<'list' | 'credit'>('list');
   const [creditAdjustModal, setCreditAdjustModal] = useState<Customer | null>(null);
   const [migrating, setMigrating] = useState(false);
+  const [displayCount, setDisplayCount] = useState(50);
+
+  useEffect(() => {
+    setDisplayCount(50);
+  }, [searchQ, subTab]);
 
 
   const handleMigrate = async () => {
@@ -421,7 +426,7 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
             {searchQ ? '查無符合顧客' : subTab === 'credit' ? '目前尚無儲值餘額或未付帳款的顧客紀錄' : '尚未建立任何顧客資料'}
           </div>
         )}
-        {(subTab === 'credit' ? creditFiltered : filtered).map(c => {
+        {(subTab === 'credit' ? creditFiltered : filtered).slice(0, displayCount).map(c => {
           const isExpanded = expandedId === c.id;
           return (
             <div key={c.id} className="glass-panel overflow-hidden shadow-sm hover:-translate-y-0.5 transition-transform duration-200">
@@ -587,6 +592,17 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
           );
         })}
       </div>
+
+      {(subTab === 'credit' ? creditFiltered : filtered).length > displayCount && (
+        <div className="flex justify-center pt-6 pb-4">
+          <button
+            onClick={() => setDisplayCount(prev => prev + 50)}
+            className="bg-coffee-800 border-2 border-coffee-800 text-white hover:bg-coffee-900 px-6 py-3 rounded-full font-bold transition shadow-md active:scale-95 text-sm flex items-center gap-2"
+          >
+            <span>✨</span> 顯示更多顧客 (已顯示 {displayCount} / 共 {(subTab === 'credit' ? creditFiltered : filtered).length} 筆)
+          </button>
+        </div>
+      )}
 
 
       {/* Add / Edit Modal */}

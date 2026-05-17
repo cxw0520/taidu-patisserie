@@ -131,7 +131,8 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
 
     const qPurchases = query(
       collection(db, 'shops', shopId, 'purchases'),
-      where('yearMonth', '==', selectedMonth)
+      where('date', '>=', `${selectedMonth}-01`),
+      where('date', '<=', `${selectedMonth}-31`)
     );
     const unsubPurchases = onSnapshot(qPurchases, (snap) => {
       setPurchases(snap.docs.map(d => d.data() as import('../types').Purchase));
@@ -676,7 +677,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     let purchaseVal = 0;
     // 舊進貨單系統
     (purchases || []).forEach((p: any) => {
-      purchaseVal += parseNum(p.totalAmt);
+      purchaseVal += parseNum(p.totalAmount || p.totalAmt);
     });
     // 新雜支系統 (只算 isMaterialCost = true 的明細)
     let nonMaterialExpenseTotal = 0;

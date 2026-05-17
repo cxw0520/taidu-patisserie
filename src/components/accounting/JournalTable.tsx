@@ -201,6 +201,11 @@ function EntryForm({
 export default function JournalTable({ entries, coa, selectedYear, shopId }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number, shopId: string }) {
   const [showForm, setShowForm] = useState(false);
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
+  const [displayCount, setDisplayCount] = useState(50);
+
+  useEffect(() => {
+    setDisplayCount(50);
+  }, [selectedYear]);
   
   const [pendingAssets, setPendingAssets] = useState<any[]>([]);
   const [currentPendingAsset, setCurrentPendingAsset] = useState<any | null>(null);
@@ -320,7 +325,7 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
           <tbody>
             {entries.length === 0 ? (
               <tr><td colSpan={7} className="p-8 text-center text-gray-400 italic">尚未有任何交易紀錄</td></tr>
-            ) : entries.map(entry => (
+            ) : entries.slice(0, displayCount).map(entry => (
               <React.Fragment key={entry.id}>
                 {editingEntryId === entry.id ? (
                   <tr>
@@ -373,6 +378,17 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
         </table>
         </div>
       </div>
+
+      {entries.length > displayCount && (
+        <div className="flex justify-center pt-6">
+          <button 
+            onClick={() => setDisplayCount(prev => prev + 50)}
+            className="bg-coffee-600 border border-coffee-700 text-white hover:bg-coffee-700 px-6 py-3 rounded-full font-bold shadow-md transition active:scale-95 text-sm flex items-center gap-2"
+          >
+            <span>✨</span> 顯示更多分錄 (已顯示 {displayCount} / 共 {entries.length} 筆)
+          </button>
+        </div>
+      )}
 
       <AnimatePresence>
         {currentPendingAsset && (
