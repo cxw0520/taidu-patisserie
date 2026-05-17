@@ -183,145 +183,249 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
 
       <AnimatePresence>
         {isAddingMode && (
-          <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }} className="overflow-hidden">
-            <form onSubmit={handleAddSubmit} className="glass-panel relative bg-white/80 mb-6 border-2 border-coffee-100 shadow-md rounded-[24px] overflow-hidden">
-              <div className="bg-coffee-50/50 border-b border-coffee-100 p-4 md:px-6 flex justify-between items-center">
-                <h3 className="font-bold text-coffee-800 text-lg">{newMaterial.id ? '編輯材料資料' : '新增材料資料卡'}</h3>
-                <button type="button" onClick={() => setIsAddingMode(false)} className="text-coffee-400 hover:text-coffee-600"><X className="w-5 h-5"/></button>
-              </div>
-              
-              <div className="p-4 md:p-6 space-y-6">
-                {/* 1. 基本資料 */}
-                <div className="space-y-3">
-                  <h4 className="text-sm font-bold text-coffee-600 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-coffee-400"></div>基本資訊</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="text-[10px] font-bold text-coffee-400 block mb-1">類別 *</label>
-                      <select value={newMaterial.category} onChange={e => setNewMaterial({...newMaterial, category: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400">
-                        <option value="食材">食材</option>
-                        <option value="包材">包材</option>
-                        <option value="裝飾品">裝飾品</option>
-                        <option value="其他">其他</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-coffee-400 block mb-1">所屬廠商 (可複選)</label>
-                      <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto p-2 border border-coffee-200 rounded-xl bg-white">
-                        {vendors.length === 0 && <span className="text-xs text-coffee-300 p-1">尚未建立廠商資料</span>}
-                        {vendors.map(v => {
-                          const isSelected = newMaterial.vendors?.includes(v.name) || newMaterial.vendor === v.name;
-                          return (
-                            <label key={v.id} className={cn(
-                              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors border",
-                              isSelected ? "bg-coffee-100 text-coffee-800 border-coffee-300" : "bg-gray-50 text-gray-500 border-transparent hover:bg-gray-100"
-                            )}>
-                              <input 
-                                type="checkbox" 
-                                className="hidden"
-                                checked={isSelected}
-                                onChange={(e) => {
-                                  const currentVendors = [...(newMaterial.vendors || [])];
-                                  if (newMaterial.vendor && !currentVendors.includes(newMaterial.vendor)) {
-                                    currentVendors.push(newMaterial.vendor);
-                                  }
-                                  
-                                  let nextVendors;
-                                  if (e.target.checked) {
-                                    nextVendors = [...new Set([...currentVendors, v.name])];
-                                  } else {
-                                    nextVendors = currentVendors.filter(name => name !== v.name);
-                                  }
-                                  setNewMaterial({ ...newMaterial, vendors: nextVendors, vendor: '' }); // Clear legacy vendor
-                                }} 
-                              />
-                              {isSelected && <CheckCircle2 className="w-3 h-3 text-coffee-600" />}
-                              {v.name}
-                            </label>
-                          );
-                        })}
-                      </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-coffee-400 block mb-1">材料名稱 *</label>
-                      <input type="text" required value={newMaterial.name} onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: 麵粉" />
-                    </div>
-                  </div>
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 overflow-y-auto">
+            {/* Backdrop */}
+            <motion.div 
+              initial={{ opacity: 0 }} 
+              animate={{ opacity: 1 }} 
+              exit={{ opacity: 0 }} 
+              onClick={() => setIsAddingMode(false)} 
+              className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm"
+            />
+            
+            {/* Modal Body */}
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0, y: 20 }} 
+              animate={{ scale: 1, opacity: 1, y: 0 }} 
+              exit={{ scale: 0.95, opacity: 0, y: 20 }} 
+              className="glass-panel w-full max-w-2xl bg-white border-0 shadow-2xl rounded-[32px] overflow-hidden relative z-10 flex flex-col max-h-[90vh]"
+            >
+              <form onSubmit={handleAddSubmit} className="flex flex-col h-full overflow-hidden">
+                <div className="bg-[#faf7f2]/50 border-b border-coffee-100 p-6 flex justify-between items-center">
+                  <h3 className="font-bold text-coffee-850 text-xl flex items-center gap-2">
+                    {newMaterial.id ? '📝 編輯材料資料' : '✨ 新增材料資料卡'}
+                  </h3>
+                  <button 
+                    type="button" 
+                    onClick={() => setIsAddingMode(false)} 
+                    className="p-2 text-coffee-400 hover:text-coffee-600 rounded-full hover:bg-coffee-50 transition-colors"
+                  >
+                    <X className="w-5 h-5"/>
+                  </button>
                 </div>
-
-                {/* 2. 單位設定 */}
-                <div className="space-y-3 p-4 bg-coffee-50/30 rounded-2xl border border-coffee-50">
-                  <h4 className="text-sm font-bold text-coffee-600 flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-coffee-400"></div>
-                    單位換算設定 (由小到大填寫)
-                  </h4>
-                  
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                    {/* Level 1 */}
-                    <div className="space-y-2 relative">
-                      <label className="text-[10px] font-bold text-coffee-600 bg-coffee-100 px-2 py-0.5 rounded-md inline-block">第一層：基本單位 *</label>
-                      <input type="text" required value={newMaterial.unit} onChange={e => setNewMaterial({...newMaterial, unit: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: g" />
-                    </div>
-
-                    {/* Level 2 */}
-                    <div className="space-y-2 relative">
-                      <label className="text-[10px] font-bold text-coffee-500 bg-coffee-50 px-2 py-0.5 rounded-md inline-block">第二層：中單位 (選填)</label>
-                      <input type="text" value={newMaterial.midUnit || ''} onChange={e => setNewMaterial({...newMaterial, midUnit: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: 罐" />
-                      {newMaterial.midUnit && (
-                        <div className="mt-2 text-xs font-bold text-coffee-500">
-                          1 {newMaterial.midUnit} = 
-                          <input type="number" step="0.001" min="0.001" required value={newMaterial.midUnitRate || ''} onChange={e => setNewMaterial({...newMaterial, midUnitRate: parseFloat(e.target.value) || undefined})} className="w-16 mx-2 border-b-2 border-coffee-300 outline-none text-center bg-transparent focus:border-coffee-600" placeholder="?" />
-                          {newMaterial.unit}
+                
+                <div className="p-6 md:p-8 space-y-6 overflow-y-auto flex-1">
+                  {/* 1. 基本資料 */}
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-bold text-coffee-700 flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-coffee-500"></div>基本資訊
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <label className="text-[10px] font-bold text-coffee-400 block mb-1">類別 *</label>
+                        <select 
+                          value={newMaterial.category} 
+                          onChange={e => setNewMaterial({...newMaterial, category: e.target.value})} 
+                          className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400 font-bold text-coffee-700"
+                        >
+                          <option value="食材">食材</option>
+                          <option value="包材">包材</option>
+                          <option value="裝飾品">裝飾品</option>
+                          <option value="其他">其他</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-coffee-400 block mb-1">所屬廠商 (可複選)</label>
+                        <div className="flex flex-wrap gap-2 max-h-[120px] overflow-y-auto p-2 border border-coffee-200 rounded-xl bg-white">
+                          {vendors.length === 0 && <span className="text-xs text-coffee-300 p-1">尚未建立廠商資料</span>}
+                          {vendors.map(v => {
+                            const isSelected = newMaterial.vendors?.includes(v.name) || newMaterial.vendor === v.name;
+                            return (
+                              <label key={v.id} className={cn(
+                                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold cursor-pointer transition-colors border",
+                                isSelected ? "bg-coffee-100 text-coffee-800 border-coffee-300" : "bg-gray-50 text-gray-500 border-transparent hover:bg-gray-100"
+                              )}>
+                                <input 
+                                  type="checkbox" 
+                                  className="hidden"
+                                  checked={isSelected}
+                                  onChange={(e) => {
+                                    const currentVendors = [...(newMaterial.vendors || [])];
+                                    if (newMaterial.vendor && !currentVendors.includes(newMaterial.vendor)) {
+                                      currentVendors.push(newMaterial.vendor);
+                                    }
+                                    
+                                    let nextVendors;
+                                    if (e.target.checked) {
+                                      nextVendors = [...new Set([...currentVendors, v.name])];
+                                    } else {
+                                      nextVendors = currentVendors.filter(name => name !== v.name);
+                                    }
+                                    setNewMaterial({ ...newMaterial, vendors: nextVendors, vendor: '' }); // Clear legacy vendor
+                                  }} 
+                                />
+                                {isSelected && <CheckCircle2 className="w-3 h-3 text-coffee-600" />}
+                                {v.name}
+                              </label>
+                            );
+                          })}
                         </div>
-                      )}
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-bold text-coffee-400 block mb-1">材料名稱 *</label>
+                        <input 
+                          type="text" 
+                          required 
+                          value={newMaterial.name} 
+                          onChange={e => setNewMaterial({...newMaterial, name: e.target.value})} 
+                          className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400 font-bold text-coffee-800" 
+                          placeholder="例如: 麵粉" 
+                        />
+                      </div>
                     </div>
+                  </div>
 
-                    {/* Level 3 */}
-                    <div className="space-y-2 relative">
-                      <label className="text-[10px] font-bold text-coffee-500 bg-coffee-50 px-2 py-0.5 rounded-md inline-block">第三層：大單位 (選填)</label>
-                      <input type="text" value={newMaterial.purchaseUnit || ''} onChange={e => setNewMaterial({...newMaterial, purchaseUnit: e.target.value})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400" placeholder="例如: 箱" />
-                      {newMaterial.purchaseUnit && (
-                        <div className="mt-2 text-xs font-bold text-coffee-500 flex items-center">
-                          1 {newMaterial.purchaseUnit} = 
-                          <input type="number" step="0.001" min="0.001" required value={newMaterial.purchaseUnitRate || ''} onChange={e => setNewMaterial({...newMaterial, purchaseUnitRate: parseFloat(e.target.value) || undefined})} className="w-16 mx-2 border-b-2 border-coffee-300 outline-none text-center bg-transparent focus:border-coffee-600" placeholder="?" />
-                          {newMaterial.midUnit ? newMaterial.midUnit : newMaterial.unit}
+                  {/* 2. 單位設定 */}
+                  <div className="space-y-3 p-4 bg-coffee-50/30 rounded-2xl border border-coffee-100/50">
+                    <h4 className="text-sm font-bold text-coffee-700 flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-coffee-500"></div>單位換算設定 (由小到大填寫)
+                    </h4>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                      {/* Level 1 */}
+                      <div className="space-y-2 relative">
+                        <label className="text-[10px] font-bold text-coffee-600 bg-coffee-100 px-2 py-0.5 rounded-md inline-block">第一層：基本單位 *</label>
+                        <input 
+                          type="text" 
+                          required 
+                          value={newMaterial.unit} 
+                          onChange={e => setNewMaterial({...newMaterial, unit: e.target.value})} 
+                          className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400 font-bold text-coffee-800" 
+                          placeholder="例如: g" 
+                        />
+                      </div>
+
+                      {/* Level 2 */}
+                      <div className="space-y-2 relative">
+                        <label className="text-[10px] font-bold text-coffee-500 bg-coffee-50 px-2 py-0.5 rounded-md inline-block">第二層：中單位 (選填)</label>
+                        <input 
+                          type="text" 
+                          value={newMaterial.midUnit || ''} 
+                          onChange={e => setNewMaterial({...newMaterial, midUnit: e.target.value})} 
+                          className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400 font-bold text-coffee-800" 
+                          placeholder="例如: 罐" 
+                        />
+                        {newMaterial.midUnit && (
+                          <div className="mt-2 text-xs font-bold text-coffee-600 bg-white/60 p-1.5 rounded-lg border border-coffee-50 inline-block w-full">
+                            1 {newMaterial.midUnit} = 
+                            <input 
+                              type="number" 
+                              step="0.001" 
+                              min="0.001" 
+                              required 
+                              value={newMaterial.midUnitRate || ''} 
+                              onChange={e => setNewMaterial({...newMaterial, midUnitRate: parseFloat(e.target.value) || undefined})} 
+                              className="w-16 mx-2 border-b border-coffee-300 outline-none text-center bg-transparent focus:border-coffee-650 font-bold" 
+                              placeholder="?" 
+                            />
+                            {newMaterial.unit}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Level 3 */}
+                      <div className="space-y-2 relative">
+                        <label className="text-[10px] font-bold text-coffee-500 bg-coffee-50 px-2 py-0.5 rounded-md inline-block">第三層：大單位 (選填)</label>
+                        <input 
+                          type="text" 
+                          value={newMaterial.purchaseUnit || ''} 
+                          onChange={e => setNewMaterial({...newMaterial, purchaseUnit: e.target.value})} 
+                          className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-400 font-bold text-coffee-800" 
+                          placeholder="例如: 箱" 
+                        />
+                        {newMaterial.purchaseUnit && (
+                          <div className="mt-2 text-xs font-bold text-coffee-600 bg-white/60 p-1.5 rounded-lg border border-coffee-50 inline-block w-full">
+                            1 {newMaterial.purchaseUnit} = 
+                            <input 
+                              type="number" 
+                              step="0.001" 
+                              min="0.001" 
+                              required 
+                              value={newMaterial.purchaseUnitRate || ''} 
+                              onChange={e => setNewMaterial({...newMaterial, purchaseUnitRate: parseFloat(e.target.value) || undefined})} 
+                              className="w-16 mx-2 border-b border-coffee-300 outline-none text-center bg-transparent focus:border-coffee-650 font-bold" 
+                              placeholder="?" 
+                            />
+                            {newMaterial.midUnit ? newMaterial.midUnit : newMaterial.unit}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {newMaterial.purchaseUnit && newMaterial.midUnit && newMaterial.purchaseUnitRate && newMaterial.midUnitRate && (
+                      <div className="text-xs text-mint-750 font-bold bg-mint-50/50 p-2.5 rounded-xl border border-mint-100 mt-2">
+                         ↳ 換算總結：1 {newMaterial.purchaseUnit} = {newMaterial.purchaseUnitRate * newMaterial.midUnitRate} {newMaterial.unit}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 3. 庫存與警示 */}
+                  <div className="space-y-3">
+                    <h4 className="text-sm font-bold text-coffee-700 flex items-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-coffee-500"></div>庫存與提醒設定
+                    </h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="text-[10px] font-bold text-coffee-400 block mb-1">目前庫存 (選填，直接輸入小單位總數)</label>
+                        <div className="relative">
+                          <input 
+                            type="number" 
+                            step="0.01" 
+                            value={newMaterial.stock || ''} 
+                            onChange={e => setNewMaterial({...newMaterial, stock: parseFloat(e.target.value) || 0})} 
+                            className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 pr-12 outline-none focus:border-coffee-400 font-bold font-mono text-coffee-800" 
+                          />
+                          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-coffee-500 font-bold">{newMaterial.unit || '單位'}</span>
                         </div>
-                      )}
-                    </div>
-                  </div>
-                  
-                  {newMaterial.purchaseUnit && newMaterial.midUnit && newMaterial.purchaseUnitRate && newMaterial.midUnitRate && (
-                    <div className="text-xs text-mint-brand font-bold bg-mint-brand/10 p-2 rounded-lg mt-2">
-                       ↳ 換算總結：1 {newMaterial.purchaseUnit} = {newMaterial.purchaseUnitRate * newMaterial.midUnitRate} {newMaterial.unit}
-                    </div>
-                  )}
-                </div>
-
-                {/* 3. 庫存與警示 */}
-                <div className="space-y-3">
-                  <h4 className="text-sm font-bold text-coffee-600 flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full bg-coffee-400"></div>庫存設定</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="text-[10px] font-bold text-coffee-400 block mb-1">目前庫存 (選填，直接輸入總數)</label>
-                      <div className="relative">
-                        <input type="number" step="0.01" value={newMaterial.stock || ''} onChange={e => setNewMaterial({...newMaterial, stock: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 pr-12 outline-none focus:border-coffee-400" />
-                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-coffee-400 font-bold">{newMaterial.unit || '單位'}</span>
                       </div>
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-bold text-amber-500 block mb-1">最低庫存提醒水位 (以最大單位計算) *</label>
-                      <div className="relative">
-                        <input type="number" required step="0.01" min="0" value={newMaterial.minAlert ?? 0} onChange={e => setNewMaterial({...newMaterial, minAlert: parseFloat(e.target.value) || 0})} className="w-full bg-white border border-amber-200 rounded-xl px-4 py-2 pr-12 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20" />
-                        <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-amber-600 font-bold">{newMaterial.purchaseUnit || newMaterial.midUnit || newMaterial.unit || '單位'}</span>
+                      <div>
+                        <label className="text-[10px] font-bold text-amber-500 block mb-1">最低提醒水位 (以最大單位計算) *</label>
+                        <div className="relative">
+                          <input 
+                            type="number" 
+                            required 
+                            step="0.01" 
+                            min="0" 
+                            value={newMaterial.minAlert ?? 0} 
+                            onChange={e => setNewMaterial({...newMaterial, minAlert: parseFloat(e.target.value) || 0})} 
+                            className="w-full bg-white border border-amber-250 rounded-xl px-4 py-2 pr-12 outline-none focus:border-amber-400 focus:ring-2 focus:ring-amber-400/20 font-bold font-mono text-amber-800" 
+                          />
+                          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-amber-600 font-bold">{newMaterial.purchaseUnit || newMaterial.midUnit || newMaterial.unit || '單位'}</span>
+                        </div>
+                        <p className="text-[10px] text-coffee-400 mt-1">例如設定為 2，代表低於 2 {newMaterial.purchaseUnit || newMaterial.midUnit || newMaterial.unit} 時會自動觸發低庫存警告。</p>
                       </div>
-                      <p className="text-[10px] text-coffee-300 mt-1">例如設定為 2，代表低於 2 {newMaterial.purchaseUnit || newMaterial.midUnit || newMaterial.unit} 時會顯示警告。</p>
                     </div>
                   </div>
                 </div>
 
-                <button type="submit" className="w-full bg-coffee-800 text-white rounded-2xl py-3 font-bold hover:bg-coffee-900 transition flex items-center justify-center gap-2 shadow-sm"><CheckCircle2 className="w-5 h-5"/> 建立完成並儲存</button>
-              </div>
-            </form>
-          </motion.div>
+                <div className="p-6 border-t border-coffee-100 bg-[#faf7f2]/30 flex gap-3">
+                  <button 
+                    type="button" 
+                    onClick={() => setIsAddingMode(false)} 
+                    className="flex-1 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold transition-all"
+                  >
+                    取消
+                  </button>
+                  <button 
+                    type="submit" 
+                    className="flex-1 bg-coffee-800 text-white rounded-xl py-3 font-bold hover:bg-coffee-900 transition-all flex items-center justify-center gap-2 shadow-md hover:shadow-lg"
+                  >
+                    <CheckCircle2 className="w-5 h-5"/> 儲存材料資料
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
         )}
       </AnimatePresence>
 

@@ -467,16 +467,17 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
 
   // Correct Voucher sequence generation following the existing sequence format
   const generateVoucherId = (selectedDate: string) => {
-    const d = new Date(selectedDate);
-    const yy = String(d.getFullYear()).slice(-2);
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
+    const parts = selectedDate.split('-');
+    if (parts.length !== 3) return `99999901`; // fallback
+    const yy = parts[0].slice(-2);
+    const mm = parts[1].padStart(2, '0');
+    const dd = parts[2].padStart(2, '0');
     const datePrefix = `${yy}${mm}${dd}`;
 
     const todayVouchers = (entries || [])
       .filter(e => e.date === selectedDate)
-      .map(e => e.id)
-      .filter(id => id.startsWith(datePrefix));
+      .map(e => e.voucherNo || e.id)
+      .filter(id => id && id.startsWith(datePrefix));
     
     let nextSeq = 1;
     if (todayVouchers.length > 0) {
@@ -487,12 +488,12 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
   };
 
   // Smart recommendation mapping algorithm matching descriptions to appropriate accounts
-  const findBestCoa = (name: string, type: 'debit' | 'credit') => {
-    const clean = (name || '').toLowerCase().trim();
+  const findBestCoa = (context: string, type: 'debit' | 'credit') => {
+    const clean = (context || '').toLowerCase().trim();
     if (!clean) return null;
 
     // 1. Precise exact matches or ID match
-    let match = coa.find(c => c.name === name || c.id === name);
+    let match = coa.find(c => c.name === context || c.id === context);
     if (match) return match;
 
     // 2. Keyword mapping
@@ -505,37 +506,40 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
         return coa.find(c => c.id === '1101') || coa.find(c => c.name === '現金');
       }
     } else {
-      if (clean.includes('食材') || clean.includes('原料') || clean.includes('食品') || clean.includes('水果') || clean.includes('奶')) {
+      if (clean.includes('食材') || clean.includes('原料') || clean.includes('食品') || clean.includes('水果') || clean.includes('奶') || clean.includes('草莓') || clean.includes('巧克力')) {
         return coa.find(c => c.id === '5101') || coa.find(c => c.name === '食材成本');
       }
-      if (clean.includes('包材') || clean.includes('包裝') || clean.includes('紙盒') || clean.includes('袋')) {
+      if (clean.includes('包材') || clean.includes('包裝') || clean.includes('紙盒') || clean.includes('袋') || clean.includes('貼紙') || clean.includes('緞帶')) {
         return coa.find(c => c.id === '5102') || coa.find(c => c.name === '包材成本');
       }
-      if (clean.includes('物流') || clean.includes('宅配') || clean.includes('運費') || clean.includes('郵')) {
+      if (clean.includes('物流') || clean.includes('宅配') || clean.includes('運費') || clean.includes('黑貓') || clean.includes('郵')) {
         return coa.find(c => c.id === '5103') || coa.find(c => c.name === '物流成本');
       }
-      if (clean.includes('租金') || clean.includes('房租') || clean.includes('店租')) {
+      if (clean.includes('租金') || clean.includes('房租') || clean.includes('店租') || clean.includes('租屋')) {
         return coa.find(c => c.id === '6101') || coa.find(c => c.name === '租金支出');
       }
       if (clean.includes('水電') || clean.includes('瓦斯') || clean.includes('天然') || clean.includes('電費') || clean.includes('水費')) {
         return coa.find(c => c.id === '6102') || coa.find(c => c.name === '水電瓦斯費');
       }
-      if (clean.includes('維修') || clean.includes('保養') || clean.includes('修繕')) {
+      if (clean.includes('維修') || clean.includes('保養') || clean.includes('修繕') || clean.includes('水電工')) {
         return coa.find(c => c.id === '6105') || coa.find(c => c.name === '維修費');
       }
-      if (clean.includes('廣告')) {
+      if (clean.includes('廣告') || clean.includes('fb') || clean.includes('臉書') || clean.includes('google') || clean.includes('推廣')) {
         return coa.find(c => c.id === '6302') || coa.find(c => c.name === '廣告費');
       }
-      if (clean.includes('行銷') || clean.includes('宣傳')) {
+      if (clean.includes('行銷') || clean.includes('宣傳') || clean.includes('公關') || clean.includes('企劃')) {
         return coa.find(c => c.id === '6301') || coa.find(c => c.name === '行銷費');
       }
-      if (clean.includes('雜支') || clean.includes('雜項') || clean.includes('五金') || clean.includes('文具') || clean.includes('清潔')) {
+      if (clean.includes('營業稅') || clean.includes('申報') || clean.includes('稅金') || clean.includes('國稅局')) {
+        return coa.find(c => c.id === '6103') || coa.find(c => c.name === '稅捐');
+      }
+      if (clean.includes('雜支') || clean.includes('雜項') || clean.includes('五金') || clean.includes('文具') || clean.includes('清潔') || clean.includes('垃圾')) {
         return coa.find(c => c.id === '6104') || coa.find(c => c.name === '店舖雜項');
       }
     }
 
     // 3. Substring matching as robust fallback
-    match = coa.find(c => c.name.includes(name) || name.includes(c.name));
+    match = coa.find(c => c.name.includes(context) || context.includes(c.name));
     if (match) return match;
 
     // 4. Default type fallback
@@ -556,8 +560,9 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
       record.lines.forEach(rl => {
         const cat = expenseCategories.find(c => c.id === rl.categoryId);
         let debitCoa = cat?.defaultCoaId ? coa.find(c => c.id === cat.defaultCoaId) : null;
-        if (!debitCoa && cat?.name) {
-          debitCoa = findBestCoa(cat.name, 'debit');
+        if (!debitCoa) {
+          const combinedContext = `${cat?.name || ''} ${record.vendor || ''} ${rl.note || ''}`;
+          debitCoa = findBestCoa(combinedContext, 'debit');
         }
         if (!debitCoa) {
           debitCoa = coa.find(c => c.type === '費用' || c.type === '成本'); // fallback
@@ -576,8 +581,9 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
     // Auto map CREDIT line (from fundingSource)
     const fs = fundingSources.find(f => f.id === record.fundingSourceId);
     let creditCoa = fs?.defaultCoaId ? coa.find(c => c.id === fs.defaultCoaId) : null;
-    if (!creditCoa && fs?.name) {
-      creditCoa = findBestCoa(fs.name, 'credit');
+    if (!creditCoa) {
+      const combinedContext = `${fs?.name || ''} ${record.vendor || ''} ${record.memo || ''}`;
+      creditCoa = findBestCoa(combinedContext, 'credit');
     }
     if (!creditCoa) {
       creditCoa = coa.find(c => c.type === '資產'); // fallback
@@ -595,8 +601,9 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
     if (record.isTransfer && record.targetFundingSourceId) {
       const targetFs = fundingSources.find(f => f.id === record.targetFundingSourceId);
       let targetCoa = targetFs?.defaultCoaId ? coa.find(c => c.id === targetFs.defaultCoaId) : null;
-      if (!targetCoa && targetFs?.name) {
-        targetCoa = findBestCoa(targetFs.name, 'credit'); // Target account is asset (debit for transfer in)
+      if (!targetCoa) {
+        const combinedContext = `${targetFs?.name || ''} ${record.vendor || ''} ${record.memo || ''}`;
+        targetCoa = findBestCoa(combinedContext, 'credit'); // Target account is asset (debit for transfer in)
       }
       if (!targetCoa) {
         targetCoa = coa.find(c => c.type === '資產');

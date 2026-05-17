@@ -59,59 +59,86 @@ export default function CoaView({ coa, shopId }: { coa: COAItem[], shopId: strin
       </div>
 
       {isAdding && (
-        <div className="glass-panel p-6 border-2 border-coffee-100 mb-6 bg-white/50">
-          <h3 className="text-lg font-bold mb-6 text-coffee-700">{editingId ? '編輯科目' : '新增科目'}</h3>
-          <form onSubmit={handleSubmit} className="grid grid-cols-1 md:grid-cols-5 gap-4 items-end">
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-coffee-300 uppercase ml-1">編號</label>
-              <input 
-                type="text" 
-                value={formData.id} 
-                onChange={e => setFormData({...formData, id: e.target.value})}
-                className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-coffee-100"
-                placeholder="例如: 1101"
-                required
-                disabled={!!editingId}
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-coffee-300 uppercase ml-1">名稱</label>
-              <input 
-                type="text" 
-                value={formData.name} 
-                onChange={e => setFormData({...formData, name: e.target.value})}
-                className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-coffee-100"
-                placeholder="例如: 現金"
-                required
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-coffee-300 uppercase ml-1">類別</label>
-              <select 
-                value={formData.type} 
-                onChange={e => setFormData({...formData, type: e.target.value})}
-                className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-coffee-100"
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-[32px] max-w-md w-full shadow-2xl overflow-hidden relative flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-[#faf7f2]/50">
+              <h3 className="text-xl font-bold text-coffee-850">
+                {editingId ? '📝 編輯科目' : '✨ 新增會計科目'}
+              </h3>
+              <button 
+                type="button"
+                onClick={() => { setIsAdding(false); setEditingId(null); setFormData({ id: '', name: '', type: '資產', side: 'debit' }); }} 
+                className="p-2 text-gray-400 hover:text-gray-600 rounded-full hover:bg-gray-100 transition"
               >
-                {['資產', '負債', '權益', '收入', '成本', '費用', '營業外收入', '營業外費損'].map(t => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
+                <X className="w-5 h-5"/>
+              </button>
             </div>
-            <div className="space-y-1">
-              <label className="text-[10px] font-bold text-coffee-300 uppercase ml-1">正常方向</label>
-              <select 
-                value={formData.side} 
-                onChange={e => setFormData({...formData, side: e.target.value as any})}
-                className="w-full bg-white border border-coffee-100 rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-coffee-100"
-              >
-                <option value="debit">借方 (Debit)</option>
-                <option value="credit">貸方 (Credit)</option>
-              </select>
-            </div>
-            <button type="submit" className="bg-coffee-600 text-white py-2 rounded-xl hover:bg-coffee-700 transition font-bold shadow-md h-[40px] flex items-center justify-center gap-2">
-              <Save className="w-4 h-4" /> {editingId ? '更新' : '儲存'}
-            </button>
-          </form>
+            
+            <form onSubmit={handleSubmit} className="p-6 space-y-5 overflow-y-auto flex-1">
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-coffee-400 block mb-1">科目編號 *</label>
+                <input 
+                  type="text" 
+                  value={formData.id} 
+                  onChange={e => setFormData({...formData, id: e.target.value})}
+                  className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2.5 outline-none focus:border-coffee-500 transition-all font-mono font-bold text-coffee-700"
+                  placeholder="例如: 1101"
+                  required
+                  disabled={!!editingId}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-coffee-400 block mb-1">科目名稱 *</label>
+                <input 
+                  type="text" 
+                  value={formData.name} 
+                  onChange={e => setFormData({...formData, name: e.target.value})}
+                  className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2.5 outline-none focus:border-coffee-500 transition-all font-bold text-coffee-800"
+                  placeholder="例如: 現金"
+                  required
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-coffee-400 block mb-1">會計類別</label>
+                <select 
+                  value={formData.type} 
+                  onChange={e => setFormData({...formData, type: e.target.value})}
+                  className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2.5 outline-none focus:border-coffee-500 transition-all font-bold text-coffee-700"
+                >
+                  {['資產', '負債', '權益', '收入', '成本', '費用', '營業外收入', '營業外費損'].map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-bold text-coffee-400 block mb-1">正常方向</label>
+                <select 
+                  value={formData.side} 
+                  onChange={e => setFormData({...formData, side: e.target.value as any})}
+                  className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2.5 outline-none focus:border-coffee-500 transition-all font-bold text-coffee-700"
+                >
+                  <option value="debit">借方 (Debit)</option>
+                  <option value="credit">貸方 (Credit)</option>
+                </select>
+              </div>
+              
+              <div className="flex gap-3 pt-4 border-t border-coffee-50">
+                <button 
+                  type="button" 
+                  onClick={() => { setIsAdding(false); setEditingId(null); setFormData({ id: '', name: '', type: '資產', side: 'debit' }); }} 
+                  className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-bold transition-all"
+                >
+                  取消
+                </button>
+                <button 
+                  type="submit" 
+                  className="flex-1 py-2.5 bg-coffee-850 hover:bg-coffee-950 text-white rounded-xl font-bold shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2"
+                >
+                  <Save className="w-4 h-4" /> {editingId ? '更新科目' : '儲存科目'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 

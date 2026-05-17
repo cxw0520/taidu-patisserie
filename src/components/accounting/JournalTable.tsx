@@ -561,7 +561,7 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
                         </>
                       )}
                       <td className={cn("p-4 text-gray-700 font-medium", line.type === 'credit' && "pl-12")}>
-                        {line.accountName}
+                        {line.accountName || coa.find(c => c.id === line.accountId)?.name || '未知名稱'}
                       </td>
                       <td className="p-4 text-xs text-gray-400 italic">{line.lineDescription || ''}</td>
                       <td className="p-4 text-right font-mono font-bold text-gray-700">{line.type === 'debit' ? line.amount.toLocaleString() : ''}</td>
