@@ -1,5 +1,5 @@
 import { initializeApp, getApp, getApps } from 'firebase/app';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getFirestore, doc, getDocFromServer, initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 import { getAuth } from 'firebase/auth';
 import type { Firestore } from 'firebase/firestore';
 import type { Auth } from 'firebase/auth';
@@ -75,8 +75,23 @@ export function getDB(): Firestore {
   if (!dbInstance) {
     const app = getTaiduApp();
     const dbId = (firebaseConfig as any).firestoreDatabaseId || '(default)';
-    // Do not coerce 'default' to '(default)' because 'default' can be a valid named database.
-    dbInstance = dbId === '(default)' ? getFirestore(app) : getFirestore(app, dbId);
+    
+    // Enable persistent local cache for offline usage
+    const cacheConfig = {
+      localCache: persistentLocalCache({
+        tabManager: persistentMultipleTabManager()
+      })
+    };
+    
+    try {
+      dbInstance = dbId === '(default)' 
+        ? initializeFirestore(app, cacheConfig) 
+        : initializeFirestore(app, cacheConfig, dbId);
+      console.log("ℹ️ Firestore Initialized with Offline Persistence");
+    } catch (err) {
+      console.warn("⚠️ Failed to initialize persistent cache (might be already initialized), falling back to getFirestore:", err);
+      dbInstance = dbId === '(default)' ? getFirestore(app) : getFirestore(app, dbId);
+    }
   }
   return dbInstance;
 }

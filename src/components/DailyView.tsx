@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { doc, onSnapshot, setDoc, getDoc, query, collection, where, getDocs, limit, orderBy, runTransaction, writeBatch, increment } from 'firebase/firestore';
+import { doc, onSnapshot, setDoc, getDoc, query, collection, where, getDocs, limit, orderBy, runTransaction, writeBatch, increment, getDocFromServer } from 'firebase/firestore';
 import { fmt, uid, parseNum, todayISO, normalizeFlavorName } from '../lib/utils';
 import { DailyReport, Settings, Order, LossEntry } from '../types';
 import { 
@@ -98,6 +98,58 @@ const applyDailyActive = (settings: Settings, dailyActive?: DailyReport['dailyAc
     })),
   };
 };
+
+export interface OfflineAction {
+  id: string;
+  type: 'add_order' | 'update_order' | 'delete_order' | 'update_daily';
+  dateKey: string;
+  payload: any;
+  timestamp: number;
+}
+
+export interface ConflictInfo {
+  action: OfflineAction;
+  title: string;
+  serverLabel: string;
+  localLabel: string;
+  serverValue: any;
+  localValue: any;
+  resolve: (chosenValue: any) => Promise<void>;
+}
+
+export const applyOfflineActions = (baseData: DailyReport | null, actions: OfflineAction[], currentDateKey: string): DailyReport | null => {
+  if (!baseData) return null;
+  let result = { ...baseData };
+  const dailyActions = actions.filter(a => a.dateKey === currentDateKey);
+  
+  dailyActions.forEach(action => {
+    if (action.type === 'add_order') {
+      const order = action.payload;
+      result.orders = result.orders || [];
+      if (!result.orders.some(o => o.id === order.id)) {
+        result.orders = [...result.orders, order];
+      }
+    } else if (action.type === 'update_order') {
+      const { orderId, patch } = action.payload;
+      result.orders = (result.orders || []).map(o => o.id === orderId ? { ...o, ...patch } : o);
+    } else if (action.type === 'delete_order') {
+      const { orderId } = action.payload;
+      result.orders = (result.orders || []).filter(o => o.id !== orderId);
+    } else if (action.type === 'update_daily') {
+      const patch = action.payload;
+      result = { 
+        ...result, 
+        ...patch,
+        inventory: { ...(result.inventory || {}), ...(patch.inventory || {}) },
+        ar: { ...(result.ar || {}), ...(patch.ar || {}) },
+        losses: [...(result.losses || []), ...(patch.losses || [])].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+      };
+    }
+  });
+  
+  return result;
+};
+
 export default function DailyView({ 
   currentDate, 
   setCurrentDate, 
@@ -141,10 +193,209 @@ export default function DailyView({
   const [loadedDateKey, setLoadedDateKey] = useState('');
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  
+  // Offline caching & Conflict resolution states
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [activeConflict, setActiveConflict] = useState<ConflictInfo | null>(null);
+  const [syncingQueue, setSyncingQueue] = useState(false);
+  const [offlineActions, setOfflineActions] = useState<OfflineAction[]>(() => {
+    try {
+      const saved = localStorage.getItem(`taidu_offline_actions_${shopId}`);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
   const localUpdateIdRef = useRef<string | null>(null);
   const pendingPatchesRef = useRef<Record<string, boolean>>({});
   const orderTxQueueRef = useRef<Record<string, Partial<Order>>>({});
   const orderTxTimeoutRef = useRef<any>(null);
+
+  // Sync localStorage with offlineActions
+  useEffect(() => {
+    if (!shopId) return;
+    localStorage.setItem(`taidu_offline_actions_${shopId}`, JSON.stringify(offlineActions));
+  }, [offlineActions, shopId]);
+
+  // Network listener
+  useEffect(() => {
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, []);
+
+  const pushOfflineAction = (action: OfflineAction) => {
+    setOfflineActions(prev => {
+      if (prev.some(a => a.id === action.id)) return prev;
+      return [...prev, action];
+    });
+  };
+
+  const popOfflineAction = (actionId: string) => {
+    setOfflineActions(prev => prev.filter(a => a.id !== actionId));
+  };
+
+  // Reconcile processing loop
+  useEffect(() => {
+    if (isOnline && offlineActions.length > 0 && !syncingQueue && !activeConflict) {
+      processNextOfflineAction();
+    }
+  }, [isOnline, offlineActions, syncingQueue, activeConflict]);
+
+  const processNextOfflineAction = async () => {
+    if (offlineActions.length === 0 || !shopId) return;
+    setSyncingQueue(true);
+    const action = offlineActions[0];
+
+    try {
+      const docRef = doc(db, 'shops', shopId, 'daily', action.dateKey);
+      const docSnap = await getDocFromServer(docRef).catch(() => null);
+      
+      let serverData: DailyReport = docSnap && docSnap.exists() 
+        ? docSnap.data() as DailyReport 
+        : {
+            date: action.dateKey,
+            orders: [],
+            inventory: {},
+            losses: [],
+            packagingUsage: {},
+            ar: { accum: 0, collect: 0, logSpent: 0, actualTotal: 0 }
+          };
+
+      serverData.orders = serverData.orders || [];
+
+      if (action.type === 'add_order') {
+        const order = action.payload;
+        if (!serverData.orders.some(o => o.id === order.id)) {
+          serverData.orders.push(order);
+          await setDoc(docRef, { orders: serverData.orders }, { merge: true });
+        }
+        popOfflineAction(action.id);
+      } 
+      
+      else if (action.type === 'delete_order') {
+        const { orderId } = action.payload;
+        const nextOrders = serverData.orders.filter(o => o.id !== orderId);
+        await setDoc(docRef, { orders: nextOrders }, { merge: true });
+        popOfflineAction(action.id);
+      } 
+      
+      else if (action.type === 'update_order') {
+        const { orderId, patch } = action.payload;
+        const serverOrderIdx = serverData.orders.findIndex(o => o.id === orderId);
+        
+        if (serverOrderIdx === -1) {
+          popOfflineAction(action.id);
+        } else {
+          const serverOrder = serverData.orders[serverOrderIdx];
+          const conflictingKeys = Object.keys(patch).filter(k => {
+            const patchVal = (patch as any)[k];
+            const serverVal = (serverOrder as any)[k];
+            return JSON.stringify(patchVal) !== JSON.stringify(serverVal);
+          });
+
+          if (conflictingKeys.length > 0) {
+            setSyncingQueue(false);
+            setActiveConflict({
+              action,
+              title: `訂單修改衝突 - ${serverOrder.buyer || '現客'}`,
+              serverLabel: '雲端已同步版本',
+              localLabel: '本機離線修改版本',
+              serverValue: serverOrder,
+              localValue: { ...serverOrder, ...patch },
+              resolve: async (chosenValue) => {
+                const updatedOrders = [...serverData.orders];
+                const idx = updatedOrders.findIndex(o => o.id === orderId);
+                if (idx >= 0) {
+                  updatedOrders[idx] = chosenValue;
+                }
+                await setDoc(docRef, { orders: updatedOrders }, { merge: true });
+                popOfflineAction(action.id);
+                setActiveConflict(null);
+              }
+            });
+            return;
+          } else {
+            const updatedOrders = [...serverData.orders];
+            updatedOrders[serverOrderIdx] = { ...serverOrder, ...patch };
+            await setDoc(docRef, { orders: updatedOrders }, { merge: true });
+            popOfflineAction(action.id);
+          }
+        }
+      } 
+      
+      else if (action.type === 'update_daily') {
+        const patch = action.payload;
+        let hasConflict = false;
+        let conflictDetails: any = null;
+
+        if (patch.inventory) {
+          const serverInv = serverData.inventory || {};
+          const localInv = patch.inventory;
+          
+          const conflictingItems = Object.keys(localInv).filter(itemId => {
+            const sItem = serverInv[itemId];
+            const lItem = localInv[itemId];
+            if (!sItem) return false;
+            return sItem.act !== lItem.act || sItem.los !== lItem.los;
+          });
+
+          if (conflictingItems.length > 0) {
+            hasConflict = true;
+            conflictDetails = {
+              title: '庫存數據衝突',
+              serverLabel: '雲端在庫盤點數',
+              localLabel: '本機離線盤點數',
+              serverValue: serverInv,
+              localValue: { ...serverInv, ...localInv },
+              resolve: async (chosenValue) => {
+                await setDoc(docRef, { inventory: chosenValue }, { merge: true });
+                popOfflineAction(action.id);
+                setActiveConflict(null);
+              }
+            };
+          }
+        }
+
+        if (hasConflict && conflictDetails) {
+          setSyncingQueue(false);
+          setActiveConflict({
+            action,
+            title: conflictDetails.title,
+            serverLabel: conflictDetails.serverLabel,
+            localLabel: conflictDetails.localLabel,
+            serverValue: conflictDetails.serverValue,
+            localValue: conflictDetails.localValue,
+            resolve: conflictDetails.resolve
+          });
+          return;
+        } else {
+          const mergedData = {
+            ...serverData,
+            ...patch,
+            inventory: { ...(serverData.inventory || {}), ...(patch.inventory || {}) },
+            ar: { ...(serverData.ar || {}), ...(patch.ar || {}) },
+            losses: [...(serverData.losses || []), ...(patch.losses || [])].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+          };
+          await setDoc(docRef, mergedData, { merge: true });
+          popOfflineAction(action.id);
+        }
+      }
+
+    } catch (err) {
+      console.error('Failed to reconcile offline action:', err);
+      setSyncingQueue(false);
+      return;
+    }
+
+    setSyncingQueue(false);
+  };
   
   // Filters, Summary search, and Sort
   const [sourceFilter, setSourceFilter] = useState<'all' | 'pos' | 'manual' | 'import'>('all');
@@ -245,6 +496,15 @@ export default function DailyView({
               ar: { ...defaultAr(), ...(data.ar || {}) } 
             };
             
+            // Replay pending offline actions to preserve local unsaved edits
+            let currentOffline: OfflineAction[] = [];
+            try {
+              const saved = localStorage.getItem(`taidu_offline_actions_${shopId}`);
+              currentOffline = saved ? JSON.parse(saved) : [];
+            } catch {}
+
+            const mergedWithOffline = applyOfflineActions(newData, currentOffline, targetDateKey) || newData;
+
             // Ignore echo-backs from our own local updates
             if ((data as any).updateId && (data as any).updateId === localUpdateIdRef.current) {
               return;
@@ -252,8 +512,8 @@ export default function DailyView({
             
             // It's a real external update. Merge intelligently to preserve local unsaved edits.
             setDailyData(prev => {
-              if (!prev) return newData;
-              const mergedData = { ...newData };
+              if (!prev) return mergedWithOffline;
+              const mergedData = { ...mergedWithOffline };
 
               // 1. Preserve root fields that are currently debouncing
               Object.keys(pendingPatchesRef.current).forEach(k => {
@@ -392,22 +652,42 @@ export default function DailyView({
       if (keysToSave.length === 0) return; // Nothing to save via debounce
 
       setSaveStatus('saving');
-      const dataToSave: any = { date: loadedDateKey };
+      const patch: any = {};
       keysToSave.forEach(k => {
-        dataToSave[k] = (dailyData as any)[k];
+        patch[k] = (dailyData as any)[k];
       });
       pendingPatchesRef.current = {}; // Clear patches
 
-      if (localUpdateIdRef.current) {
-        dataToSave.updateId = localUpdateIdRef.current;
+      if (patch.orders) {
+        patch.orders = patch.orders.map((o: any) => ({
+          ...o,
+          customerId: o.customerId || null
+        }));
       }
-      await setDoc(
-        doc(db, 'shops', shopId, 'daily', loadedDateKey),
-        dataToSave,
-        { merge: true }
-      );
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
+
+      if (!navigator.onLine) {
+        pushOfflineAction({
+          id: uid(),
+          type: 'update_daily',
+          dateKey: loadedDateKey,
+          payload: patch,
+          timestamp: Date.now()
+        });
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      } else {
+        const dataToSave = { ...patch };
+        if (localUpdateIdRef.current) {
+          (dataToSave as any).updateId = localUpdateIdRef.current;
+        }
+        await setDoc(
+          doc(db, 'shops', shopId, 'daily', loadedDateKey),
+          dataToSave,
+          { merge: true }
+        );
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      }
     }, 1000);
     return () => clearTimeout(t);
   }, [dailyData, currentDate, loadedDateKey, loading, shopId]);
@@ -445,25 +725,75 @@ export default function DailyView({
       return updaterFn(prev);
     });
 
-    if (!shopId) return;
-
-    // 2. Transaction update
-    try {
-      await runTransaction(db, async (tx) => {
-        const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
+    // 2. Offline check
+    if (!navigator.onLine) {
+      sideEffectOrders.forEach(order => {
+        pushOfflineAction({
+          id: uid(),
+          type: 'add_order',
+          dateKey: targetKey,
+          payload: order,
+          timestamp: Date.now()
+        });
+      });
+      
+      const currentSnapshot = dailyData ? updaterFn(dailyData) : null;
+      if (currentSnapshot) {
+        pushOfflineAction({
+          id: uid(),
+          type: 'update_daily',
+          dateKey: targetKey,
+          payload: {
+            ar: currentSnapshot.ar || {},
+            inventory: currentSnapshot.inventory || {},
+            losses: currentSnapshot.losses || {}
+          },
+          timestamp: Date.now()
+        });
+      }
+      setSaveStatus('saved');
+    } else {
+      if (!shopId) return;
+      try {
+        await runTransaction(db, async (tx) => {
+          const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
           const snap = await tx.get(docRef);
           if (snap.exists()) {
              const serverData = snap.data() as DailyReport;
              const nextData = updaterFn(serverData);
-             tx.set(docRef, { orders: nextData.orders }, { merge: true });
+             tx.set(docRef, { orders: nextData.orders, ar: nextData.ar }, { merge: true });
           } else {
              const fallbackData = updaterFn({ orders: [], date: targetKey } as any);
              tx.set(docRef, fallbackData, { merge: true });
           }
         });
       } catch (e) {
-        console.error('[POS] Firestore transaction failed:', e);
+        console.warn('[POS] Online transaction failed, queuing offline:', e);
+        sideEffectOrders.forEach(order => {
+          pushOfflineAction({
+            id: uid(),
+            type: 'add_order',
+            dateKey: targetKey,
+            payload: order,
+            timestamp: Date.now()
+          });
+        });
+        const currentSnapshot = dailyData ? updaterFn(dailyData) : null;
+        if (currentSnapshot) {
+          pushOfflineAction({
+            id: uid(),
+            type: 'update_daily',
+            dateKey: targetKey,
+            payload: {
+              ar: currentSnapshot.ar || {},
+              inventory: currentSnapshot.inventory || {},
+              losses: currentSnapshot.losses || {}
+            },
+            timestamp: Date.now()
+          });
+        }
       }
+    }
 
     // 4. Side effects: packaging deduction + CRM (do NOT touch orders state)
     for (const order of sideEffectOrders) {
@@ -576,23 +906,42 @@ export default function DailyView({
 
     if (!shopId) return;
 
-    // 2. Transaction update
-    try {
-      await runTransaction(db, async (tx) => {
-        const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
-        const snap = await tx.get(docRef);
-        if (snap.exists()) {
-           const serverData = snap.data() as DailyReport;
-           const sOrders = serverData.orders || [];
-           if (!sOrders.some(o => o.id === order.id)) {
-              tx.set(docRef, { orders: [...sOrders, order] }, { merge: true });
-           }
-        } else {
-           tx.set(docRef, { date: targetKey, orders: [order] }, { merge: true });
-        }
+    // 2. Offline check
+    if (!navigator.onLine) {
+      pushOfflineAction({
+        id: uid(),
+        type: 'add_order',
+        dateKey: targetKey,
+        payload: order,
+        timestamp: Date.now()
       });
-    } catch (e) {
-      console.error('[Add Order] Firestore transaction failed:', e);
+      setSaveStatus('saved');
+    } else {
+      // Transaction update
+      try {
+        await runTransaction(db, async (tx) => {
+          const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
+          const snap = await tx.get(docRef);
+          if (snap.exists()) {
+             const serverData = snap.data() as DailyReport;
+             const sOrders = serverData.orders || [];
+             if (!sOrders.some(o => o.id === order.id)) {
+                tx.set(docRef, { orders: [...sOrders, order] }, { merge: true });
+             }
+          } else {
+             tx.set(docRef, { date: targetKey, orders: [order] }, { merge: true });
+          }
+        });
+      } catch (e) {
+        console.warn('[Add Order] Online transaction failed, queuing offline:', e);
+        pushOfflineAction({
+          id: uid(),
+          type: 'add_order',
+          dateKey: targetKey,
+          payload: order,
+          timestamp: Date.now()
+        });
+      }
     }
     
     // Auto-deduct packaging ONLY IF it's not a pending pickup order
@@ -637,34 +986,57 @@ export default function DailyView({
 
     if (!targetKey || !shopId) return;
 
-    // 2. Queue patch and debounce transaction
-    orderTxQueueRef.current[orderId] = { ...orderTxQueueRef.current[orderId], ...patch };
+    // 2. Offline check
+    if (!navigator.onLine) {
+      pushOfflineAction({
+        id: uid(),
+        type: 'update_order',
+        dateKey: targetKey,
+        payload: { orderId, patch },
+        timestamp: Date.now()
+      });
+      setSaveStatus('saved');
+    } else {
+      // Queue patch and debounce transaction
+      orderTxQueueRef.current[orderId] = { ...orderTxQueueRef.current[orderId], ...patch };
 
-    if (orderTxTimeoutRef.current) clearTimeout(orderTxTimeoutRef.current);
-    orderTxTimeoutRef.current = setTimeout(() => {
-      const patchesToApply = orderTxQueueRef.current;
-      orderTxQueueRef.current = {};
-      if (Object.keys(patchesToApply).length === 0) return;
+      if (orderTxTimeoutRef.current) clearTimeout(orderTxTimeoutRef.current);
+      orderTxTimeoutRef.current = setTimeout(() => {
+        const patchesToApply = orderTxQueueRef.current;
+        orderTxQueueRef.current = {};
+        if (Object.keys(patchesToApply).length === 0) return;
 
-      const newUpdateId = uid();
-      localUpdateIdRef.current = newUpdateId;
+        const newUpdateId = uid();
+        localUpdateIdRef.current = newUpdateId;
 
-      runTransaction(db, async (tx) => {
-        const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
-        const snap = await tx.get(docRef);
-        if (snap.exists()) {
-          const sData = snap.data() as any;
-          const sOrders = sData.orders || [];
+        runTransaction(db, async (tx) => {
+          const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
+          const snap = await tx.get(docRef);
+          if (snap.exists()) {
+            const sData = snap.data() as any;
+            const sOrders = sData.orders || [];
+            Object.keys(patchesToApply).forEach(oId => {
+              const idx = sOrders.findIndex((o: any) => o.id === oId);
+              if (idx >= 0) {
+                sOrders[idx] = { ...sOrders[idx], ...patchesToApply[oId] };
+              }
+            });
+            tx.set(docRef, { orders: sOrders, updateId: newUpdateId }, { merge: true });
+          }
+        }).catch(e => {
+          console.warn('Order update tx failed, queuing offline:', e);
           Object.keys(patchesToApply).forEach(oId => {
-            const idx = sOrders.findIndex((o: any) => o.id === oId);
-            if (idx >= 0) {
-              sOrders[idx] = { ...sOrders[idx], ...patchesToApply[oId] };
-            }
+            pushOfflineAction({
+              id: uid(),
+              type: 'update_order',
+              dateKey: targetKey,
+              payload: { orderId: oId, patch: patchesToApply[oId] },
+              timestamp: Date.now()
+            });
           });
-          tx.set(docRef, { orders: sOrders, updateId: newUpdateId }, { merge: true });
-        }
-      }).catch(e => console.error('Order update tx failed:', e));
-    }, 800);
+        });
+      }, 800);
+    }
   };
 
   const deleteOrderInDb = (orderId: string) => {
@@ -676,7 +1048,18 @@ export default function DailyView({
       return { ...prev, orders: (prev.orders || []).filter(o => o.id !== orderId) };
     });
 
-    if (shopId) {
+    if (!shopId) return;
+
+    if (!navigator.onLine) {
+      pushOfflineAction({
+        id: uid(),
+        type: 'delete_order',
+        dateKey: targetKey,
+        payload: { orderId },
+        timestamp: Date.now()
+      });
+      setSaveStatus('saved');
+    } else {
       const newUpdateId = uid();
       localUpdateIdRef.current = newUpdateId;
 
@@ -686,7 +1069,16 @@ export default function DailyView({
         if (snap.exists()) {
            tx.set(docRef, { orders: (snap.data().orders || []).filter((o: any) => o.id !== orderId), updateId: newUpdateId }, { merge: true });
         }
-      }).catch(e => console.error('Delete order tx failed:', e));
+      }).catch(e => {
+        console.warn('Delete order tx failed, queuing offline:', e);
+        pushOfflineAction({
+          id: uid(),
+          type: 'delete_order',
+          dateKey: targetKey,
+          payload: { orderId },
+          timestamp: Date.now()
+        });
+      });
     }
   };
 
@@ -877,6 +1269,18 @@ export default function DailyView({
             {saveStatus === 'saving' && <motion.div animate={{ rotate: 360 }} transition={{ repeat: Infinity, duration: 1 }}><RefreshCw className="w-4 h-4" /></motion.div>}
             {saveStatus === 'saved' && <Check className="w-4 h-4 text-green-500" />}
             {saveStatus === 'saved' ? "已儲存" : saveStatus === 'saving' ? "同步中..." : "雲端存檔"}
+            
+            {/* Offline status indicator */}
+            {!isOnline && (
+              <span className="ml-3 px-2 py-1 rounded bg-amber-500 text-white font-bold text-[10px] flex items-center gap-1 animate-pulse">
+                <AlertTriangle className="w-3 h-3" /> 離線模式 (已暫存)
+              </span>
+            )}
+            {isOnline && offlineActions.length > 0 && (
+              <span className="ml-3 px-2 py-1 rounded bg-mint-brand text-white font-bold text-[10px] flex items-center gap-1">
+                <RefreshCw className="w-3 h-3 animate-spin" /> 連線同步中 ({offlineActions.length})
+              </span>
+            )}
           </div>
         </div>
 
@@ -1868,6 +2272,103 @@ export default function DailyView({
       {forcedSubTab !== 'pos' && subTab === 'settings' && (
         <SettingsTab settings={baseSettings} shopId={shopId} dailyActive={dailyData?.dailyActive} updateDaily={updateDaily} />
       )}
+
+      {/* Offline Conflict Resolution Modal */}
+      <AnimatePresence>
+        {activeConflict && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-coffee-950/80 backdrop-blur-md" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="w-full max-w-2xl bg-[#faf7f2] border-0 shadow-2xl rounded-[32px] relative z-10 overflow-hidden flex flex-col max-h-[90vh]">
+              {/* Header */}
+              <div className="bg-amber-600 text-white p-8 text-center relative">
+                <div className="w-16 h-16 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-3">
+                  <AlertTriangle className="w-8 h-8 text-white" />
+                </div>
+                <h3 className="text-xl font-bold">{activeConflict.title}</h3>
+                <p className="text-amber-100 text-xs mt-1">偵測到離線期間與雲端同步之數據衝突，請選擇保留版本</p>
+              </div>
+
+              {/* Comparison Columns */}
+              <div className="p-8 grid grid-cols-1 md:grid-cols-2 gap-6 overflow-y-auto flex-1">
+                {/* Server Version */}
+                <div className="flex flex-col h-full bg-white border border-coffee-100 rounded-2xl p-6 shadow-sm justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="w-2.5 h-2.5 rounded-full bg-mint-brand" />
+                      <h4 className="text-sm font-bold text-coffee-800">{activeConflict.serverLabel}</h4>
+                    </div>
+                    
+                    <div className="space-y-3 text-xs text-coffee-600 font-bold bg-coffee-50 p-4 rounded-xl font-mono">
+                      {activeConflict.action.type === 'update_order' ? (
+                        <>
+                          <div>購買人: {activeConflict.serverValue.buyer || '現客'}</div>
+                          <div>實收金額: ${activeConflict.serverValue.actualAmt}</div>
+                          <div>備註: {activeConflict.serverValue.notes || '無'}</div>
+                          <div>付款狀態: {activeConflict.serverValue.status}</div>
+                        </>
+                      ) : (
+                        <div>
+                          {Object.entries(activeConflict.serverValue || {}).map(([itemId, item]: any) => {
+                            const name = settings.singleItems?.find(i => i.id === itemId)?.name || settings.giftItems?.find(i => i.id === itemId)?.name || itemId;
+                            return <div key={itemId}>{name}: 盤點數 {item.act} 顆 (損耗 {item.los})</div>;
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={() => activeConflict.resolve(activeConflict.serverValue)}
+                    className="mt-6 w-full py-3 bg-mint-brand hover:bg-mint-brand/90 text-white rounded-xl font-bold transition-all active:scale-95 text-xs shadow-md"
+                  >
+                    保留此雲端版本
+                  </button>
+                </div>
+
+                {/* Local Offline Version */}
+                <div className="flex flex-col h-full bg-white border-2 border-rose-brand/30 rounded-2xl p-6 shadow-md justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 mb-4">
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-brand" />
+                      <h4 className="text-sm font-bold text-rose-brand">{activeConflict.localLabel}</h4>
+                    </div>
+                    
+                    <div className="space-y-3 text-xs text-coffee-600 font-bold bg-rose-50/50 p-4 rounded-xl font-mono">
+                      {activeConflict.action.type === 'update_order' ? (
+                        <>
+                          <div>購買人: {activeConflict.localValue.buyer || '現客'}</div>
+                          <div>實收金額: ${activeConflict.localValue.actualAmt}</div>
+                          <div>備註: {activeConflict.localValue.notes || '無'}</div>
+                          <div>付款狀態: {activeConflict.localValue.status}</div>
+                        </>
+                      ) : (
+                        <div>
+                          {Object.entries(activeConflict.localValue || {}).map(([itemId, item]: any) => {
+                            const name = settings.singleItems?.find(i => i.id === itemId)?.name || settings.giftItems?.find(i => i.id === itemId)?.name || itemId;
+                            return <div key={itemId}>{name}: 盤點數 {item.act} 顆 (損耗 {item.los})</div>;
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <button 
+                    onClick={() => activeConflict.resolve(activeConflict.localValue)}
+                    className="mt-6 w-full py-3 bg-rose-brand hover:bg-rose-brand/90 text-white rounded-xl font-bold transition-all active:scale-95 text-xs shadow-md"
+                  >
+                    保留離線修改版本
+                  </button>
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="px-8 py-5 border-t border-coffee-50 bg-coffee-50/50 text-center">
+                <p className="text-[10px] text-coffee-400 font-bold">一旦做出選擇，另一版本將會被覆蓋，且無法復原。</p>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
