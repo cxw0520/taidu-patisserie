@@ -402,8 +402,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     const cashSales = dailyData.orders
       .filter(o => o.status === '現結')
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-    const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
-    const expected = shift.openingTotal + cashSales - totalExpenses;
+    const expected = shift.openingTotal + cashSales;
     
     updateDaily({
       cashRegister: {
@@ -427,8 +426,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     const cashSales = dailyData.orders
       .filter(o => o.status === '現結')
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-    const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
-    const expected = shift.openingTotal + cashSales - totalExpenses;
+    const expected = shift.openingTotal + cashSales;
 
     const diffs: string[] = [];
     Object.entries(currencyForm).forEach(([val, count]) => {
@@ -459,8 +457,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     const cashSales = dailyData.orders
       .filter(o => o.status === '現結')
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-    const totalExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
-    const expected = total + cashSales - totalExpenses;
+    const expected = total + cashSales;
 
     const diffs: string[] = [];
     Object.entries(currencyForm).forEach(([val, count]) => {
@@ -527,6 +524,31 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     });
     return Object.entries(stats).map(([name, qty]) => ({ name, qty }));
   }, [dailyData.orders, allItems]);
+
+  const allSalesStats = useMemo(() => {
+    const stats: Record<string, number> = {};
+    const itemsList = [
+      ...(settings.giftItems || []),
+      ...(settings.singleItems || []),
+      ...(settings.customCategories || []).flatMap(c => c.items || [])
+    ];
+    dailyData.orders.forEach(o => {
+      // Exclude topups from item sales count
+      if (o.orderType === 'topup') return;
+      
+      Object.entries(o.items || {}).forEach(([id, qty]) => {
+        const item = itemsList.find(i => i.id === id);
+        if (item) {
+          stats[item.name] = (stats[item.name] || 0) + Number(qty || 0);
+        } else {
+          stats[id] = (stats[id] || 0) + Number(qty || 0);
+        }
+      });
+    });
+    return Object.entries(stats)
+      .map(([name, qty]) => ({ name, qty }))
+      .filter(item => item.qty > 0);
+  }, [dailyData.orders, settings]);
 
   if (!shift.isOpen && !shift.closeTime) {
     return (
@@ -618,6 +640,10 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     <td className="p-3 border border-gray-300 font-mono font-bold">${fmt(dailyData.orders.reduce((sum, o) => sum + (o.prodAmt || 0) + (o.shipAmt || 0), 0))}</td>
                   </tr>
                   <tr>
+                    <th className="p-3 bg-gray-50 border border-gray-300">運費收入</th>
+                    <td className="p-3 border border-gray-300 font-mono">${fmt(dailyData.orders.reduce((sum, o) => sum + (o.shipAmt || 0), 0))}</td>
+                  </tr>
+                  <tr>
                     <th className="p-3 bg-gray-50 border border-gray-300">折扣總額</th>
                     <td className="p-3 border border-gray-300 font-mono text-red-600">-${fmt(dailyData.orders.reduce((sum, o) => sum + (o.discAmt || 0), 0))}</td>
                   </tr>
@@ -625,76 +651,37 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     <th className="p-3 bg-gray-50 border border-gray-300">營業淨額</th>
                     <td className="p-3 border border-gray-300 font-mono font-bold text-lg">${fmt(dailyData.orders.reduce((sum, o) => sum + (o.actualAmt || 0), 0))}</td>
                   </tr>
-                  <tr>
-                    <th className="p-3 bg-gray-50 border border-gray-300">來客數 (總筆數)</th>
-                    <td className="p-3 border border-gray-300 font-mono">{dailyData.orders.length} 筆</td>
-                  </tr>
-                  <tr>
-                    <th className="p-3 bg-gray-50 border border-gray-300">客單價 (淨額/筆數)</th>
-                    <td className="p-3 border border-gray-300 font-mono">
-                      ${fmt(dailyData.orders.length > 0 ? (dailyData.orders.reduce((sum, o) => sum + (o.actualAmt || 0), 0) / dailyData.orders.length) : 0)}
-                    </td>
-                  </tr>
                 </tbody>
               </table>
             </section>
 
-            {/* 2. POS 系統數據 */}
+            {/* 2. 品項銷售數量彙整 */}
             <section className="space-y-4">
-              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">ＰＯＳ結帳總額 (僅經由收銀機結帳)</h3>
-              <table className="w-full border-collapse border border-gray-300 text-left">
-                <thead>
-                  <tr className="bg-gray-50">
-                    <th className="p-3 border border-gray-300">付款方式</th>
-                    <th className="p-3 border border-gray-300 text-right">結帳總額</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(settings.paymentMethods || ['現結', '匯款', '未結帳款']).map(method => {
-                    const total = dailyData.orders
-                      .filter(o => o.source === 'pos' && o.status === method)
-                      .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-                    return (
-                      <tr key={method}>
-                        <td className="p-3 border border-gray-300">{method}</td>
-                        <td className="p-3 border border-gray-300 text-right font-mono">${fmt(total)}</td>
-                      </tr>
-                    );
-                  })}
-                  <tr className="bg-gray-50 font-bold">
-                    <td className="p-3 border border-gray-300">POS 總額小計</td>
-                    <td className="p-3 border border-gray-300 text-right font-mono">
-                      ${fmt(dailyData.orders.filter(o => o.source === 'pos').reduce((sum, o) => sum + (o.actualAmt || 0), 0))}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-            </section>
-
-            {/* 3. 本日全部銷售明細 */}
-            <section className="space-y-4">
-              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">本日銷售明細 (全天清單)</h3>
+              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">品項銷售數量彙整 (僅列出當日有銷售之品項)</h3>
               <table className="w-full border-collapse border border-gray-300 text-left text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="p-2 border border-gray-300">明細編號 (後四碼)</th>
-                    <th className="p-2 border border-gray-300 text-right">金額</th>
-                    <th className="p-2 border border-gray-300 text-center">付款方式</th>
+                    <th className="p-3 border border-gray-300">品項名稱</th>
+                    <th className="p-3 border border-gray-300 text-right w-1/3">銷售數量</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {dailyData.orders.map(o => (
-                    <tr key={o.id}>
-                      <td className="p-2 border border-gray-300 font-mono">...{o.id.slice(-4)}</td>
-                      <td className="p-2 border border-gray-300 text-right font-mono">${fmt(o.actualAmt)}</td>
-                      <td className="p-2 border border-gray-300 text-center">{o.status}</td>
+                  {allSalesStats.map(item => (
+                    <tr key={item.name}>
+                      <td className="p-3 border border-gray-300 font-bold">{item.name}</td>
+                      <td className="p-3 border border-gray-300 text-right font-mono font-bold">{item.qty} 個</td>
                     </tr>
                   ))}
+                  {allSalesStats.length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="p-3 border border-gray-300 text-center text-gray-500 italic">今日無任何品項銷售紀錄</td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </section>
 
-            {/* 4. 付款方式彙整 */}
+            {/* 3. 付款方式彙整 */}
             <section className="space-y-4">
               <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">付款方式彙整統計</h3>
               <table className="w-full border-collapse border border-gray-300 text-left text-sm">
@@ -721,18 +708,20 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               </table>
             </section>
 
-            {/* 5. 收銀機盤點數據 (即時計算確保報表數值一致) */}
+            {/* 4. 收銀機盤點數據 (即時計算確保報表數值一致) */}
             {(() => {
-              const posCashSales = dailyData.orders
-                .filter(o => (o.source === 'pos' || o.note?.includes('收銀機交易')) && o.status === '現結')
+              const todaySalesCash = dailyData.orders
+                .filter(o => o.status === '現結' && o.orderType !== 'topup' && (!o.pickupDate || o.pickupDate === dailyData.date))
                 .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-              const otherCashSales = dailyData.orders
-                .filter(o => !(o.source === 'pos' || o.note?.includes('收銀機交易')) && o.status === '現結')
+              const preorderSalesCash = dailyData.orders
+                .filter(o => o.status === '現結' && o.orderType !== 'topup' && o.pickupDate && o.pickupDate !== dailyData.date)
+                .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+              const topupCashAmt = dailyData.orders
+                .filter(o => o.orderType === 'topup' && o.status === '現結')
                 .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
                 
-              const currentCashSales = posCashSales + otherCashSales;
-              const currentExpenses = shift.expenses.reduce((sum, e) => sum + e.amount, 0);
-              const currentExpected = shift.openingTotal + currentCashSales - currentExpenses;
+              const currentCashSales = todaySalesCash + preorderSalesCash + topupCashAmt;
+              const currentExpected = shift.openingTotal + currentCashSales;
               const currentOverShort = (shift.closingTotal || 0) - currentExpected;
 
               return (
@@ -741,13 +730,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                   <div className="grid grid-cols-2 gap-6 border border-gray-300 p-6">
                     <div className="space-y-2">
                       <div className="flex justify-between text-sm text-gray-500"><span>開帳現金:</span> <span className="font-mono">${fmt(shift.openingTotal)}</span></div>
-                      <div className="flex justify-between text-sm"><span>+ POS 現金收入:</span> <span className="font-mono">${fmt(posCashSales)}</span></div>
-                      {otherCashSales > 0 && (
-                        <div className="flex justify-between text-sm text-amber-600"><span>+ 其他現結 (匯入/手動):</span> <span className="font-mono">${fmt(otherCashSales)}</span></div>
-                      )}
-                      {currentExpenses > 0 && (
-                        <div className="flex justify-between text-sm text-red-600"><span>- 現金支出紀錄:</span> <span className="font-mono">-${fmt(currentExpenses)}</span></div>
-                      )}
+                      <div className="flex justify-between text-sm"><span>+ 今日銷售 (現結):</span> <span className="font-mono">${fmt(todaySalesCash)}</span></div>
+                      <div className="flex justify-between text-sm text-amber-600"><span>+ 商品預購金額 (現結):</span> <span className="font-mono">${fmt(preorderSalesCash)}</span></div>
+                      <div className="flex justify-between text-sm text-emerald-600"><span>+ 儲值金額 (現結):</span> <span className="font-mono">${fmt(topupCashAmt)}</span></div>
                       <div className="border-t-2 border-gray-800 pt-2 flex justify-between font-bold text-lg">
                         <span>應有現金金額:</span> 
                         <span className="font-mono">${fmt(currentExpected)}</span>
@@ -766,11 +751,6 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                       </div>
                     </div>
                   </div>
-                  {otherCashSales > 0 && (
-                    <p className="text-[10px] text-amber-600 font-bold">
-                      ⚠️ 注意：應有現金包含了「非 POS 系統」產生的現結訂單。若這些款項未入收銀機，請檢查匯入清單。
-                    </p>
-                  )}
                 </section>
               );
             })()}
@@ -832,7 +812,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                 <textarea 
                   value={editMemo}
                   onChange={e => setEditMemo(e.target.value)}
-                  placeholder="請簡述修改原因 (例如: 補登支出、盤點輸入錯誤...)"
+                  placeholder="請簡述修改原因 (例如: 盤點輸入錯誤、漏填備註...)"
                   className="w-full h-32 bg-coffee-50 border border-coffee-100 rounded-2xl p-4 outline-none focus:border-coffee-400 text-sm font-bold"
                 />
               </div>
@@ -1592,7 +1572,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           setCurrency={setCurrencyForm}
           isClosing
           shiftData={shift}
-          metricsCash={metrics?.cash || 0}
+          dailyData={dailyData}
         />
       )}
     </div>
@@ -1669,13 +1649,29 @@ function NumericKeypad({
   );
 }
 
-function CurrencyModal({ title, onClose, onSubmit, currency, setCurrency, isClosing, shiftData, metricsCash }: any) {
+function CurrencyModal({ title, onClose, onSubmit, currency, setCurrency, isClosing, shiftData, dailyData }: any) {
   const total = Object.entries(currency).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
   
   // Calculate expected if closing
-  const cashSales = metricsCash;
-  const totalExpenses = shiftData?.expenses?.reduce((sum: number, e: any) => sum + e.amount, 0) || 0;
-  const expected = isClosing ? ((shiftData?.openingTotal || 0) + cashSales - totalExpenses) : 0;
+  let todaySalesCash = 0;
+  let preorderSalesCash = 0;
+  let topupCashAmt = 0;
+  let expected = 0;
+
+  if (isClosing && dailyData) {
+    todaySalesCash = dailyData.orders
+      .filter((o: any) => o.status === '現結' && o.orderType !== 'topup' && (!o.pickupDate || o.pickupDate === dailyData.date))
+      .reduce((sum: number, o: any) => sum + (o.actualAmt || 0), 0);
+    preorderSalesCash = dailyData.orders
+      .filter((o: any) => o.status === '現結' && o.orderType !== 'topup' && o.pickupDate && o.pickupDate !== dailyData.date)
+      .reduce((sum: number, o: any) => sum + (o.actualAmt || 0), 0);
+    topupCashAmt = dailyData.orders
+      .filter((o: any) => o.orderType === 'topup' && o.status === '現結')
+      .reduce((sum: number, o: any) => sum + (o.actualAmt || 0), 0);
+      
+    const cashSales = todaySalesCash + preorderSalesCash + topupCashAmt;
+    expected = (shiftData?.openingTotal || 0) + cashSales;
+  }
 
   return (
     <div className="fixed inset-0 z-[130] flex items-center justify-center p-4">
@@ -1716,13 +1712,19 @@ function CurrencyModal({ title, onClose, onSubmit, currency, setCurrency, isClos
                   <span className="font-mono">${fmt(shiftData.openingTotal)}</span>
                 </div>
                 <div className="flex justify-between text-sm">
-                  <span className="opacity-60">本日現金銷售</span>
-                  <span className="font-mono text-mint-brand">+${fmt(cashSales)}</span>
+                  <span className="opacity-60">今日銷售 (現結)</span>
+                  <span className="font-mono text-mint-brand">+${fmt(todaySalesCash)}</span>
                 </div>
-                {totalExpenses > 0 && (
-                  <div className="flex justify-between text-sm">
-                    <span className="opacity-60">合計支出</span>
-                    <span className="font-mono text-rose-brand">-${fmt(totalExpenses)}</span>
+                {preorderSalesCash > 0 && (
+                  <div className="flex justify-between text-sm text-amber-300">
+                    <span className="opacity-60">商品預購金額 (現結)</span>
+                    <span className="font-mono">+${fmt(preorderSalesCash)}</span>
+                  </div>
+                )}
+                {topupCashAmt > 0 && (
+                  <div className="flex justify-between text-sm text-emerald-300">
+                    <span className="opacity-60">儲值金額 (現結)</span>
+                    <span className="font-mono">+${fmt(topupCashAmt)}</span>
                   </div>
                 )}
                 <div className="h-px bg-white/10 my-2" />
