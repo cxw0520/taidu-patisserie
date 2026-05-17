@@ -51,14 +51,20 @@ export function buildAttendanceRecord(
   const rosterEntry = roster[rosterKey];
   const tpl = rosterEntry?.shiftTemplateId ? shiftTemplates.find(t => t.id === rosterEntry.shiftTemplateId) : null;
 
+  const parseTimeToMins = (tStr: string) => {
+    if (!tStr) return 0;
+    const [h, m] = tStr.split(':').map(Number);
+    return h * 60 + m;
+  };
+
   if (clockIn && clockOut) {
     const totalWorked = calcMinutesDiff(clockIn, clockOut);
     const breakMins = tpl ? (tpl.breakMinutes || 0) : 0;
     effectiveMinutes = Math.max(0, totalWorked - breakMins);
 
     if (tpl) {
-      const scheduledStartMins = tpl.startTime.split(':').reduce((h, m, i) => i === 0 ? Number(h) * 60 : Number(h) + Number(m), 0 as any);
-      const actualStartMins = clockIn.split(':').reduce((h, m, i) => i === 0 ? Number(h) * 60 : Number(h) + Number(m), 0 as any);
+      const scheduledStartMins = parseTimeToMins(tpl.startTime);
+      const actualStartMins = parseTimeToMins(clockIn);
       
       // Handle late calculation
       lateMinutes = Math.max(0, actualStartMins - scheduledStartMins);
@@ -70,8 +76,8 @@ export function buildAttendanceRecord(
         lateMinutes = 0;
       }
 
-      const scheduledEndMins = tpl.endTime.split(':').reduce((h, m, i) => i === 0 ? Number(h) * 60 : Number(h) + Number(m), 0 as any);
-      const actualEndMins = clockOut.split(':').reduce((h, m, i) => i === 0 ? Number(h) * 60 : Number(h) + Number(m), 0 as any);
+      const scheduledEndMins = parseTimeToMins(tpl.endTime);
+      const actualEndMins = parseTimeToMins(clockOut);
       
       let scheduledDuration = (scheduledEndMins - scheduledStartMins);
       if (scheduledDuration < 0) scheduledDuration += 24 * 60;

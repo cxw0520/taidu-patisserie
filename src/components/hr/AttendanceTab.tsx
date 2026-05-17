@@ -83,11 +83,20 @@ export default function AttendanceTab({
     if (!punchModal || !punchForm.time) return;
     const { dateKey } = punchModal;
     const existing = attendanceData[dateKey];
+    const [y, m, d] = dateKey.split('-').map(Number);
+    const [hr, min] = punchForm.time.split(':').map(Number);
+    const localDate = new Date(y, m - 1, d, hr, min);
+    if (isNaN(localDate.getTime())) {
+      alert('打卡時間格式錯誤');
+      return;
+    }
+    const rawTime = localDate.toISOString();
+
     const newPunch: AttendancePunch = {
       id: uid(),
       type: punchForm.type,
       time: punchForm.time,
-      rawTime: new Date(`${dateKey}T${punchForm.time}`).toISOString(),
+      rawTime,
       method: 'manual_admin',
       adminNote: punchForm.note || undefined,
     };
