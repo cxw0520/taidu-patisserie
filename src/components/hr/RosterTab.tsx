@@ -43,6 +43,19 @@ export default function RosterTab({
   const [cellModal, setCellModal] = useState<{ operatorId: string; dateKey: string } | null>(null);
   const [templateForm, setTemplateForm] = useState<Partial<ShiftTemplate>>({});
 
+  // Quick Roster states
+  const [quickRosterModal, setQuickRosterModal] = useState(false);
+  const [quickOpId, setQuickOpId] = useState<string>('');
+  const [quickDays, setQuickDays] = useState<number[]>([]);
+  const [quickShiftId, setQuickShiftId] = useState<string | 'off' | 'clear'>('off');
+
+  // Auto-initialize quickOpId
+  useEffect(() => {
+    if (operators.length > 0 && !quickOpId) {
+      setQuickOpId(operators[0].id);
+    }
+  }, [operators, quickOpId]);
+
   const shiftTemplates: ShiftTemplate[] = settings.shiftTemplates || [];
   const ymKey = fmtYM(viewYear, viewMonth);
   const daysInMonth = getDaysInMonth(viewYear, viewMonth);
@@ -59,10 +72,29 @@ export default function RosterTab({
     return unsub;
   }, [shopId, ymKey]);
 
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'success'>('idle');
+
   const saveRoster = async (newRoster: Record<string, RosterEntry>) => {
     setRoster(newRoster);
     const ref = doc(db, 'shops', shopId, 'hr', `roster_${ymKey}`);
-    await setDoc(ref, newRoster, { merge: true });
+    const cleanRoster = JSON.parse(JSON.stringify(newRoster));
+    await setDoc(ref, cleanRoster, { merge: true });
+  };
+
+  const handleManualSave = async () => {
+    if (!shopId) return;
+    setSaveStatus('saving');
+    try {
+      const ref = doc(db, 'shops', shopId, 'hr', `roster_${ymKey}`);
+      const cleanRoster = JSON.parse(JSON.stringify(roster));
+      await setDoc(ref, cleanRoster);
+      setSaveStatus('success');
+      setTimeout(() => setSaveStatus('idle'), 3000);
+    } catch (err) {
+      console.error('Manual save roster error:', err);
+      alert('儲存失敗，請檢查網路連線');
+      setSaveStatus('idle');
+    }
   };
 
   const getRosterKey = (operatorId: string, dateKey: string) => `${operatorId}_${dateKey}`;
@@ -148,6 +180,45 @@ export default function RosterTab({
     setCellModal(null);
   };
 
+  const handleApplyQuickRoster = async () => {
+    if (!quickOpId) {
+      alert('請選擇員工');
+      return;
+    }
+    if (quickDays.length === 0) {
+      alert('請選擇日期');
+      return;
+    }
+
+    const targetOpIds = quickOpId === 'all' ? operators.map(o => o.id) : [quickOpId];
+    const newRoster = { ...roster };
+
+    for (const opId of targetOpIds) {
+      for (const day of quickDays) {
+        const dateKey = `${ymKey}-${String(day).padStart(2, '0')}`;
+        const key = getRosterKey(opId, dateKey);
+
+        if (quickShiftId === 'clear') {
+          delete newRoster[key];
+        } else {
+          const isOff = quickShiftId === 'off';
+          const isHolidayDay = settings.exceptionCalendar?.[dateKey] === 'holiday';
+          newRoster[key] = {
+            operatorId: opId,
+            dateKey,
+            shiftTemplateId: isOff ? undefined : quickShiftId,
+            isOff,
+            isHoliday: isHolidayDay,
+          };
+        }
+      }
+    }
+
+    await saveRoster(newRoster);
+    setQuickRosterModal(false);
+    setQuickDays([]);
+  };
+
   const prevMonth = () => {
     if (viewMonth === 1) { setViewMonth(12); setViewYear(v => v - 1); }
     else setViewMonth(m => m - 1);
@@ -173,6 +244,42 @@ export default function RosterTab({
           <div className="bg-coffee-50 px-4 py-2 rounded-xl border border-coffee-100 text-sm font-bold text-coffee-700">
             💰 本月預估薪資成本：<span className="text-rose-brand font-mono">${estimatedCost.toLocaleString()}</span>
           </div>
+          <button
+            onClick={handleManualSave}
+            disabled={saveStatus === 'saving'}
+            className={cn(
+              "px-4 py-2 rounded-xl font-bold text-sm flex items-center gap-2 transition-all shadow-sm border",
+              saveStatus === 'success'
+                ? "bg-mint-brand/10 border-mint-brand text-mint-brand"
+                : saveStatus === 'saving'
+                  ? "bg-coffee-100 border-coffee-200 text-coffee-400"
+                  : "bg-coffee-800 border-coffee-800 text-white hover:bg-coffee-900 active:scale-95"
+            )}
+          >
+            {saveStatus === 'saving' ? (
+              <>
+                <div className="w-3.5 h-3.5 border-2 border-coffee-400 border-t-coffee-600 rounded-full animate-spin" />
+                <span>儲存中...</span>
+              </>
+            ) : saveStatus === 'success' ? (
+              <span>✅ 儲存成功</span>
+            ) : (
+              <>
+                <Save className="w-4 h-4" />
+                <span>儲存排班</span>
+              </>
+            )}
+          </button>
+          <button
+            onClick={() => {
+              setQuickRosterModal(true);
+              setQuickDays([]);
+              if (operators.length > 0) setQuickOpId(operators[0].id);
+            }}
+            className="px-4 py-2 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-700 rounded-xl font-bold text-sm flex items-center gap-2 transition shadow-sm"
+          >
+            ⚡ 快速排班
+          </button>
           <button
             onClick={() => { setEditTemplateModal('new'); setTemplateForm({ breakMinutes: 60, color: DEFAULT_COLORS[shiftTemplates.length % DEFAULT_COLORS.length] }); }}
             className="px-4 py-2 bg-coffee-600 text-white rounded-xl font-bold text-sm flex items-center gap-2 hover:bg-coffee-700 transition"
@@ -375,6 +482,187 @@ export default function RosterTab({
                   disabled={!templateForm.name || !templateForm.startTime || !templateForm.endTime}
                   className="w-full py-3 bg-coffee-800 text-white rounded-2xl font-bold hover:bg-coffee-900 transition disabled:opacity-50 flex items-center justify-center gap-2">
                   <Save className="w-4 h-4" /> 儲存班別
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Quick Roster Modal */}
+      <AnimatePresence>
+        {quickRosterModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" onClick={() => setQuickRosterModal(false)} />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel bg-white w-full max-w-lg rounded-3xl p-8 relative z-10 space-y-6 flex flex-col max-h-[90vh]">
+              <div className="flex justify-between items-center">
+                <h3 className="font-bold text-xl text-coffee-800">⚡ 快速批次排班</h3>
+                <button onClick={() => setQuickRosterModal(false)} className="p-1 hover:bg-coffee-50 rounded-full"><X className="w-5 h-5" /></button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto pr-2 space-y-6">
+                {/* Operator Selector */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-coffee-500 block font-bold">套用員工</label>
+                  <select value={quickOpId} onChange={e => setQuickOpId(e.target.value)}
+                    className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-3 font-bold text-coffee-700 outline-none focus:border-rose-brand">
+                    <option value="all">👥 所有員工 (批次排班)</option>
+                    {operators.map(op => <option key={op.id} value={op.id}>👤 {op.name}</option>)}
+                  </select>
+                </div>
+
+                {/* Days Selection Grid */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center">
+                    <label className="text-xs font-bold text-coffee-500 uppercase tracking-wider">選擇日期</label>
+                    <div className="flex gap-1.5 font-bold">
+                      <button
+                        onClick={() => setQuickDays(Array.from({ length: daysInMonth }, (_, i) => i + 1))}
+                        className="px-2 py-1 bg-coffee-50 hover:bg-coffee-100 rounded-lg text-[10px] font-bold text-coffee-600 transition"
+                      >
+                        全選
+                      </button>
+                      <button
+                        onClick={() => {
+                          const weekdays = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter(d => {
+                            const dow = getDayOfWeek(d);
+                            return dow !== 0 && dow !== 6;
+                          });
+                          setQuickDays(weekdays);
+                        }}
+                        className="px-2 py-1 bg-coffee-50 hover:bg-coffee-100 rounded-lg text-[10px] font-bold text-coffee-600 transition"
+                      >
+                        週一至五
+                      </button>
+                      <button
+                        onClick={() => {
+                          const weekends = Array.from({ length: daysInMonth }, (_, i) => i + 1).filter(d => {
+                            const dow = getDayOfWeek(d);
+                            return dow === 0 || dow === 6;
+                          });
+                          setQuickDays(weekends);
+                        }}
+                        className="px-2 py-1 bg-coffee-50 hover:bg-coffee-100 rounded-lg text-[10px] font-bold text-coffee-600 transition"
+                      >
+                        週六日
+                      </button>
+                      <button
+                        onClick={() => setQuickDays([])}
+                        className="px-2 py-1 bg-rose-50 hover:bg-rose-100 rounded-lg text-[10px] font-bold text-rose-600 transition"
+                      >
+                        清除
+                      </button>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-7 gap-2 p-3 bg-coffee-50 rounded-2xl border border-coffee-100">
+                    {['日', '一', '二', '三', '四', '五', '六'].map(w => (
+                      <div key={w} className="text-center text-[10px] font-bold text-coffee-400 py-1">{w}</div>
+                    ))}
+                    {/* Pad previous month days */}
+                    {Array.from({ length: new Date(viewYear, viewMonth - 1, 1).getDay() }).map((_, idx) => (
+                      <div key={`pad-${idx}`} />
+                    ))}
+                    {days.map(d => {
+                      const isSelected = quickDays.includes(d);
+                      const dow = getDayOfWeek(d);
+                      const isWeekend = dow === 0 || dow === 6;
+                      return (
+                        <button
+                          key={d}
+                          onClick={() => {
+                            if (isSelected) {
+                              setQuickDays(prev => prev.filter(x => x !== d));
+                            } else {
+                              setQuickDays(prev => [...prev, d].sort((a, b) => a - b));
+                            }
+                          }}
+                          className={cn(
+                            "aspect-square rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center relative",
+                            isSelected
+                              ? "bg-rose-brand text-white shadow-md scale-105"
+                              : isWeekend
+                                ? "bg-white hover:bg-coffee-100 text-blue-500 border border-coffee-100"
+                                : "bg-white hover:bg-coffee-100 text-coffee-700 border border-coffee-100"
+                          )}
+                        >
+                          <span>{d}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Shift Selection */}
+                <div className="space-y-2">
+                  <label className="text-xs font-bold text-coffee-500 uppercase tracking-wider">選擇班別</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {shiftTemplates.map(tpl => (
+                      <button
+                        key={tpl.id}
+                        type="button"
+                        onClick={() => setQuickShiftId(tpl.id)}
+                        className={cn(
+                          "flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all text-left",
+                          quickShiftId === tpl.id
+                            ? "border-coffee-800 bg-coffee-800 text-white shadow-sm"
+                            : "border-coffee-100 bg-white hover:border-coffee-300 text-coffee-700"
+                        )}
+                      >
+                        <span
+                          className="w-3.5 h-3.5 rounded-full flex-shrink-0"
+                          style={quickShiftId === tpl.id ? { background: '#fff' } : { background: tpl.color || '#ccc' }}
+                        />
+                        <div className="truncate">
+                          <div>{tpl.name}</div>
+                          <div className={cn("text-[9px] font-normal", quickShiftId === tpl.id ? "text-white/70" : "text-coffee-400")}>
+                            {tpl.startTime}-{tpl.endTime}
+                          </div>
+                        </div>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setQuickShiftId('off')}
+                      className={cn(
+                        "flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all text-left",
+                        quickShiftId === 'off'
+                          ? "border-gray-500 bg-gray-500 text-white shadow-sm"
+                          : "border-coffee-100 bg-white hover:border-coffee-300 text-coffee-700"
+                      )}
+                    >
+                      <span className="text-sm">📴</span>
+                      <div>
+                        <div>排休</div>
+                        <div className={cn("text-[9px] font-normal", quickShiftId === 'off' ? "text-white/70" : "text-coffee-400")}>Off Day</div>
+                      </div>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setQuickShiftId('clear')}
+                      className={cn(
+                        "flex items-center gap-2 p-2.5 rounded-xl border text-xs font-bold transition-all text-left col-span-2",
+                        quickShiftId === 'clear'
+                          ? "border-rose-600 bg-rose-600 text-white shadow-sm"
+                          : "border-rose-100 bg-rose-50/50 hover:border-rose-300 text-rose-700"
+                      )}
+                    >
+                      <span className="text-sm">🗑️</span>
+                      <div>
+                        <div>清除排班</div>
+                        <div className={cn("text-[9px] font-normal", quickShiftId === 'clear' ? "text-white/70" : "text-rose-400")}>刪除排班紀錄</div>
+                      </div>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-4 border-t border-coffee-100">
+                <button
+                  onClick={handleApplyQuickRoster}
+                  disabled={quickDays.length === 0}
+                  className="w-full py-4 bg-coffee-800 text-white rounded-2xl font-bold shadow-xl hover:bg-coffee-900 transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                  ⚡ 套用快速排班 ({quickDays.length} 天)
                 </button>
               </div>
             </motion.div>

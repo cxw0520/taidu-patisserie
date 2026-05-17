@@ -42,8 +42,18 @@ export default function AttendanceTab({
   const daysInMonth = getDaysInMonth(viewYear, viewMonth);
   const shiftTemplates: ShiftTemplate[] = settings.shiftTemplates || [];
 
+  // Auto-select first operator if none selected yet to prevent infinite loading
   useEffect(() => {
-    if (!shopId || !selectedOpId) return;
+    if (!selectedOpId && operators.length > 0) {
+      setSelectedOpId(operators[0].id);
+    }
+  }, [selectedOpId, operators, setSelectedOpId]);
+
+  useEffect(() => {
+    if (!shopId || !selectedOpId) {
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setAttendanceData({}); // Clear stale data immediately
     const ref = doc(db, 'shops', shopId, 'hr', `attendance_${selectedOpId}_${ymKey}`);
@@ -71,7 +81,9 @@ export default function AttendanceTab({
   const saveAttendance = async (newData: Record<string, AttendanceRecord>) => {
     const ref = doc(db, 'shops', shopId, 'hr', `attendance_${selectedOpId}_${ymKey}`);
     try {
-      await setDoc(ref, newData);
+      // JSON.parse(JSON.stringify()) cleanly strips all undefined fields which Firestore rejects
+      const cleanData = JSON.parse(JSON.stringify(newData));
+      await setDoc(ref, cleanData);
       // Local state will be updated by onSnapshot automatically
     } catch (err) {
       console.error('Save HR error:', err);

@@ -146,7 +146,8 @@ export default function OperatorLockScreen({ shopId, operators, settings, onUnlo
         settings.shiftTemplates || []
       );
 
-      await setDoc(ref, { ...existing, [targetDateKey]: updatedRecord });
+      const cleanData = JSON.parse(JSON.stringify({ ...existing, [targetDateKey]: updatedRecord }));
+      await setDoc(ref, cleanData);
       
       setClockSuccess(clockConfirm);
       setMode('clock_success');
