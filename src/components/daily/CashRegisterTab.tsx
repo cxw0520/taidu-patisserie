@@ -1192,113 +1192,114 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               {/* Body — two columns when 現結 */}
               <div className={cn("flex-1 overflow-y-auto p-8 pt-6 gap-6", checkoutData.paymentMethod === '現結' ? "grid grid-cols-2 items-start" : "flex flex-col space-y-4")}>
 
-
-                {/* ── Left: form fields ── */}
-                <div className="space-y-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1">
-                      <label className="text-xs font-bold text-coffee-400 mb-1 block">購買人</label>
-                      <input
-                        type="text"
-                        value={checkoutData.buyer}
-                        onChange={e => setCheckoutData({...checkoutData, buyer: e.target.value})}
-                        className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand"
-                      />
+                  {/* ── Left: form fields ── */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <label className="text-xs font-bold text-coffee-400 mb-1 block">購買人</label>
+                        <input
+                          type="text"
+                          value={checkoutData.buyer}
+                          onChange={e => setCheckoutData({...checkoutData, buyer: e.target.value})}
+                          className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand"
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="text-xs font-bold text-coffee-400 mb-1 block">折讓金額</label>
+                        <input
+                          type="number"
+                          value={checkoutData.discAmt || ''}
+                          placeholder="0"
+                          onChange={e => setCheckoutData({...checkoutData, discAmt: Number(e.target.value)})}
+                          className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-rose-brand outline-none focus:border-rose-brand font-mono"
+                        />
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <label className="text-xs font-bold text-coffee-400 mb-1 block">折讓金額</label>
-                      <input
-                        type="number"
-                        value={checkoutData.discAmt || ''}
-                        placeholder="0"
-                        onChange={e => setCheckoutData({...checkoutData, discAmt: Number(e.target.value)})}
-                        className="w-full bg-coffee-50 border border-coffee-100 rounded-xl px-4 py-2 text-sm font-bold text-rose-brand outline-none focus:border-rose-brand font-mono"
-                      />
-                    </div>
-                  </div>
-                  <CustomerAutocomplete
-                    customers={customers}
-                    phoneInput={checkoutData.phone}
-                    setPhoneInput={phone => setCheckoutData({ ...checkoutData, phone })}
-                    onSelectCustomer={c => {
-                      setSelectedCust(c);
-                      setCheckoutData({ ...checkoutData, buyer: c.name, phone: c.phone });
-                    }}
-                  />
+                    <CustomerAutocomplete
+                      customers={customers}
+                      phoneInput={checkoutData.phone}
+                      setPhoneInput={phone => setCheckoutData({ ...checkoutData, phone })}
+                      onSelectCustomer={c => {
+                        setSelectedCust(c);
+                        setCheckoutData({ ...checkoutData, buyer: c.name, phone: c.phone });
+                      }}
+                    />
 
-                  <div>
-                    <div className="flex justify-between items-center mb-1.5">
-                      <label className="text-xs font-bold text-coffee-400 block">付款方式</label>
-                      {selectedCust && (
-                        <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
-                          儲值餘額: ${fmt(selectedCust.creditBalance || 0)}
-                        </span>
+                    <div>
+                      <div className="flex justify-between items-center mb-1.5">
+                        <label className="text-xs font-bold text-coffee-400 block">付款方式</label>
+                        {selectedCust && (
+                          <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                            儲值餘額: ${fmt(selectedCust.creditBalance || 0)}
+                          </span>
+                        )}
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {Array.from(new Set([...(settings.paymentMethods || ['現結', '匯款', '未結帳款']), '儲值金扣款'])).map(m => (
+                          <button
+                            key={m}
+                            onClick={() => {
+                              if (m === '儲值金扣款' && selectedCust) {
+                                const bal = Number(selectedCust.creditBalance || 0);
+                                const targetAmt = totalCartAmt - checkoutData.discAmt;
+                                if (targetAmt > bal) {
+                                  alert(`提醒：顧客儲值餘額 ($${bal}) 小於結帳應付總計 ($${targetAmt})`);
+                                }
+                              }
+                              setCheckoutData({...checkoutData, paymentMethod: m as any});
+                            }}
+                            className={cn(
+                              "py-2 rounded-xl text-[11px] font-bold border transition-all truncate px-1",
+                              checkoutData.paymentMethod === m
+                                ? m === '儲值金扣款' ? "bg-emerald-600 border-emerald-600 text-white shadow-xs" : "bg-rose-brand border-rose-brand text-white shadow-xs"
+                                : "bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300"
+                            )}
+                          >
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex flex-col">
+                      <label className="text-xs font-bold text-coffee-400 mb-1 block">取貨日期 (預設為今日)</label>
+                      <input
+                        type="date"
+                        value={checkoutData.pickupDate}
+                        onChange={e => setCheckoutData({...checkoutData, pickupDate: e.target.value})}
+                        className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand"
+                      />
+                      {checkoutData.pickupDate !== dailyData.date && (
+                        <p className="text-[10px] text-amber-600 mt-1 font-bold">
+                          注意：這是一筆預購單！今天將只記錄現金，商品數量與營收將在取貨日認列。
+                        </p>
                       )}
                     </div>
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {Array.from(new Set([...(settings.paymentMethods || ['現結', '匯款', '未結帳款']), '儲值金扣款'])).map(m => (
-                        <button
-                          key={m}
-                          onClick={() => {
-                            if (m === '儲值金扣款' && selectedCust) {
-                              const bal = Number(selectedCust.creditBalance || 0);
-                              const targetAmt = totalCartAmt - checkoutData.discAmt;
-                              if (targetAmt > bal) {
-                                alert(`提醒：顧客儲值餘額 ($${bal}) 小於結帳應付總計 ($${targetAmt})`);
-                              }
-                            }
-                            setCheckoutData({...checkoutData, paymentMethod: m as any});
-                          }}
-                          className={cn(
-                            "py-2 rounded-xl text-[11px] font-bold border transition-all truncate px-1",
-                            checkoutData.paymentMethod === m
-                              ? m === '儲值金扣款' ? "bg-emerald-600 border-emerald-600 text-white shadow-xs" : "bg-rose-brand border-rose-brand text-white shadow-xs"
-                              : "bg-white border-coffee-100 text-coffee-500 hover:border-coffee-300"
-                          )}
-                        >
-                          {m}
-                        </button>
-                      ))}
+
+                    <div className="p-4 bg-coffee-50 rounded-2xl space-y-2">
+                      <div className="flex justify-between text-sm font-bold text-coffee-500">
+                        <span>商品小計</span><span className="font-mono">${fmt(totalCartAmt)}</span>
+                      </div>
+                      <div className="flex justify-between text-sm font-bold text-rose-brand">
+                        <span>折讓金額</span><span className="font-mono">-${fmt(checkoutData.discAmt)}</span>
+                      </div>
+                      <div className="h-px bg-coffee-100 my-2" />
+                      <div className="flex justify-between items-center">
+                        <span className="text-lg font-bold text-coffee-800">應收總金額</span>
+                        <span className="text-2xl font-serif-brand font-bold text-rose-brand">${fmt(totalCartAmt - checkoutData.discAmt)}</span>
+                      </div>
                     </div>
                   </div>
 
-                  <div className="flex flex-col">
-                    <label className="text-xs font-bold text-coffee-400 mb-1 block">取貨日期 (預設為今日)</label>
-                    <input
-                      type="date"
-                      value={checkoutData.pickupDate}
-                      onChange={e => setCheckoutData({...checkoutData, pickupDate: e.target.value})}
-                      className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand"
-                    />
-                    {checkoutData.pickupDate !== dailyData.date && (
-                      <p className="text-[10px] text-amber-600 mt-1 font-bold">
-                        注意：這是一筆預購單！今天將只記錄現金，商品數量與營收將在取貨日認列。
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="p-4 bg-coffee-50 rounded-2xl space-y-2">
-                    <div className="flex justify-between text-sm font-bold text-coffee-500">
-                      <span>商品小計</span><span className="font-mono">${fmt(totalCartAmt)}</span>
-                    </div>
-                    <div className="flex justify-between text-sm font-bold text-rose-brand">
-                      <span>折讓金額</span><span className="font-mono">-${fmt(checkoutData.discAmt)}</span>
-                    </div>
-                    <div className="h-px bg-coffee-100 my-2" />
-                    <div className="flex justify-between items-center">
-                      <span className="text-lg font-bold text-coffee-800">應收總金額</span>
-                      <span className="text-2xl font-serif-brand font-bold text-rose-brand">${fmt(totalCartAmt - checkoutData.discAmt)}</span>
-                    </div>
-                  </div>
-
-                  {/* 實收 / 找零 — only when 現結 */}
+                  {/* ── Right: numeric keypad (現結 only) ── */}
                   {checkoutData.paymentMethod === '現結' && (
+                    <div className="flex flex-col justify-start pt-1 space-y-4">
+                    {/* 實收 / 找零 — Moved here for better visibility */}
                     <div className="space-y-2">
-                      <label className="text-xs font-bold text-coffee-400 block">實收金額</label>
+                      <label className="text-xs font-bold text-coffee-400 block">實收金額 (點擊下方鍵盤輸入)</label>
                       <div className="w-full bg-white border-2 border-mint-brand/40 rounded-xl px-3 py-3 text-3xl font-bold text-mint-brand shadow-inner font-mono text-center select-none min-h-[64px] flex items-center justify-center">
                         {receivedInput || <span className="text-coffee-200 text-base font-bold">— 請輸入 —</span>}
                       </div>
-                      {/* Always rendered to prevent layout shift; invisible when no input */}
                       <div className={cn(
                         "p-3 bg-mint-brand/5 border border-mint-brand/10 rounded-xl flex justify-between items-center transition-all",
                         checkoutData.receivedAmt > 0 ? "opacity-100" : "opacity-0 pointer-events-none"
@@ -1309,12 +1310,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                         </span>
                       </div>
                     </div>
-                  )}
-                </div>
 
-                {/* ── Right: numeric keypad (現結 only) ── */}
-                {checkoutData.paymentMethod === '現結' && (
-                  <div className="flex flex-col justify-start pt-1">
                     <NumericKeypad
                       value={receivedInput}
                       onChange={(val) => {
