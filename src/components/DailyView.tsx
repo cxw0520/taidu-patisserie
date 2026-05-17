@@ -1082,6 +1082,147 @@ export default function DailyView({
     }
   };
 
+  const handleChangePickupDate = async (order: Order, newDateStr: string) => {
+    if (!shopId) return;
+    try {
+      const normalizedNewDate = normalizeDateKey(newDateStr);
+      const originalDateKey = loadedDateKey || normalizeDateKey(currentDate);
+
+      if (order.orderType === 'pickup') {
+        // --- CASE 1: Migrating the pickup order itself ---
+        // 1. Remove from current/original day in Firestore
+        const originalDocRef = doc(db, 'shops', shopId, 'daily', originalDateKey);
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(originalDocRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            const orders = (data.orders || []).filter((o: any) => o.id !== order.id);
+            tx.update(originalDocRef, { orders });
+          }
+        });
+
+        // Update local state if the original order was in the currently loaded day
+        if (originalDateKey === loadedDateKey) {
+          setDailyData(prev => {
+            if (!prev) return prev;
+            return { ...prev, orders: (prev.orders || []).filter(o => o.id !== order.id) };
+          });
+        }
+
+        // 2. Add to the new day in Firestore
+        const newDocRef = doc(db, 'shops', shopId, 'daily', normalizedNewDate);
+        const updatedPickupOrder = {
+          ...order,
+          pickupDate: newDateStr,
+          note: order.note.replace(/\d{4}-\d{2}-\d{2}/, newDateStr) // update date in note if matches yyyy-mm-dd
+        };
+
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(newDocRef);
+          if (snap.exists()) {
+            const data = snap.data();
+            const orders = [...(data.orders || [])];
+            if (!orders.some((o: any) => o.id === order.id)) {
+              orders.push(updatedPickupOrder);
+            }
+            tx.update(newDocRef, { orders });
+          } else {
+            tx.set(newDocRef, { orders: [updatedPickupOrder] });
+          }
+        });
+
+        // Update local state if the currently loaded day is the new date
+        if (normalizedNewDate === loadedDateKey) {
+          setDailyData(prev => {
+            if (!prev) return prev;
+            const orders = [...(prev.orders || [])];
+            if (!orders.some(o => o.id === order.id)) {
+              orders.push(updatedPickupOrder);
+            }
+            return { ...prev, orders };
+          });
+        }
+
+        // 3. Find and update the prepayment order on the payment day if it exists in the current view
+        setDailyData(prev => {
+          if (!prev) return prev;
+          const nextOrders = (prev.orders || []).map(o => {
+            if (o.orderType === 'prepayment' && o.phone === order.phone && o.buyer === order.buyer && o.pickupDate === order.pickupDate) {
+              const patch = {
+                pickupDate: newDateStr,
+                note: o.note.replace(/\d{4}-\d{2}-\d{2}/, newDateStr)
+              };
+              setTimeout(() => updateOrderInDb(o.id, patch), 50);
+              return { ...o, ...patch };
+            }
+            return o;
+          });
+          return { ...prev, orders: nextOrders };
+        });
+
+        alert(`已成功將取貨單移動到新取貨日：${newDateStr}！`);
+
+      } else if (order.orderType === 'prepayment') {
+        // --- CASE 2: Migrating the booking date on a prepayment order ---
+        // 1. Update the prepayment order itself on the currently loaded day
+        const oldPickupDateStr = order.pickupDate || '';
+        const patch = {
+          pickupDate: newDateStr,
+          note: order.note.replace(/\d{4}-\d{2}-\d{2}/, newDateStr)
+        };
+        updateOrderInDb(order.id, patch);
+
+        // 2. Try to find the pickup order on the old pickup date and migrate it to the new pickup date
+        if (oldPickupDateStr) {
+          const oldPickupDateKey = normalizeDateKey(oldPickupDateStr);
+          const oldPickupDocRef = doc(db, 'shops', shopId, 'daily', oldPickupDateKey);
+
+          await runTransaction(db, async (tx) => {
+            const snap = await tx.get(oldPickupDocRef);
+            if (snap.exists()) {
+              const data = snap.data();
+              const sOrders = data.orders || [];
+              
+              // Find the corresponding pickup order
+              const pickupOrderToMove = sOrders.find((o: any) => o.orderType === 'pickup' && o.phone === order.phone && o.buyer === order.buyer);
+              
+              if (pickupOrderToMove) {
+                // Remove from old date in firestore
+                const remainingOrders = sOrders.filter((o: any) => o.id !== pickupOrderToMove.id);
+                tx.update(oldPickupDocRef, { orders: remainingOrders });
+
+                // Add to new date in firestore
+                const newDocRef = doc(db, 'shops', shopId, 'daily', normalizedNewDate);
+                const updatedPickupOrder = {
+                  ...pickupOrderToMove,
+                  pickupDate: newDateStr,
+                  note: pickupOrderToMove.note.replace(/\d{4}-\d{2}-\d{2}/, newDateStr)
+                };
+
+                const newSnap = await tx.get(newDocRef);
+                if (newSnap.exists()) {
+                  const newData = newSnap.data();
+                  const newOrders = [...(newData.orders || [])];
+                  if (!newOrders.some((o: any) => o.id === pickupOrderToMove.id)) {
+                    newOrders.push(updatedPickupOrder);
+                  }
+                  tx.update(newDocRef, { orders: newOrders });
+                } else {
+                  tx.set(newDocRef, { orders: [updatedPickupOrder] });
+                }
+              }
+            }
+          });
+        }
+
+        alert(`已成功將預購單與對應取貨單日期變更為新取貨日：${newDateStr}！`);
+      }
+    } catch (err) {
+      console.error('Change pickup date error:', err);
+      alert('變更失敗，請確認網路連線！');
+    }
+  };
+
   const metrics = useMemo(() => {
 
     if (!dailyData) return null;
@@ -1722,21 +1863,31 @@ export default function DailyView({
                       </td>
                       {/* 配送方式 */}
                       <td className="px-2 py-2 min-w-[80px]">
-                        {(order.source === 'pos' || order.note?.includes('收銀機交易')) ? (
+                        {(order.source === 'pos' || order.note?.includes('收銀機交易')) && (order.orderType !== 'prepayment' && order.orderType !== 'pickup') ? (
                           <span className="text-[10px] font-bold text-coffee-300 bg-coffee-50 px-2 py-0.5 rounded-full">現場</span>
                         ) : (
                         <div className="flex flex-col gap-1.5 items-center">
-                          {/* 宅配/自取 toggle */}
-                          <div className="flex rounded-lg overflow-hidden border border-coffee-100 text-[10px] font-bold">
-                            <button
-                              onClick={() => { updateOrderInDb(order.id, { deliveryMethod: '宅配' }); }}
-                              className={cn("px-2 py-1 transition-colors flex items-center gap-0.5", isDelivery ? "bg-blue-500 text-white" : "bg-white text-coffee-400 hover:bg-coffee-50")}
-                            ><Truck className="w-3 h-3"/>宅</button>
-                            <button
-                              onClick={() => { updateOrderInDb(order.id, { deliveryMethod: '自取' }); }}
-                              className={cn("px-2 py-1 transition-colors flex items-center gap-0.5", isPickup ? "bg-mint-brand text-white" : "bg-white text-coffee-400 hover:bg-coffee-50")}
-                            ><MapPin className="w-3 h-3"/>取</button>
-                          </div>
+                          {/* 宅配/自取 toggle (僅對非預購單開放) */}
+                          {order.orderType !== 'prepayment' && order.orderType !== 'pickup' ? (
+                            <div className="flex rounded-lg overflow-hidden border border-coffee-100 text-[10px] font-bold">
+                              <button
+                                onClick={() => { updateOrderInDb(order.id, { deliveryMethod: '宅配' }); }}
+                                className={cn("px-2 py-1 transition-colors flex items-center gap-0.5", isDelivery ? "bg-blue-500 text-white" : "bg-white text-coffee-400 hover:bg-coffee-50")}
+                              ><Truck className="w-3 h-3"/>宅</button>
+                              <button
+                                onClick={() => { updateOrderInDb(order.id, { deliveryMethod: '自取' }); }}
+                                className={cn("px-2 py-1 transition-colors flex items-center gap-0.5", isPickup ? "bg-mint-brand text-white" : "bg-white text-coffee-400 hover:bg-coffee-50")}
+                              ><MapPin className="w-3 h-3"/>取</button>
+                            </div>
+                          ) : (
+                            <span className={cn(
+                              "text-[10px] font-bold px-2 py-0.5 rounded-full tracking-tighter shadow-sm border",
+                              order.orderType === 'prepayment' ? "bg-amber-50 text-amber-600 border-amber-200" : "bg-mint-50 text-mint-600 border-mint-200"
+                            )}>
+                              {order.orderType === 'prepayment' ? '🛍️ 預購付款' : '📍 預購取貨'}
+                            </span>
+                          )}
+
                           {/* 自取：已取/未取 toggle */}
                           {isPickup && (
                             <button
@@ -1746,6 +1897,7 @@ export default function DailyView({
                               )}
                             >{order.isPickedUp ? '✓ 已取貨' : '未取貨'}</button>
                           )}
+
                           {/* 宅配：收件人資訊 + 複製 */}
                           {isDelivery && (
                             <div className="w-full text-left space-y-0.5">
@@ -1778,6 +1930,25 @@ export default function DailyView({
                                   className="flex-shrink-0 p-0.5 text-blue-400 hover:text-blue-600 hover:bg-blue-50 rounded transition"
                                 ><Copy className="w-3 h-3"/></button>
                               </div>
+                            </div>
+                          )}
+
+                          {/* 預購/取貨：變更取貨日期 */}
+                          {(order.orderType === 'prepayment' || order.orderType === 'pickup') && !order.isPickedUp && (
+                            <div className="w-full mt-1 pt-1.5 border-t border-coffee-100 flex flex-col items-stretch gap-1">
+                              <span className="text-[9px] font-bold text-coffee-400 text-center">📅 變更取貨日</span>
+                              <input
+                                type="date"
+                                className="text-[10px] font-bold bg-white border border-coffee-200 rounded px-1.5 py-0.5 text-coffee-700 outline-none focus:border-coffee-400 text-center"
+                                value={order.pickupDate || ''}
+                                onChange={(e) => {
+                                  if (e.target.value) {
+                                    if (window.confirm(`確定要將取貨日期變更為 ${e.target.value} 嗎？\n系統將自動安全搬移取貨明細並更新報表。`)) {
+                                      handleChangePickupDate(order, e.target.value);
+                                    }
+                                  }
+                                }}
+                              />
                             </div>
                           )}
                         </div>
