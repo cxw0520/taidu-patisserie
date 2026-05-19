@@ -64,146 +64,152 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
   };
 
   const processImport = async () => {
-    const raw = importText.trim();
-    if (!raw) return alert("請貼上資料");
+    try {
+      const raw = importText.trim();
+      if (!raw) return alert("請貼上資料");
 
-    const Papa = (await import('papaparse')).default;
-    const { data } = Papa.parse(raw, { skipEmptyLines: 'greedy' });
-    const rows = data as string[][];
+      const Papa = (await import('papaparse')).default;
+      const { data } = Papa.parse(raw, { skipEmptyLines: 'greedy' });
+      const rows = data as string[][];
 
-    if (rows.length < 2) return alert("資料格式不正確 (需包含標題列)");
+      if (rows.length < 2) return alert("資料格式不正確 (需包含標題列)");
 
-    const headers = rows[0];
-    const dataRows = rows.slice(1);
+      const headers = rows[0];
+      const dataRows = rows.slice(1);
 
-    const getIdx = (keywords: string[]) => {
-      for (const k of keywords) {
-        const found = headers.findIndex(h => h.trim() === k);
-        if (found !== -1) return found;
-      }
-      return headers.findIndex(h => keywords.some(k => h.includes(k)));
-    };
-
-    const idxBuyer = getIdx(['訂購人姓名', '姓名']);
-    const idxPhone = getIdx(['訂購人電話', '電話', '聯絡電話']);
-    const idxAddr = getIdx(['宅配地址', '地址', '收件地址']);
-    const idxRecipientName = getIdx(['收件人姓名']);
-    const idxRecipientStatus = getIdx(['收件人']);
-    const idxRecipientPhone = getIdx(['收件人電話']);
-    const idxStoreDate = getIdx(['預約取貨日期', '店取', '取貨日']);
-    const idxShipDate = getIdx(['宅配出貨日', '出貨', '出貨日']);
-    const idxMethod = getIdx(['取貨方式', '物流', '運送方式']);
-    const idxEmail = getIdx(['電子郵件', '信箱', 'Email', 'email', 'e-mail']);
-
-    const itemMap: { item: any; colIdx: number }[] = [];
-    const allPossibleItems = [
-      ...(settings.giftItems || []),
-      ...(settings.singleItems || []),
-    ];
-
-    headers.forEach((h, colIdx) => {
-      const cleanH = h.trim();
-      const isGBHeader = cleanH.includes('禮盒') || cleanH.includes('盒');
-      const isSGHeader = cleanH.includes('單顆') || cleanH.includes('個');
-
-      let bestMatch = null;
-      if (isGBHeader) {
-        bestMatch = (settings.giftItems || []).find((i) => cleanH.includes(i.name) || i.name.includes(cleanH));
-        if (!bestMatch) {
-          if (cleanH.includes('綜合')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('綜合'));
-          if (cleanH.includes('原味')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('原味'));
-          if (cleanH.includes('伯爵')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('伯爵'));
-          if (cleanH.includes('可可')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('可可'));
-          if (cleanH.includes('抹茶')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('抹茶'));
+      const getIdx = (keywords: string[]) => {
+        for (const k of keywords) {
+          const found = headers.findIndex(h => h && typeof h === 'string' && h.trim() === k);
+          if (found !== -1) return found;
         }
-      } else if (isSGHeader) {
-        bestMatch = (settings.singleItems || []).find((i) => cleanH.includes(i.name) || i.name.includes(cleanH));
-        if (!bestMatch) {
-          if (cleanH.includes('原味')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('原味'));
-          if (cleanH.includes('伯爵')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('伯爵'));
-          if (cleanH.includes('可可')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('可可'));
-          if (cleanH.includes('抹茶')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('抹茶'));
-        }
-      }
+        return headers.findIndex(h => h && typeof h === 'string' && keywords.some(k => h.includes(k)));
+      };
 
-      if (!bestMatch) {
-        bestMatch = (settings.giftItems || []).find((i) => cleanH.includes(i.name)) || 
-                    (settings.singleItems || []).find((i) => cleanH.includes(i.name));
-      }
+      const idxBuyer = getIdx(['訂購人姓名', '姓名']);
+      const idxPhone = getIdx(['訂購人電話', '電話', '聯絡電話']);
+      const idxAddr = getIdx(['宅配地址', '地址', '收件地址']);
+      const idxRecipientName = getIdx(['收件人姓名']);
+      const idxRecipientStatus = getIdx(['收件人']);
+      const idxRecipientPhone = getIdx(['收件人電話']);
+      const idxStoreDate = getIdx(['預約取貨日期', '店取', '取貨日']);
+      const idxShipDate = getIdx(['宅配出貨日', '出貨', '出貨日']);
+      const idxMethod = getIdx(['取貨方式', '物流', '運送方式']);
+      const idxEmail = getIdx(['電子郵件', '信箱', 'Email', 'email', 'e-mail']);
 
-      if (bestMatch && !itemMap.some((m) => m.colIdx === colIdx)) {
-        itemMap.push({ item: bestMatch, colIdx });
-      }
-    });
+      const itemMap: { item: any; colIdx: number }[] = [];
+      const allPossibleItems = [
+        ...(settings.giftItems || []),
+        ...(settings.singleItems || []),
+      ];
 
-    const parsed: any[] = [];
-    dataRows.forEach((row) => {
-      if (!row.some(c => c)) return;
-      const rowStr = row.join('');
-      if (rowStr.includes('欄')) return; // Skip helper rows
+      headers.forEach((h, colIdx) => {
+        if (!h || typeof h !== 'string') return;
+        const cleanH = h.trim();
+        const isGBHeader = cleanH.includes('禮盒') || cleanH.includes('盒');
+        const isSGHeader = cleanH.includes('單顆') || cleanH.includes('個');
 
-      const method = idxMethod !== -1 && row[idxMethod] ? String(row[idxMethod]) : '';
-      let targetDate = '';
-      if (method && (method.includes('店') || method.includes('自取'))) {
-        targetDate = idxStoreDate !== -1 && row[idxStoreDate] ? String(row[idxStoreDate]) : '';
-      } else if (method && (method.includes('宅配') || method.includes('出貨') || method.includes('寄送'))) {
-        targetDate = idxShipDate !== -1 && row[idxShipDate] ? String(row[idxShipDate]) : '';
-      } else {
-        targetDate = (idxStoreDate !== -1 && row[idxStoreDate] ? String(row[idxStoreDate]) : '') || (idxShipDate !== -1 && row[idxShipDate] ? String(row[idxShipDate]) : '');
-      }
-
-      const parsedDate = parseDateFromCell(targetDate);
-      const d = parsedDate || normalizeDateKey(currentDate);
-      
-      const buyer = idxBuyer !== -1 && row[idxBuyer] ? String(row[idxBuyer]) : '未知';
-      const phone = idxPhone !== -1 && row[idxPhone] ? String(row[idxPhone]) : '';
-      const email = idxEmail !== -1 && row[idxEmail] ? String(row[idxEmail]).trim() : '';
-      const addr = idxAddr !== -1 && row[idxAddr] ? String(row[idxAddr]) : '';
-
-      const rNameRaw = idxRecipientName !== -1 ? String(row[idxRecipientName] || '').trim() : '';
-      const rStatusRaw = idxRecipientStatus !== -1 ? String(row[idxRecipientStatus] || '').trim() : '';
-      
-      let recipientName = '';
-      if (rNameRaw && !['與訂購人相同', '與訂購人不同'].includes(rNameRaw)) {
-        recipientName = rNameRaw;
-      } else if (rStatusRaw && !['與訂購人相同', '與訂購人不同'].includes(rStatusRaw)) {
-        recipientName = rStatusRaw;
-      } else {
-        recipientName = buyer;
-      }
-      
-      let recipientPhone = idxRecipientPhone !== -1 && row[idxRecipientPhone] ? String(row[idxRecipientPhone]) : '';
-      if (!recipientPhone) recipientPhone = phone;
-      
-      const items: Record<string, number> = {};
-      let prodAmt = 0;
-      itemMap.forEach(m => {
-        const val = row[m.colIdx];
-        if (val) {
-          const match = val.match(/(\d+)\s*份/) || val.match(/(\d+)/);
-          if (match) {
-            const qty = parseInt(match[1]);
-            if (qty > 0) {
-              items[m.item.id] = qty;
-              prodAmt += qty * m.item.price;
-            }
+        let bestMatch = null;
+        if (isGBHeader) {
+          bestMatch = (settings.giftItems || []).find((i) => cleanH.includes(i.name) || i.name.includes(cleanH));
+          if (!bestMatch) {
+            if (cleanH.includes('綜合')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('綜合'));
+            if (cleanH.includes('原味')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('原味'));
+            if (cleanH.includes('伯爵')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('伯爵'));
+            if (cleanH.includes('可可')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('可可'));
+            if (cleanH.includes('抹茶')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('抹茶'));
           }
+        } else if (isSGHeader) {
+          bestMatch = (settings.singleItems || []).find((i) => cleanH.includes(i.name) || i.name.includes(cleanH));
+          if (!bestMatch) {
+            if (cleanH.includes('原味')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('原味'));
+            if (cleanH.includes('伯爵')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('伯爵'));
+            if (cleanH.includes('可可')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('可可'));
+            if (cleanH.includes('抹茶')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('抹茶'));
+          }
+        }
+
+        if (!bestMatch) {
+          bestMatch = (settings.giftItems || []).find((i) => cleanH.includes(i.name)) || 
+                      (settings.singleItems || []).find((i) => cleanH.includes(i.name));
+        }
+
+        if (bestMatch && !itemMap.some((m) => m.colIdx === colIdx)) {
+          itemMap.push({ item: bestMatch, colIdx });
         }
       });
 
-      if (Object.keys(items).length > 0) {
+      const parsed: any[] = [];
+      dataRows.forEach((row) => {
+        if (!row.some(c => c)) return;
+        const rowStr = row.join('');
+        if (rowStr.includes('欄')) return; // Skip helper rows
+
+        const method = idxMethod !== -1 && row[idxMethod] ? String(row[idxMethod]) : '';
+        let targetDate = '';
+        if (method && (method.includes('店') || method.includes('自取'))) {
+          targetDate = idxStoreDate !== -1 && row[idxStoreDate] ? String(row[idxStoreDate]) : '';
+        } else if (method && (method.includes('宅配') || method.includes('出貨') || method.includes('寄送'))) {
+          targetDate = idxShipDate !== -1 && row[idxShipDate] ? String(row[idxShipDate]) : '';
+        } else {
+          targetDate = (idxStoreDate !== -1 && row[idxStoreDate] ? String(row[idxStoreDate]) : '') || (idxShipDate !== -1 && row[idxShipDate] ? String(row[idxShipDate]) : '');
+        }
+
+        const parsedDate = parseDateFromCell(targetDate);
+        const d = parsedDate || normalizeDateKey(currentDate);
+        
+        const buyer = idxBuyer !== -1 && row[idxBuyer] ? String(row[idxBuyer]) : '未知';
+        const phone = idxPhone !== -1 && row[idxPhone] ? String(row[idxPhone]) : '';
+        const email = idxEmail !== -1 && row[idxEmail] ? String(row[idxEmail]).trim() : '';
+        const addr = idxAddr !== -1 && row[idxAddr] ? String(row[idxAddr]) : '';
+
+        const rNameRaw = idxRecipientName !== -1 ? String(row[idxRecipientName] || '').trim() : '';
+        const rStatusRaw = idxRecipientStatus !== -1 ? String(row[idxRecipientStatus] || '').trim() : '';
+        
+        let recipientName = '';
+        if (rNameRaw && !['與訂購人相同', '與訂購人不同'].includes(rNameRaw)) {
+          recipientName = rNameRaw;
+        } else if (rStatusRaw && !['與訂購人相同', '與訂購人不同'].includes(rStatusRaw)) {
+          recipientName = rStatusRaw;
+        } else {
+          recipientName = buyer;
+        }
+        
+        let recipientPhone = idxRecipientPhone !== -1 && row[idxRecipientPhone] ? String(row[idxRecipientPhone]) : '';
+        if (!recipientPhone) recipientPhone = phone;
+        
+        const items: Record<string, number> = {};
+        let prodAmt = 0;
+        itemMap.forEach(m => {
+          const val = row[m.colIdx];
+          if (val) {
+            const match = val.match(/(\d+)\s*份/) || val.match(/(\d+)/);
+            if (match) {
+              const qty = parseInt(match[1]);
+              if (qty > 0) {
+                items[m.item.id] = qty;
+                prodAmt += qty * m.item.price;
+              }
+            }
+          }
+        });
+
+        if (Object.keys(items).length > 0) {
           parsed.push({
             date: d,
             buyer, phone, email, addr, recipientName, recipientPhone, items, prodAmt,
             method: method || ''
           });
         }
-    });
+      });
 
-    if (parsed.length === 0) {
-      alert("解析完成，但未找到有效訂單資料。請檢查標題列是否包含「姓名/電話/取貨方式/項目名稱」等關鍵字。");
+      if (parsed.length === 0) {
+        alert("解析完成，但未找到有效訂單資料。請檢查標題列是否包含「姓名/電話/取貨方式/項目名稱」等關鍵字。");
+      }
+      setParsedOrders(parsed);
+    } catch (err: any) {
+      console.error("解析錯誤:", err);
+      alert("解析資料時發生錯誤，請確認貼上資料的格式是否正確。錯誤原因: " + (err?.message || err));
     }
-    setParsedOrders(parsed);
   };
 
   const confirmImport = async () => {
