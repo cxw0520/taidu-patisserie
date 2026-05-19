@@ -100,7 +100,8 @@ export default function ExportModal({ onClose, entries, coa, selectedYear, purch
     } else if (contentType === 'is') {
       const displayModeName = costMode === 'purchases' ? '即期採購成本制' : '實際消耗成本制';
       filename = `${currentYear}年度_損益表_${displayModeName}`;
-      const balances = calculateBalances(entries, coa, new Date(currentYear, 0, 1), new Date(currentYear, 11, 31));
+      const filteredEntries = entries.filter(e => !e.isClosing);
+      const balances = calculateBalances(filteredEntries, coa, new Date(currentYear, 0, 1), new Date(currentYear, 11, 31));
       const revenue = Object.values(balances).filter(a => a.type === '收入');
       const cost = Object.values(balances).filter(a => a.type === '成本');
       const expense = Object.values(balances).filter(a => a.type === '費用');
@@ -215,7 +216,8 @@ export default function ExportModal({ onClose, entries, coa, selectedYear, purch
       const displayModeName = costMode === 'purchases' ? '即期採購成本制' : '實際消耗成本制';
       title = `損益表 (${displayModeName})`;
       
-      const balances = calculateBalances(entries, coa, new Date(currentYear, 0, 1), new Date(currentYear, 11, 31));
+      const filteredEntries = entries.filter(e => !e.isClosing);
+      const balances = calculateBalances(filteredEntries, coa, new Date(currentYear, 0, 1), new Date(currentYear, 11, 31));
       const revenue = Object.values(balances).filter(a => a.type === '收入');
       const cost = Object.values(balances).filter(a => a.type === '成本');
       const expense = Object.values(balances).filter(a => a.type === '費用');

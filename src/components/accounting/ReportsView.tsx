@@ -94,7 +94,9 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
   // IS Calculation
   const isLedger = useMemo<Record<string, AccountBalance>>(() => {
     const { start, end } = getFilterRange(isFilter, isCustomDates, selectedYear);
-    return calculateBalances(entries, coa, start, end);
+    // 過濾掉月底損益結轉傳票，避免虛帳戶在損益表統計中被清零
+    const filteredEntries = entries.filter(e => !e.isClosing);
+    return calculateBalances(filteredEntries, coa, start, end);
   }, [entries, coa, isFilter, isCustomDates, selectedYear]);
 
   // purchases total in selected range

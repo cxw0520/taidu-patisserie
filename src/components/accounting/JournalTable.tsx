@@ -22,6 +22,7 @@ function EntryForm({
 }) {
   const [date, setDate] = useState(initialData?.date || '');
   const [description, setDescription] = useState(initialData?.description || '');
+  const [isClosing, setIsClosing] = useState(initialData?.isClosing || false);
   const [lines, setLines] = useState<{accountId: string, amount: number, type: 'debit'|'credit', lineDescription: string}[]>(
     initialData?.lines.map(l => ({ ...l, amount: l.amount })) || [
     { accountId: '', amount: 0, type: 'debit', lineDescription: '' },
@@ -102,11 +103,13 @@ function EntryForm({
       lines: lines.map(l => ({
         ...l,
         accountName: coa.find(a => a.id === l.accountId)?.name || '未知名稱'
-      }))
+      })),
+      isClosing
     };
     onSave(entry);
     if (!initialData) {
       setDescription('');
+      setIsClosing(false);
       setLines([
         { accountId: '', amount: 0, type: 'debit', lineDescription: '' },
         { accountId: '', amount: 0, type: 'credit', lineDescription: '' }
@@ -131,6 +134,21 @@ function EntryForm({
             placeholder="例如：購買麵粉、今日營收..."
             className="w-full border rounded-lg p-2 focus:ring-2 focus:ring-coffee-300 outline-none" required
           />
+        </div>
+      </div>
+
+      {/* 月底結帳傳票標記開關 */}
+      <div className="flex items-center gap-3.5 bg-rose-50/20 hover:bg-rose-50/40 p-3.5 rounded-2xl border border-rose-100/30 transition-colors w-full">
+        <input 
+          type="checkbox" 
+          id="isClosing" 
+          checked={isClosing} 
+          onChange={e => setIsClosing(e.target.checked)}
+          className="w-4.5 h-4.5 text-rose-brand rounded focus:ring-rose-brand/30 border-coffee-250 cursor-pointer"
+        />
+        <div className="flex flex-col cursor-pointer select-none" onClick={() => setIsClosing(!isClosing)}>
+          <span className="text-xs font-extrabold text-coffee-800">📅 月底損益結轉傳票（結帳分錄）</span>
+          <span className="text-[10px] text-coffee-450 mt-0.5 font-medium">若勾選此項，系統會自動在「損益表」的營業額與費損統計中排除此傳票，以確保損益表不會被清零，且日記簿、分類帳與資產負債表能正常結轉平衡。</span>
         </div>
       </div>
 
