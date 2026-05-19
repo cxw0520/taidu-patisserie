@@ -7,7 +7,7 @@ import { uid, fmt, cn, parseNum } from '../lib/utils';
 import { Customer, CustomerPurchase, Settings, CreditLog } from '../types';
 import {
   Users, Plus, Search, Trash2, ChevronDown, ChevronRight,
-  Phone, Mail, StickyNote, ShoppingBag, X, Edit2, Check, Star, User, Database, MessageCircle, Cake, Tag, AlertTriangle, CreditCard, DollarSign, History
+  Phone, Mail, StickyNote, ShoppingBag, X, Edit2, Check, Star, User, Database, MessageCircle, Cake, Tag, AlertTriangle, CreditCard, DollarSign, History, Wrench
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -220,11 +220,111 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
   const [subTab, setSubTab] = useState<'list' | 'credit'>('list');
   const [creditAdjustModal, setCreditAdjustModal] = useState<Customer | null>(null);
   const [migrating, setMigrating] = useState(false);
+  const [fixing, setFixing] = useState(false);
   const [displayCount, setDisplayCount] = useState(50);
 
   useEffect(() => {
     setDisplayCount(50);
   }, [searchQ, subTab]);
+
+  const handleFixData = async () => {
+    if (!window.confirm('確定要執行「顧客資料一鍵校正與清洗」？\n這會自動掃描所有顧客的明細，移除重複訂單，並重新校對未付款餘額與消費總額。')) return;
+    setFixing(true);
+    try {
+      // 1. 取得所有日報表，收集所有訂單作為「真理之源」
+      const dailySnap = await getDocs(collection(db, 'shops', shopId, 'daily'));
+      const globalOrders = new Map<string, any>();
+      dailySnap.docs.forEach(docSnap => {
+        const data = docSnap.data();
+        const orders = data.orders || [];
+        orders.forEach((o: any) => {
+          if (o && o.id) globalOrders.set(o.id, o);
+        });
+      });
+
+      // 2. 進行校正
+      let fixCount = 0;
+      for (const c of customers) {
+        const purchases = c.purchases || [];
+        let needsUpdate = false;
+        const uniqueMap = new Map<string, any>();
+        
+        for (const p of purchases) {
+          if (!p.orderId) continue;
+          const realOrder = globalOrders.get(p.orderId);
+          let updatedP = { ...p };
+          
+          if (realOrder) {
+            if (p.status !== realOrder.status) {
+              updatedP.status = realOrder.status;
+              needsUpdate = true;
+            }
+            if (p.actualAmt !== realOrder.actualAmt) {
+              updatedP.actualAmt = realOrder.actualAmt;
+              needsUpdate = true;
+            }
+            if (p.prodAmt !== realOrder.prodAmt) {
+              updatedP.prodAmt = realOrder.prodAmt;
+              needsUpdate = true;
+            }
+          }
+
+          if (uniqueMap.has(p.orderId)) {
+            needsUpdate = true;
+            const existing = uniqueMap.get(p.orderId);
+            if (existing.status === '未結帳款' && updatedP.status !== '未結帳款') {
+              uniqueMap.set(p.orderId, updatedP);
+            }
+          } else {
+            uniqueMap.set(p.orderId, updatedP);
+          }
+        }
+
+        const cleanedPurchases = Array.from(uniqueMap.values());
+        
+        // 重新計算 unpaidBalance
+        let unpaidBalance = 0;
+        cleanedPurchases.forEach((p: any) => {
+          if (p.status === '未結帳款') {
+            unpaidBalance += Number(p.actualAmt || 0);
+          }
+        });
+
+        const totalPurchaseCount = cleanedPurchases.length;
+        const totalPurchaseAmt = cleanedPurchases.reduce((s: number, p: any) => s + Number(p.actualAmt || 0), 0);
+
+        const oldUnpaid = Number(c.unpaidBalance || 0);
+        const oldAmt = Number(c.totalPurchaseAmt || 0);
+        const oldCount = Number(c.totalPurchaseCount || 0);
+        const oldPurchasesCount = purchases.length;
+
+        if (
+          needsUpdate ||
+          oldUnpaid !== unpaidBalance ||
+          oldAmt !== totalPurchaseAmt ||
+          oldCount !== totalPurchaseCount ||
+          oldPurchasesCount !== cleanedPurchases.length
+        ) {
+          const updated = {
+            ...c,
+            purchases: cleanedPurchases,
+            unpaidBalance,
+            totalPurchaseCount,
+            totalPurchaseAmt,
+            updatedAt: new Date().toISOString()
+          };
+          await setDoc(doc(db, 'shops', shopId, 'customers', c.id), updated);
+          fixCount++;
+        }
+      }
+      alert(`🎉 校正完成！共成功修正了 ${fixCount} 位顧客的重複與未付款資料。`);
+    } catch (err: any) {
+      console.error(err);
+      alert(`❌ 校正失敗：${err.message || err}`);
+    } finally {
+      setFixing(false);
+    }
+  };
 
 
   const handleMigrate = async () => {
@@ -383,6 +483,14 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
               className="pl-9 pr-4 py-2 bg-white border border-coffee-100 rounded-xl text-sm font-bold text-coffee-700 outline-none focus:border-rose-brand w-48 sm:w-56"
             />
           </div>
+          <button
+            onClick={handleFixData}
+            disabled={fixing}
+            className="bg-amber-50 border border-amber-200 text-amber-700 px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-amber-100 transition shadow-sm disabled:opacity-50"
+          >
+            {fixing ? <span className="w-4 h-4 border-2 border-amber-600 border-t-transparent rounded-full animate-spin" /> : <Wrench className="w-4 h-4" />}
+            <span className="hidden sm:inline">{fixing ? '校正中...' : '一鍵校正資料'}</span>
+          </button>
           <button
             onClick={handleMigrate}
             disabled={migrating}
