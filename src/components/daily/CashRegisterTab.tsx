@@ -359,6 +359,18 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     const isCreditPayment = checkoutData.paymentMethod === '儲值金扣款';
     let creditBalanceAfter: number | undefined;
 
+    if (isCreditPayment) {
+      if (!selectedCust) {
+        alert('請先選取顧客再進行儲值金扣款結帳！');
+        return;
+      }
+      const currentBal = Number(selectedCust.creditBalance || 0);
+      if (currentBal < grandTotal) {
+        alert(`儲值金不足！目前餘額 $${currentBal}，需要 $${grandTotal}，請先至顧客資料加值，或更換付款方式。`);
+        return;
+      }
+    }
+
     // ── 1. Firestore Transaction for credit deduction ──────────────
     if (isCreditPayment && selectedCust && shopId) {
       try {

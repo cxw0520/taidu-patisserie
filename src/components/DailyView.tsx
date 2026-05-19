@@ -1076,14 +1076,28 @@ export default function DailyView({
     const targetKey = normalizeDateKey(currentDate);
     if (!loadedDateKey || loadedDateKey !== targetKey) return;
 
-    // 🌟 邏輯刪除：將 status 改為 '已取消'，而非物理刪除
-    setDailyData(prev => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        orders: (prev.orders || []).map(o => o.id === orderId ? { ...o, status: '已取消' } : o)
-      };
-    });
+    const currentOrder = dailyData?.orders?.find(o => o.id === orderId);
+    const isAlreadyCancelled = currentOrder?.status === '已取消' || currentOrder?.status === '已刪除';
+
+    if (isAlreadyCancelled) {
+      // 🌟 物理刪除
+      setDailyData(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          orders: (prev.orders || []).filter(o => o.id !== orderId)
+        };
+      });
+    } else {
+      // 🌟 邏輯刪除：將 status 改為 '已取消'
+      setDailyData(prev => {
+        if (!prev) return prev;
+        return {
+          ...prev,
+          orders: (prev.orders || []).map(o => o.id === orderId ? { ...o, status: '已取消' } : o)
+        };
+      });
+    }
 
     if (!shopId) return;
 
@@ -1108,14 +1122,16 @@ export default function DailyView({
           const sOrders = sData.orders || [];
           const idx = sOrders.findIndex((o: any) => o.id === orderId);
           if (idx >= 0) {
-            // 將訂單狀態設為 '已取消'
-            sOrders[idx] = { ...sOrders[idx], status: '已取消' };
+            if (isAlreadyCancelled) {
+              sOrders.splice(idx, 1);
+            } else {
+              sOrders[idx] = { ...sOrders[idx], status: '已取消' };
+            }
           }
           tx.set(docRef, { orders: sOrders, updateId: newUpdateId }, { merge: true });
         }
       }).then(() => {
-        // 🌟 異動成功後，將「已取消」狀態同步至 CRM，以沖銷儲值金或未付款餘額
-        const finalOrder = dailyData?.orders?.find(o => o.id === orderId);
+        const finalOrder = currentOrder;
         if (finalOrder && finalOrder.buyer && finalOrder.buyer !== '現客') {
           upsertCustomerFromOrder(shopId, customers, {
             orderId: finalOrder.id,
@@ -1126,7 +1142,7 @@ export default function DailyView({
             prodAmt: finalOrder.prodAmt,
             actualAmt: finalOrder.actualAmt,
             items: finalOrder.items,
-            status: '已取消', // 強制同步為已取消
+            status: isAlreadyCancelled ? '已物理刪除' : '已取消',
             source: finalOrder.source
           }, (candidates, resolve) => {
             setMergeConflict({ candidates, resolve });

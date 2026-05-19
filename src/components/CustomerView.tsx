@@ -117,7 +117,7 @@ export async function upsertCustomerFromOrder(
     if (freshCust) {
       const impact = getImpact(freshCust);
       const basePurchases = (freshCust.purchases || []).filter(p => p.orderId !== orderId);
-      const newPurchases = [...basePurchases, purchase];
+      const newPurchases = status === '已物理刪除' ? basePurchases : [...basePurchases, purchase];
       const validP = newPurchases.filter(p => p.status !== '已取消' && p.status !== '已刪除');
       const updated: Customer = {
         ...freshCust,
@@ -140,7 +140,7 @@ export async function upsertCustomerFromOrder(
     if (freshCust) {
       const impact = getImpact(freshCust);
       const basePurchases = (freshCust.purchases || []).filter(p => p.orderId !== orderId);
-      const newPurchases = [...basePurchases, purchase];
+      const newPurchases = status === 'Spacer' || status === '已物理刪除' ? basePurchases : [...basePurchases, purchase];
       const validP = newPurchases.filter(p => p.status !== '已取消' && p.status !== '已刪除');
       const updated: Customer = {
         ...freshCust,
@@ -157,8 +157,8 @@ export async function upsertCustomerFromOrder(
     return;
   }
 
-  const initialCount = (status === '已取消' || status === '已刪除') ? 0 : 1;
-  const initialAmtVal = (status === '已取消' || status === '已刪除') ? 0 : actualAmt;
+  const initialCount = (status === '已取消' || status === '已刪除' || status === '已物理刪除') ? 0 : 1;
+  const initialAmtVal = (status === '已取消' || status === '已刪除' || status === '已物理刪除') ? 0 : actualAmt;
 
   if (dups.length > 0) {
     // ask caller what to do
@@ -169,7 +169,7 @@ export async function upsertCustomerFromOrder(
           if (freshCust) {
             const impact = getImpact(freshCust);
             const basePurchases = (freshCust.purchases || []).filter(p => p.orderId !== orderId);
-            const newPurchases = [...basePurchases, purchase];
+            const newPurchases = status === '已物理刪除' ? basePurchases : [...basePurchases, purchase];
             const validP = newPurchases.filter(p => p.status !== '已取消' && p.status !== '已刪除');
             const updated: Customer = {
               ...freshCust,
