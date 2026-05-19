@@ -85,27 +85,49 @@ export function calcOrderFinancialImpact(
 export async function upsertCustomerFromOrder(
   shopId: string,
   allCustomers: Customer[],
-  orderInfo: { orderId: string; date: string; buyer: string; phone: string; email?: string; prodAmt: number; actualAmt: number; items: Record<string, number>; status: string },
+  orderInfo: { orderId: string; date: string; buyer: string; phone: string; email?: string; prodAmt: number; actualAmt: number; items: Record<string, number>; status: string; source?: string },
   onConflict: (matches: Customer[], resolve: (action: 'merge' | 'new', targetId?: string) => void) => void
 ): Promise<void> {
-  const { orderId, date, buyer, phone, email, prodAmt, actualAmt, items, status } = orderInfo;
+  const { orderId, date, buyer, phone, email, prodAmt, actualAmt, items, status, source } = orderInfo;
   const purchase: CustomerPurchase = { orderId, date, prodAmt, actualAmt, items, status };
   const { name: parsedName, gender: parsedGender } = parseNameAndGender(buyer);
+  const isPosSource = source === 'pos';
+
+  const getFreshCustomer = async (id: string): Promise<Customer | null> => {
+    const snap = await getDoc(doc(db, 'shops', shopId, 'customers', id));
+    return snap.exists() ? (snap.data() as Customer) : null;
+  };
+
+  const getImpact = (c: Partial<Customer>) => {
+    if (isPosSource) {
+      // 🌟 POS 交易在結帳時已自行透過 Transaction 處理完扣款/加值，CRM 僅記錄消費歷史，不做重複財務扣減
+      return {
+        creditBalance: Number(c.creditBalance || 0),
+        unpaidBalance: Number(c.unpaidBalance || 0),
+        creditLogs: c.creditLogs || []
+      };
+    }
+    return calcOrderFinancialImpact(c, orderId, actualAmt, status);
+  };
 
   // check if this order is already linked to a customer
   const alreadyLinked = allCustomers.find(c => c.purchases.some(p => p.orderId === orderId));
   if (alreadyLinked) {
-    // update amounts in place
-    const impact = calcOrderFinancialImpact(alreadyLinked, orderId, actualAmt, status);
-    const updated: Customer = {
-      ...alreadyLinked,
-      ...impact,
-      purchases: alreadyLinked.purchases.map(p => p.orderId === orderId ? purchase : p),
-      totalPurchaseCount: alreadyLinked.purchases.length,
-      totalPurchaseAmt: alreadyLinked.purchases.reduce((s, p) => s + (p.orderId === orderId ? actualAmt : p.actualAmt), 0),
-      updatedAt: new Date().toISOString(),
-    };
-    await setDoc(doc(db, 'shops', shopId, 'customers', alreadyLinked.id), updated);
+    const freshCust = await getFreshCustomer(alreadyLinked.id);
+    if (freshCust) {
+      const impact = getImpact(freshCust);
+      const basePurchases = (freshCust.purchases || []).filter(p => p.orderId !== orderId);
+      const newPurchases = [...basePurchases, purchase];
+      const updated: Customer = {
+        ...freshCust,
+        ...impact,
+        purchases: newPurchases,
+        totalPurchaseCount: newPurchases.length,
+        totalPurchaseAmt: newPurchases.reduce((s, p) => s + p.actualAmt, 0),
+        updatedAt: new Date().toISOString(),
+      };
+      await setDoc(doc(db, 'shops', shopId, 'customers', freshCust.id), updated);
+    }
     return;
   }
 
@@ -113,20 +135,23 @@ export async function upsertCustomerFromOrder(
 
   const exactMatch = dups.find(c => c.name === parsedName && normalizePhone(c.phone) === normalizePhone(phone));
   if (exactMatch) {
-    // Auto-merge if exact match found
-    const impact = calcOrderFinancialImpact(exactMatch, orderId, actualAmt, status);
-    const newPurchases = [...exactMatch.purchases, purchase];
-    const updated: Customer = {
-      ...exactMatch,
-      ...impact,
-      email: email || exactMatch.email,
-      gender: exactMatch.gender === '不選擇' && parsedGender !== '不選擇' ? parsedGender : exactMatch.gender,
-      purchases: newPurchases,
-      totalPurchaseCount: newPurchases.length,
-      totalPurchaseAmt: newPurchases.reduce((s, p) => s + p.actualAmt, 0),
-      updatedAt: new Date().toISOString(),
-    };
-    await setDoc(doc(db, 'shops', shopId, 'customers', exactMatch.id), updated);
+    const freshCust = await getFreshCustomer(exactMatch.id);
+    if (freshCust) {
+      const impact = getImpact(freshCust);
+      const basePurchases = (freshCust.purchases || []).filter(p => p.orderId !== orderId);
+      const newPurchases = [...basePurchases, purchase];
+      const updated: Customer = {
+        ...freshCust,
+        ...impact,
+        email: email || freshCust.email,
+        gender: freshCust.gender === '不選擇' && parsedGender !== '不選擇' ? parsedGender : freshCust.gender,
+        purchases: newPurchases,
+        totalPurchaseCount: newPurchases.length,
+        totalPurchaseAmt: newPurchases.reduce((s, p) => s + p.actualAmt, 0),
+        updatedAt: new Date().toISOString(),
+      };
+      await setDoc(doc(db, 'shops', shopId, 'customers', freshCust.id), updated);
+    }
     return;
   }
 
@@ -135,28 +160,31 @@ export async function upsertCustomerFromOrder(
     await new Promise<void>((resolve) => {
       onConflict(dups, async (action, targetId) => {
         if (action === 'merge' && targetId) {
-          const existing = allCustomers.find(c => c.id === targetId)!;
-          const impact = calcOrderFinancialImpact(existing, orderId, actualAmt, status);
-          const newPurchases = [...existing.purchases, purchase];
-          const updated: Customer = {
-            ...existing,
-            ...impact,
-            name: existing.name !== '未知' && existing.name ? existing.name : parsedName,
-            phone: phone || existing.phone,
-            email: email || existing.email,
-            gender: existing.gender === '不選擇' && parsedGender !== '不選擇' ? parsedGender : existing.gender,
-            purchases: newPurchases,
-            totalPurchaseCount: newPurchases.length,
-            totalPurchaseAmt: newPurchases.reduce((s, p) => s + p.actualAmt, 0),
-            updatedAt: new Date().toISOString(),
-          };
-          await setDoc(doc(db, 'shops', shopId, 'customers', existing.id), updated);
+          const freshCust = await getFreshCustomer(targetId);
+          if (freshCust) {
+            const impact = getImpact(freshCust);
+            const basePurchases = (freshCust.purchases || []).filter(p => p.orderId !== orderId);
+            const newPurchases = [...basePurchases, purchase];
+            const updated: Customer = {
+              ...freshCust,
+              ...impact,
+              name: freshCust.name !== '未知' && freshCust.name ? freshCust.name : parsedName,
+              phone: phone || freshCust.phone,
+              email: email || freshCust.email,
+              gender: freshCust.gender === '不選擇' && parsedGender !== '不選擇' ? parsedGender : freshCust.gender,
+              purchases: newPurchases,
+              totalPurchaseCount: newPurchases.length,
+              totalPurchaseAmt: newPurchases.reduce((s, p) => s + p.actualAmt, 0),
+              updatedAt: new Date().toISOString(),
+            };
+            await setDoc(doc(db, 'shops', shopId, 'customers', freshCust.id), updated);
+          }
         } else {
           // create new
           const newId = uid();
-          const impact = calcOrderFinancialImpact({}, orderId, actualAmt, status);
+          const impact = getImpact({});
           const newCustomer: Customer = {
-            id: newId, name: parsedName, phone, email, gender: parsedGender, createdAt: new Date().toISOString(),
+            id: newId, name: parsedName, phone, email: email || '', gender: parsedGender, createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(), purchases: [purchase],
             totalPurchaseCount: 1, totalPurchaseAmt: actualAmt,
             ...impact
@@ -168,7 +196,7 @@ export async function upsertCustomerFromOrder(
     });
   } else {
     const newId = uid();
-    const impact = calcOrderFinancialImpact({}, orderId, actualAmt, status);
+    const impact = getImpact({});
     const newCustomer: Customer = {
       id: newId, name: parsedName, phone, email: email || '', gender: parsedGender, createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(), purchases: [purchase],

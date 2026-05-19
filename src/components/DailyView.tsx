@@ -797,6 +797,7 @@ export default function DailyView({
 
     // 4. Side effects: packaging deduction + CRM (do NOT touch orders state)
     for (const order of sideEffectOrders) {
+      if (order.orderType === 'topup') continue; // 🌟 儲值訂單排除
       if (!order.pendingPickup) {
         await deductPackagingForOrder(order);
       }
@@ -810,7 +811,8 @@ export default function DailyView({
           prodAmt: order.prodAmt,
           actualAmt: order.actualAmt,
           items: order.items,
-          status: order.status
+          status: order.status,
+          source: order.source
         }, (candidates, resolve) => { setMergeConflict({ candidates, resolve }); });
       }
     }
@@ -876,6 +878,7 @@ export default function DailyView({
     targetData.orders = [...(targetData.orders || []), order];
     await setDoc(docRef, targetData, { merge: true });
 
+    if (order.orderType === 'topup') return; // 🌟 儲值訂單排除
     if (order.buyer && order.buyer !== '現客') {
       upsertCustomerFromOrder(shopId, customers, {
         orderId: order.id,
@@ -886,7 +889,8 @@ export default function DailyView({
         prodAmt: order.prodAmt,
         actualAmt: order.actualAmt,
         items: order.items,
-        status: order.status
+        status: order.status,
+        source: order.source
       }, (candidates, resolve) => {
         setMergeConflict({ candidates, resolve });
       });
@@ -950,6 +954,7 @@ export default function DailyView({
     }
     
     // CRM update
+    if (order.orderType === 'topup') return; // 🌟 儲值訂單排除
     if (order.buyer === '現客' && !order.phone) return;
     if (!order.buyer && !order.phone) return;
 
@@ -962,7 +967,8 @@ export default function DailyView({
       prodAmt: order.prodAmt,
       actualAmt: order.actualAmt,
       items: order.items,
-      status: order.status
+      status: order.status,
+      source: order.source
     }, (candidates, resolve) => {
       setMergeConflict({ candidates, resolve });
     });
@@ -1023,6 +1029,33 @@ export default function DailyView({
             });
             tx.set(docRef, { orders: sOrders, updateId: newUpdateId }, { merge: true });
           }
+        }).then(() => {
+          // 🌟 異動成功後，若更動了狀態、實收金額、購買人、電話或品項，則同步更新至 CRM 系統
+          Object.keys(patchesToApply).forEach(oId => {
+            const currentOrder = dailyData?.orders?.find(o => o.id === oId);
+            const patch = patchesToApply[oId];
+            const finalOrder = currentOrder ? { ...currentOrder, ...patch } : null;
+            
+            if (finalOrder && finalOrder.orderType !== 'topup') {
+              const hasCrmPatch = patch.status !== undefined || patch.actualAmt !== undefined || patch.buyer !== undefined || patch.phone !== undefined || patch.items !== undefined;
+              if (hasCrmPatch && finalOrder.buyer && finalOrder.buyer !== '現客') {
+                upsertCustomerFromOrder(shopId, customers, {
+                  orderId: finalOrder.id,
+                  date: currentDate,
+                  buyer: finalOrder.buyer,
+                  phone: finalOrder.phone || '',
+                  email: '',
+                  prodAmt: finalOrder.prodAmt,
+                  actualAmt: finalOrder.actualAmt,
+                  items: finalOrder.items,
+                  status: finalOrder.status,
+                  source: finalOrder.source
+                }, (candidates, resolve) => {
+                  setMergeConflict({ candidates, resolve });
+                });
+              }
+            }
+          });
         }).catch(e => {
           console.warn('Order update tx failed, queuing offline:', e);
           Object.keys(patchesToApply).forEach(oId => {
@@ -1853,12 +1886,14 @@ export default function DailyView({
                             order.status === '匯款' && "bg-blue-50 text-blue-600",
                             order.status === '現結' && "bg-green-50 text-green-600",
                             order.status === '未結帳款' && "bg-danger-brand/10 text-danger-brand",
-                            order.status === '公關品' && "bg-purple-50 text-purple-600"
+                            order.status === '公關品' && "bg-purple-50 text-purple-600",
+                            order.status === '儲值金扣款' && "bg-emerald-50 text-emerald-600"
                           )}>
                           <option value="匯款">匯款</option>
                           <option value="現結">現結</option>
                           <option value="未結帳款">未結</option>
                           <option value="公關品">公關</option>
+                          <option value="儲值金扣款">儲值金扣款</option>
                         </select>
                       </td>
                       {/* 配送方式 */}

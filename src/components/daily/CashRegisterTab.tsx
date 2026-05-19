@@ -1450,32 +1450,45 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                 <div className="p-7 space-y-4">
                   {/* Phone search */}
                   <div>
-                    <label className="text-xs font-bold text-coffee-400 mb-1.5 block">搜尋顧客電話</label>
+                    <label className="text-xs font-bold text-coffee-400 mb-1.5 block">搜尋顧客電話或姓名</label>
                     <input
-                      type="tel"
+                      type="text"
                       value={topupPhone}
                       onChange={e => {
-                        setTopupPhone(e.target.value);
-                        const found = customers.find(c => c.phone === e.target.value || c.phone?.includes(e.target.value));
-                        setTopupCust(e.target.value.length >= 4 && found ? found : null);
+                        const val = e.target.value;
+                        setTopupPhone(val);
+                        const valDigits = val.replace(/\D/g, '');
+                        const valLower = val.trim().toLowerCase();
+                        const found = customers.find(c => {
+                          const phoneMatch = valDigits && c.phone && c.phone.replace(/\D/g, '').includes(valDigits);
+                          const nameMatch = c.name.toLowerCase().includes(valLower);
+                          return phoneMatch || nameMatch;
+                        });
+                        setTopupCust(val.trim().length >= 2 && found ? found : null);
                       }}
-                      placeholder="輸入電話號碼"
+                      placeholder="輸入電話號碼或顧客姓名"
                       className="w-full px-4 py-3 bg-coffee-50 border border-coffee-100 rounded-xl text-sm font-bold text-coffee-700 outline-none focus:border-emerald-400"
                     />
                     {/* Live results */}
-                    {topupPhone.length >= 4 && (
+                    {topupPhone.trim().length >= 2 && (
                       <div className="mt-1.5 space-y-1">
-                        {customers.filter(c => (c.phone || '').includes(topupPhone)).slice(0, 4).map(c => (
+                        {customers.filter(c => {
+                          const valDigits = topupPhone.replace(/\D/g, '');
+                          const valLower = topupPhone.trim().toLowerCase();
+                          const phoneMatch = valDigits && (c.phone || '').replace(/\D/g, '').includes(valDigits);
+                          const nameMatch = c.name.toLowerCase().includes(valLower);
+                          return phoneMatch || nameMatch;
+                        }).slice(0, 4).map(c => (
                           <button
                             key={c.id}
-                            onClick={() => { setTopupCust(c); setTopupPhone(c.phone); }}
+                            onClick={() => { setTopupCust(c); setTopupPhone(c.phone || c.name); }}
                             className={cn(
                               'w-full text-left px-3 py-2 rounded-xl text-xs font-bold transition-all border',
                               topupCust?.id === c.id ? 'bg-emerald-50 border-emerald-300 text-emerald-800' : 'bg-white border-coffee-100 text-coffee-700 hover:border-coffee-300'
                             )}
                           >
                             <span>{c.name}</span>
-                            <span className="text-coffee-400 ml-2 font-mono">{c.phone}</span>
+                            <span className="text-coffee-400 ml-2 font-mono">{c.phone || '無電話'}</span>
                             <span className="ml-2 text-emerald-600">餘額 ${fmt(c.creditBalance || 0)}</span>
                           </button>
                         ))}
