@@ -118,12 +118,13 @@ export async function upsertCustomerFromOrder(
       const impact = getImpact(freshCust);
       const basePurchases = (freshCust.purchases || []).filter(p => p.orderId !== orderId);
       const newPurchases = [...basePurchases, purchase];
+      const validP = newPurchases.filter(p => p.status !== '已取消' && p.status !== '已刪除');
       const updated: Customer = {
         ...freshCust,
         ...impact,
         purchases: newPurchases,
-        totalPurchaseCount: newPurchases.length,
-        totalPurchaseAmt: newPurchases.reduce((s, p) => s + p.actualAmt, 0),
+        totalPurchaseCount: validP.length,
+        totalPurchaseAmt: validP.reduce((s, p) => s + Number(p.actualAmt || 0), 0),
         updatedAt: new Date().toISOString(),
       };
       await setDoc(doc(db, 'shops', shopId, 'customers', freshCust.id), updated);
@@ -140,20 +141,24 @@ export async function upsertCustomerFromOrder(
       const impact = getImpact(freshCust);
       const basePurchases = (freshCust.purchases || []).filter(p => p.orderId !== orderId);
       const newPurchases = [...basePurchases, purchase];
+      const validP = newPurchases.filter(p => p.status !== '已取消' && p.status !== '已刪除');
       const updated: Customer = {
         ...freshCust,
         ...impact,
         email: email || freshCust.email,
         gender: freshCust.gender === '不選擇' && parsedGender !== '不選擇' ? parsedGender : freshCust.gender,
         purchases: newPurchases,
-        totalPurchaseCount: newPurchases.length,
-        totalPurchaseAmt: newPurchases.reduce((s, p) => s + p.actualAmt, 0),
+        totalPurchaseCount: validP.length,
+        totalPurchaseAmt: validP.reduce((s, p) => s + Number(p.actualAmt || 0), 0),
         updatedAt: new Date().toISOString(),
       };
       await setDoc(doc(db, 'shops', shopId, 'customers', freshCust.id), updated);
     }
     return;
   }
+
+  const initialCount = (status === '已取消' || status === '已刪除') ? 0 : 1;
+  const initialAmtVal = (status === '已取消' || status === '已刪除') ? 0 : actualAmt;
 
   if (dups.length > 0) {
     // ask caller what to do
@@ -165,6 +170,7 @@ export async function upsertCustomerFromOrder(
             const impact = getImpact(freshCust);
             const basePurchases = (freshCust.purchases || []).filter(p => p.orderId !== orderId);
             const newPurchases = [...basePurchases, purchase];
+            const validP = newPurchases.filter(p => p.status !== '已取消' && p.status !== '已刪除');
             const updated: Customer = {
               ...freshCust,
               ...impact,
@@ -173,8 +179,8 @@ export async function upsertCustomerFromOrder(
               email: email || freshCust.email,
               gender: freshCust.gender === '不選擇' && parsedGender !== '不選擇' ? parsedGender : freshCust.gender,
               purchases: newPurchases,
-              totalPurchaseCount: newPurchases.length,
-              totalPurchaseAmt: newPurchases.reduce((s, p) => s + p.actualAmt, 0),
+              totalPurchaseCount: validP.length,
+              totalPurchaseAmt: validP.reduce((s, p) => s + Number(p.actualAmt || 0), 0),
               updatedAt: new Date().toISOString(),
             };
             await setDoc(doc(db, 'shops', shopId, 'customers', freshCust.id), updated);
@@ -186,7 +192,7 @@ export async function upsertCustomerFromOrder(
           const newCustomer: Customer = {
             id: newId, name: parsedName, phone, email: email || '', gender: parsedGender, createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString(), purchases: [purchase],
-            totalPurchaseCount: 1, totalPurchaseAmt: actualAmt,
+            totalPurchaseCount: initialCount, totalPurchaseAmt: initialAmtVal,
             ...impact
           };
           await setDoc(doc(db, 'shops', shopId, 'customers', newId), newCustomer);
@@ -200,7 +206,7 @@ export async function upsertCustomerFromOrder(
     const newCustomer: Customer = {
       id: newId, name: parsedName, phone, email: email || '', gender: parsedGender, createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(), purchases: [purchase],
-      totalPurchaseCount: 1, totalPurchaseAmt: actualAmt,
+      totalPurchaseCount: initialCount, totalPurchaseAmt: initialAmtVal,
       ...impact
     };
     await setDoc(doc(db, 'shops', shopId, 'customers', newId), newCustomer);
@@ -267,6 +273,12 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
               updatedP.prodAmt = realOrder.prodAmt;
               needsUpdate = true;
             }
+          } else {
+            // 🌟 物理刪除的訂單（即日報表已找不到），在校正時將其標記為 '已取消'，沖銷金額
+            if (p.status !== '已取消' && p.status !== '已刪除') {
+              updatedP.status = '已取消';
+              needsUpdate = true;
+            }
           }
 
           if (uniqueMap.has(p.orderId)) {
@@ -290,8 +302,10 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
           }
         });
 
-        const totalPurchaseCount = cleanedPurchases.length;
-        const totalPurchaseAmt = cleanedPurchases.reduce((s: number, p: any) => s + Number(p.actualAmt || 0), 0);
+        // 🌟 重新計算消費次數與金額時，完全排除已取消 / 已刪除的訂單金額
+        const validPurchases = cleanedPurchases.filter((p: any) => p.status !== '已取消' && p.status !== '已刪除');
+        const totalPurchaseCount = validPurchases.length;
+        const totalPurchaseAmt = validPurchases.reduce((s: number, p: any) => s + Number(p.actualAmt || 0), 0);
 
         const oldUnpaid = Number(c.unpaidBalance || 0);
         const oldAmt = Number(c.totalPurchaseAmt || 0);
@@ -696,28 +710,33 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
                           <p className="text-sm text-coffee-300 italic">尚無購買紀錄</p>
                         )}
                         <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-                          {[...c.purchases].sort((a, b) => b.date.localeCompare(a.date)).map((p, i) => (
-                            <div key={i} className="bg-white rounded-xl px-4 py-3 border border-coffee-100 flex justify-between items-start gap-4">
-                              <div className="min-w-0">
-                                <div className="text-xs font-bold text-coffee-400 font-mono">{p.date}</div>
-                                <div className="text-sm text-coffee-600 font-bold mt-0.5">
-                                  {Object.entries(p.items || {}).filter(([, q]) => Number(q) > 0).map(([id, q]) => `${getItemName(id)} ×${q}`).join('、') || '—'}
+                          {[...c.purchases].sort((a, b) => b.date.localeCompare(a.date)).map((p, i) => {
+                            const isDeleted = p.status === '已取消' || p.status === '已刪除';
+                            return (
+                              <div key={i} className={cn("bg-white rounded-xl px-4 py-3 border border-coffee-100 flex justify-between items-start gap-4", isDeleted && "bg-gray-50/80 text-gray-400 opacity-60 border-gray-200")}>
+                                <div className="min-w-0">
+                                  <div className={cn("text-xs font-bold text-coffee-400 font-mono", isDeleted && "line-through text-gray-400")}>{p.date}</div>
+                                  <div className={cn("text-sm text-coffee-600 font-bold mt-0.5", isDeleted && "line-through text-gray-400")}>
+                                    {Object.entries(p.items || {}).filter(([, q]) => Number(q) > 0).map(([id, q]) => `${getItemName(id)} ×${q}`).join('、') || '—'}
+                                  </div>
+                                  <div className="mt-1">
+                                    <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full",
+                                      p.status === '匯款' && 'bg-blue-50 text-blue-600',
+                                      p.status === '現結' && 'bg-green-50 text-green-600',
+                                      p.status === '未結帳款' && 'bg-red-50 text-red-500',
+                                      p.status === '公關品' && 'bg-purple-50 text-purple-600',
+                                      p.status === '儲值金扣款' && 'bg-emerald-50 text-emerald-700 border border-emerald-200/60',
+                                      isDeleted && 'bg-gray-200 text-gray-500 border border-gray-300'
+                                    )}>{p.status}</span>
+                                  </div>
                                 </div>
-                                <div className="mt-1">
-                                  <span className={cn("text-[10px] font-bold px-2 py-0.5 rounded-full",
-                                    p.status === '匯款' && 'bg-blue-50 text-blue-600',
-                                    p.status === '現結' && 'bg-green-50 text-green-600',
-                                    p.status === '未結帳款' && 'bg-red-50 text-red-500',
-                                    p.status === '公關品' && 'bg-purple-50 text-purple-600',
-                                    p.status === '儲值金扣款' && 'bg-emerald-50 text-emerald-700 border border-emerald-200/60',
-                                  )}>{p.status}</span>
+                                <div className="text-right flex-shrink-0">
+                                  <div className={cn("font-bold font-mono text-rose-brand", isDeleted ? "text-gray-400 line-through" : "")}>${fmt(p.actualAmt)}</div>
+                                  {isDeleted && <span className="text-[10px] block text-gray-400 font-bold mt-0.5">(已作廢)</span>}
                                 </div>
                               </div>
-                              <div className="text-right flex-shrink-0">
-                                <div className="font-bold font-mono text-rose-brand">${fmt(p.actualAmt)}</div>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     </div>

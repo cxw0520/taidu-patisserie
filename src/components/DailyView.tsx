@@ -134,7 +134,7 @@ export const applyOfflineActions = (baseData: DailyReport | null, actions: Offli
       result.orders = (result.orders || []).map(o => o.id === orderId ? { ...o, ...patch } : o);
     } else if (action.type === 'delete_order') {
       const { orderId } = action.payload;
-      result.orders = (result.orders || []).filter(o => o.id !== orderId);
+      result.orders = (result.orders || []).map(o => o.id === orderId ? { ...o, status: '已取消' } : o);
     } else if (action.type === 'update_daily') {
       const patch = action.payload;
       result = { 
@@ -1076,9 +1076,13 @@ export default function DailyView({
     const targetKey = normalizeDateKey(currentDate);
     if (!loadedDateKey || loadedDateKey !== targetKey) return;
 
+    // 🌟 邏輯刪除：將 status 改為 '已取消'，而非物理刪除
     setDailyData(prev => {
       if (!prev) return prev;
-      return { ...prev, orders: (prev.orders || []).filter(o => o.id !== orderId) };
+      return {
+        ...prev,
+        orders: (prev.orders || []).map(o => o.id === orderId ? { ...o, status: '已取消' } : o)
+      };
     });
 
     if (!shopId) return;
@@ -1100,10 +1104,36 @@ export default function DailyView({
         const docRef = doc(db, 'shops', shopId, 'daily', targetKey);
         const snap = await tx.get(docRef);
         if (snap.exists()) {
-           tx.set(docRef, { orders: (snap.data().orders || []).filter((o: any) => o.id !== orderId), updateId: newUpdateId }, { merge: true });
+          const sData = snap.data() as any;
+          const sOrders = sData.orders || [];
+          const idx = sOrders.findIndex((o: any) => o.id === orderId);
+          if (idx >= 0) {
+            // 將訂單狀態設為 '已取消'
+            sOrders[idx] = { ...sOrders[idx], status: '已取消' };
+          }
+          tx.set(docRef, { orders: sOrders, updateId: newUpdateId }, { merge: true });
+        }
+      }).then(() => {
+        // 🌟 異動成功後，將「已取消」狀態同步至 CRM，以沖銷儲值金或未付款餘額
+        const finalOrder = dailyData?.orders?.find(o => o.id === orderId);
+        if (finalOrder && finalOrder.buyer && finalOrder.buyer !== '現客') {
+          upsertCustomerFromOrder(shopId, customers, {
+            orderId: finalOrder.id,
+            date: currentDate,
+            buyer: finalOrder.buyer,
+            phone: finalOrder.phone || '',
+            email: '',
+            prodAmt: finalOrder.prodAmt,
+            actualAmt: finalOrder.actualAmt,
+            items: finalOrder.items,
+            status: '已取消', // 強制同步為已取消
+            source: finalOrder.source
+          }, (candidates, resolve) => {
+            setMergeConflict({ candidates, resolve });
+          });
         }
       }).catch(e => {
-        console.warn('Delete order tx failed, queuing offline:', e);
+        console.warn('Delete (cancel) order tx failed, queuing offline:', e);
         pushOfflineAction({
           id: uid(),
           type: 'delete_order',
@@ -1285,6 +1315,7 @@ export default function DailyView({
     const allGiftItems = [...(settings.giftItems || []), ...(settings.customCategories || []).flatMap(c => (c.items || []).filter((_, idx) => c.name.includes('禮盒') || c.id === 'gift'))]; // simplified logic to identify gifts in custom categories if needed
     
     dailyData.orders.forEach(o => {
+        if (o.status === '已取消' || o.status === '已刪除') return;
         const isPR = o.status === '公關品';
         m.rev += o.prodAmt; 
         m.disc += o.discAmt;
@@ -1818,12 +1849,13 @@ export default function DailyView({
                       const text = `${order.recipientName || order.buyer} / ${order.recipientPhone || order.phone} / ${order.address}`;
                       navigator.clipboard.writeText(text);
                     };
+                    const isCancelled = order.status === '已取消' || order.status === '已刪除';
                     return (
-                    <tr key={order.id} className="group hover:bg-coffee-50/50 transition-colors">
+                    <tr key={order.id} className={cn("group hover:bg-coffee-50/50 transition-colors", isCancelled && "opacity-60 bg-gray-50/85 text-gray-400 select-none line-through")}>
                       <td className="px-3 py-3 sticky left-0 z-10 bg-white/90 backdrop-blur-sm group-hover:bg-[#faf7f2]/90 border-r border-[#f0ede8]">
                         <div className="flex flex-col items-start gap-1">
                           <input
-                            className="w-20 md:w-28 bg-transparent font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
+                            className={cn("w-20 md:w-28 bg-transparent font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand", isCancelled && "text-gray-400 line-through")}
                             placeholder="姓名"
                             value={order.buyer}
                             onChange={(e) => { updateOrderInDb(order.id, { buyer: e.target.value }); }}
@@ -1836,6 +1868,11 @@ export default function DailyView({
                               "bg-gray-100 text-gray-400")}>
                               {order.source === 'pos' ? 'POS收銀' : order.source === 'import' ? '批量匯入' : order.source === 'manual' ? '手動新增' : '未知'}
                             </span>
+                            {isCancelled && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded-full font-bold bg-gray-200 text-gray-500 border border-gray-300 shadow-sm">
+                                ❌ 已取消
+                              </span>
+                            )}
                             {order.createdAt && (
                               <span className="text-[9px] text-coffee-300 font-mono tabular-nums" title={order.createdAt}>
                                 {new Date(order.createdAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit', hour12: false })}
@@ -1849,6 +1886,7 @@ export default function DailyView({
                           <input type="number"
                             className="w-12 bg-transparent text-center font-bold text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
                             value={order.items?.[i.id] || ''} placeholder="0"
+                            disabled={isCancelled}
                             onChange={(e) => { const num = parseNum(e.target.value); const newItems = { ...(order.items || {}), [i.id]: num }; let pAmt = 0; [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => { pAmt += (newItems[item.id] || 0) * item.price; }); updateOrderInDb(order.id, { items: newItems, prodAmt: pAmt, actualAmt: pAmt + (order.shipAmt || 0) - (order.discAmt || 0) }); }}
                           />
                         </td>
@@ -1858,6 +1896,7 @@ export default function DailyView({
                           <input type="number"
                             className="w-12 bg-transparent text-center font-bold text-coffee-600 outline-none border-b border-transparent focus:border-rose-brand"
                             value={order.items?.[i.id] || ''} placeholder="0"
+                            disabled={isCancelled}
                             onChange={(e) => { const num = parseNum(e.target.value); const newItems = { ...(order.items || {}), [i.id]: num }; let pAmt = 0; [...(settings.giftItems || []), ...(settings.singleItems || [])].forEach(item => { pAmt += (newItems[item.id] || 0) * item.price; }); updateOrderInDb(order.id, { items: newItems, prodAmt: pAmt, actualAmt: pAmt + (order.shipAmt || 0) - (order.discAmt || 0) }); }}
                           />
                         </td>
@@ -1867,6 +1906,7 @@ export default function DailyView({
                         <input type="number"
                           className="w-14 bg-transparent text-center font-mono font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
                           value={order.shipAmt || ''} placeholder="0"
+                          disabled={isCancelled}
                           onChange={(e) => { const num = parseNum(e.target.value); updateOrderInDb(order.id, { shipAmt: num, actualAmt: (order.prodAmt || 0) + (order.shipAmt || 0) - (order.discAmt || 0) + (num - (order.shipAmt || 0)) }); }}
                         />
                       </td>
@@ -1874,6 +1914,7 @@ export default function DailyView({
                         <input type="number"
                           className="w-14 bg-transparent text-center font-mono font-bold text-rose-brand outline-none border-b border-transparent focus:border-rose-brand"
                           value={order.discAmt || ''} placeholder="0"
+                          disabled={isCancelled}
                           onChange={(e) => { const num = parseNum(e.target.value); updateOrderInDb(order.id, { discAmt: num, actualAmt: (order.prodAmt || 0) + (order.shipAmt || 0) - (order.discAmt || 0) + (num - (order.discAmt || 0)) }); }}
                         />
                       </td>
@@ -1887,13 +1928,15 @@ export default function DailyView({
                             order.status === '現結' && "bg-green-50 text-green-600",
                             order.status === '未結帳款' && "bg-danger-brand/10 text-danger-brand",
                             order.status === '公關品' && "bg-purple-50 text-purple-600",
-                            order.status === '儲值金扣款' && "bg-emerald-50 text-emerald-600"
+                            order.status === '儲值金扣款' && "bg-emerald-50 text-emerald-600",
+                            isCancelled && "bg-gray-100 text-gray-500 line-through border border-gray-300"
                           )}>
                           <option value="匯款">匯款</option>
                           <option value="現結">現結</option>
                           <option value="未結帳款">未結</option>
                           <option value="公關品">公關</option>
                           <option value="儲值金扣款">儲值金扣款</option>
+                          <option value="已取消">已取消</option>
                         </select>
                       </td>
                       {/* 配送方式 */}
