@@ -35,15 +35,32 @@ export interface AppliedPromo {
 
 export function calculateCartPricing(
   cart: { item: Item; qty: number }[],
+  loadedOrders: LoadedOrder[] = [],
+  allItems: Item[] = [],
   promoRules: any[] = []
 ) {
-  const subtotal = cart.reduce((sum, entry) => sum + (entry.item.price * entry.qty), 0);
+  const cartSubtotal = cart.reduce((sum, entry) => sum + (entry.item.price * entry.qty), 0);
 
   let itemsPool: any[] = [];
+  
+  // 1. 展開現場購物車
   cart.forEach(entry => {
     for (let i = 0; i < entry.qty; i++) {
       itemsPool.push({ ...entry.item });
     }
+  });
+
+  // 2. 展開既有載入訂單商品
+  loadedOrders.forEach(lo => {
+    const orderItems = lo.order.items || {};
+    Object.entries(orderItems).forEach(([itemId, qty]) => {
+      const matchItem = allItems.find(it => it.id === itemId);
+      if (matchItem) {
+        for (let i = 0; i < qty; i++) {
+          itemsPool.push({ ...matchItem });
+        }
+      }
+    });
   });
 
   const activeRules = (promoRules || [])
@@ -54,7 +71,6 @@ export function calculateCartPricing(
   activeRules.sort((a, b) => a.comboPrice - b.comboPrice);
 
   const appliedPromos: AppliedPromo[] = [];
-  let finalTotal = 0;
 
   activeRules.forEach(rule => {
     let matchCount = 0;
@@ -90,7 +106,6 @@ export function calculateCartPricing(
       }
 
       matchCount++;
-      finalTotal += rule.comboPrice;
       const originalPairPrice = baseItem.price + targetItem.price;
       ruleDiscountTotal += Math.max(0, originalPairPrice - rule.comboPrice);
     }
@@ -106,16 +121,11 @@ export function calculateCartPricing(
     }
   });
 
-  itemsPool.forEach(it => {
-    finalTotal += it.price;
-  });
-
-  const discount = Math.max(0, subtotal - finalTotal);
+  const totalDiscount = appliedPromos.reduce((sum, p) => sum + p.discountAmt, 0);
 
   return {
-    subtotal,
-    finalTotal,
-    discount,
+    cartSubtotal,
+    discount: totalDiscount,
     appliedPromos
   };
 }
@@ -196,11 +206,16 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     expenses: []
   };
 
-  const cartPricing = useMemo(() => 
-    calculateCartPricing(cart, settings?.promoRules || [])
-  , [cart, settings?.promoRules]);
+  const allItemsList = useMemo(() => [
+    ...(settings?.giftItems || []),
+    ...(settings?.singleItems || [])
+  ], [settings]);
 
-  const totalNewItemsAmt = cartPricing.finalTotal;
+  const cartPricing = useMemo(() => 
+    calculateCartPricing(cart, loadedOrders, allItemsList, settings?.promoRules || [])
+  , [cart, loadedOrders, allItemsList, settings?.promoRules]);
+
+  const totalNewItemsAmt = Math.max(0, cartPricing.cartSubtotal - cartPricing.discount);
 
   // Amount still owed from loaded orders (unpaid ones)
   const totalLoadedUnpaid = useMemo(() =>
@@ -208,7 +223,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   , [loadedOrders]);
 
   // Grand total to collect
-  const totalCartAmt = totalNewItemsAmt + totalLoadedUnpaid;
+  const totalCartAmt = Math.max(0, (cartPricing.cartSubtotal + totalLoadedUnpaid) - cartPricing.discount);
   const finalDueAmount = totalCartAmt - checkoutData.discAmt;
 
   const addToCart = (item: Item) => {
@@ -380,13 +395,13 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     }
 
     const totalDiscAmt = cartPricing.discount + checkoutData.discAmt;
-    const finalActualAmt = Math.max(0, cartPricing.subtotal - totalDiscAmt);
+    const finalActualAmt = Math.max(0, cartPricing.cartSubtotal - totalDiscAmt);
     const promoNotes = cartPricing.appliedPromos.map(ap => `${ap.ruleName} × ${ap.count}`).join(', ');
 
     // ── 2 & 3. Atomically update orders based on the freshest prev state ─────
     const newNormalOrder: Order | null = (cart.length > 0 && !isFuturePickup) ? {
       id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
-      address: '', items: orderItems, prodAmt: cartPricing.subtotal, shipAmt: 0,
+      address: '', items: orderItems, prodAmt: cartPricing.cartSubtotal, shipAmt: 0,
       discAmt: totalDiscAmt, actualAmt: finalActualAmt,
       status: checkoutData.paymentMethod,
       note: `收銀機交易 - ${checkoutData.paymentMethod}${promoNotes ? ` (套用優惠: ${promoNotes})` : ''}`,
@@ -1208,7 +1223,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                   </div>
                   <div className="flex justify-between text-xs font-bold text-coffee-400">
                     <span>新增品項原價</span>
-                    <span className="font-mono">${fmt(cartPricing.subtotal)}</span>
+                    <span className="font-mono">${fmt(cartPricing.cartSubtotal)}</span>
                   </div>
                   {cartPricing.discount > 0 && (
                     <div className="flex justify-between text-xs font-bold text-emerald-600">
@@ -1222,7 +1237,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               {loadedOrders.length === 0 && cart.length > 0 && cartPricing.discount > 0 && (
                 <div className="flex justify-between text-xs font-bold text-coffee-400 border-b border-coffee-50 pb-2">
                   <span>商品原價小計</span>
-                  <span className="font-mono">${fmt(cartPricing.subtotal)}</span>
+                  <span className="font-mono">${fmt(cartPricing.cartSubtotal)}</span>
                 </div>
               )}
 
@@ -1389,7 +1404,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
                     <div className="p-4 bg-coffee-50 rounded-2xl space-y-2">
                       <div className="flex justify-between text-xs font-bold text-coffee-400">
-                        <span>商品原價小計</span><span className="font-mono">${fmt(cartPricing.subtotal)}</span>
+                        <span>商品原價小計</span><span className="font-mono">${fmt(cartPricing.cartSubtotal)}</span>
                       </div>
                       {cartPricing.discount > 0 && (
                         <div className="flex justify-between text-xs font-bold text-emerald-600">
