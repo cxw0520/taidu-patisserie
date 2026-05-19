@@ -41,7 +41,9 @@ const PERMISSION_LABELS: Record<keyof Permissions, string> = {
 
 export default function SettingsView({ shopId, roles, operators, settings }: Props) {
   const today = new Date();
-  const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators' | 'business_days' | 'operations' | 'hr_rules' | 'finance' | 'accounting' | 'multi_account'>('operators');
+  const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators' | 'business_days' | 'operations' | 'hr_rules' | 'finance' | 'accounting' | 'multi_account' | 'promo_rules'>('operators');
+  const [promoRules, setPromoRules] = useState<any[]>(settings?.promoRules || []);
+  const [editingRule, setEditingRule] = useState<any | null>(null);
   
   // Multi-account link state
   const [targetShopIdInput, setTargetShopIdInput] = useState('');
@@ -122,7 +124,8 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
       timeRoundingInterval, lateGracePeriod, earlyLeaveTolerance,
       overtimeTier1Hours, overtimeTier1Rate, overtimeTier2Hours, overtimeTier2Rate, holidayPayRate,
       estimatedMonthlyRent, estimatedMonthlyUtilities, estimatedMonthlyPayroll,
-      fundingSources, expenseCategories, paymentMethods
+      fundingSources, expenseCategories, paymentMethods,
+      promoRules // 🌟 包含優惠活動規則
     };
     await setDoc(doc(db, 'shops', shopId), { shopName, logo: logoBase64 }, { merge: true });
     await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), payload, { merge: true });
@@ -257,6 +260,9 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
         </button>
         <button onClick={() => setActiveTab('multi_account')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'multi_account' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
           🔗 多帳號連動管理
+        </button>
+        <button onClick={() => setActiveTab('promo_rules')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'promo_rules' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
+          🎁 優惠組合設定
         </button>
       </div>
 
@@ -988,6 +994,221 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
             <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-8">
               <Save className="w-5 h-5" /> 儲存設定
             </button>
+          </div>
+        )}
+
+        {activeTab === 'promo_rules' && (
+          <div className="space-y-6">
+            <div className="flex justify-between items-center bg-white p-6 rounded-3xl shadow-sm border border-coffee-100">
+              <div>
+                <h2 className="text-xl font-bold text-coffee-800">🎁 優惠活動組合設定</h2>
+                <p className="text-sm text-coffee-400 mt-1">設定「商品 A + 商品 B」的組合優惠活動，商品 B 可多選，結帳時將自動匹配最划算組合。</p>
+              </div>
+              <button 
+                onClick={() => setEditingRule({ id: '', name: '', active: true, baseItemId: '', targetGroupItemIds: [], comboPrice: 0 })}
+                className="px-4 py-2 bg-rose-brand text-white font-bold rounded-xl shadow-md hover:bg-rose-brand/90 transition flex items-center gap-2"
+              >
+                <Plus className="w-5 h-5" /> 新增優惠組合
+              </button>
+            </div>
+
+            {editingRule && (
+              <div className="bg-rose-50/30 p-6 rounded-3xl border border-rose-100 shadow-sm space-y-6">
+                <div className="flex justify-between items-center pb-3 border-b border-rose-100/50">
+                  <h3 className="text-lg font-bold text-coffee-800">{editingRule.id ? '編輯優惠組合' : '新增優惠組合'}</h3>
+                  <button onClick={() => setEditingRule(null)} className="text-gray-400 hover:text-gray-600"><X className="w-6 h-6"/></button>
+                </div>
+                
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* 基本資訊 */}
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-bold text-coffee-700 mb-2">優惠活動名稱</label>
+                      <input 
+                        type="text" 
+                        value={editingRule.name} 
+                        onChange={e => setEditingRule({...editingRule, name: e.target.value})} 
+                        className="w-full border border-coffee-200 bg-white rounded-xl p-3 focus:ring-2 focus:ring-rose-brand outline-none" 
+                        placeholder="例如：切片蛋糕+茶飲組合價" 
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-bold text-coffee-700 mb-2">選取主商品 A</label>
+                      <select 
+                        value={editingRule.baseItemId} 
+                        onChange={e => setEditingRule({...editingRule, baseItemId: e.target.value})} 
+                        className="w-full border border-coffee-200 bg-white rounded-xl p-3 focus:ring-2 focus:ring-rose-brand outline-none font-bold text-coffee-700"
+                      >
+                        <option value="" disabled>請選取主商品...</option>
+                        {[...(settings?.giftItems || []), ...(settings?.singleItems || [])].filter(i => i.active).map(i => (
+                          <option key={i.id} value={i.id}>{i.name} (${i.price})</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-bold text-coffee-700 mb-2">優惠組合總價 (元)</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">$</span>
+                        <input 
+                          type="number" 
+                          value={editingRule.comboPrice || ''} 
+                          onChange={e => setEditingRule({...editingRule, comboPrice: Number(e.target.value)})} 
+                          className="w-full pl-8 pr-3 py-3 border border-coffee-200 bg-white rounded-xl focus:ring-2 focus:ring-rose-brand outline-none font-mono font-bold text-coffee-800" 
+                          placeholder="例如 250" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="flex items-center">
+                      <label className="flex items-center gap-2.5 cursor-pointer p-3 border border-coffee-200 rounded-xl bg-white select-none hover:bg-coffee-50 transition-all">
+                        <input 
+                          type="checkbox" 
+                          checked={editingRule.active} 
+                          onChange={e => setEditingRule({...editingRule, active: e.target.checked})} 
+                          className="w-5 h-5 text-rose-brand rounded focus:ring-rose-brand cursor-pointer" 
+                        />
+                        <div>
+                          <span className="font-bold text-xs text-coffee-800 block">啟用此活動</span>
+                          <span className="text-[9px] text-coffee-400 font-normal">勾選後收銀機會自動執行匹配</span>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 組合商品 B 多選區 */}
+                  <div className="space-y-3">
+                    <label className="block text-sm font-bold text-coffee-700">選取搭配商品 B (可多選，購物車中任一品項皆可成組)</label>
+                    <div className="border border-coffee-100 rounded-2xl p-4 bg-white max-h-[320px] overflow-y-auto space-y-2">
+                      {[...(settings?.giftItems || []), ...(settings?.singleItems || [])]
+                        .filter(i => i.active && i.id !== editingRule.baseItemId)
+                        .map(i => {
+                          const isChecked = editingRule.targetGroupItemIds.includes(i.id);
+                          return (
+                            <label key={i.id} className={cn("flex items-center justify-between p-2.5 rounded-xl border cursor-pointer hover:bg-coffee-50 transition-all", isChecked ? "border-rose-300 bg-rose-50/20" : "border-coffee-50")}>
+                              <div className="flex items-center gap-2">
+                                <input 
+                                  type="checkbox" 
+                                  checked={isChecked} 
+                                  onChange={e => {
+                                    const ids = [...editingRule.targetGroupItemIds];
+                                    if (e.target.checked) {
+                                      ids.push(i.id);
+                                    } else {
+                                      const idx = ids.indexOf(i.id);
+                                      if (idx >= 0) ids.splice(idx, 1);
+                                    }
+                                    setEditingRule({ ...editingRule, targetGroupItemIds: ids });
+                                  }}
+                                  className="w-4 h-4 text-rose-brand rounded focus:ring-rose-brand cursor-pointer" 
+                                />
+                                <span className="text-xs font-bold text-coffee-800">{i.name}</span>
+                              </div>
+                              <span className="text-xs font-mono font-bold text-coffee-400">${i.price}</span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="pt-4 border-t border-rose-100 flex gap-3">
+                  <button 
+                    onClick={async () => {
+                      if (!editingRule.name.trim() || !editingRule.baseItemId || editingRule.targetGroupItemIds.length === 0 || editingRule.comboPrice <= 0) {
+                        alert('請填寫完整資訊 (名稱、主商品、至少一個搭配商品、組合價)！');
+                        return;
+                      }
+                      let nextRules = [...promoRules];
+                      if (editingRule.id) {
+                        nextRules = nextRules.map(r => r.id === editingRule.id ? editingRule : r);
+                      } else {
+                        nextRules.push({ ...editingRule, id: uid() });
+                      }
+                      setPromoRules(nextRules);
+                      setEditingRule(null);
+                      // 同步寫入 Firestore
+                      const payload = {
+                        ...settings,
+                        promoRules: nextRules
+                      };
+                      await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), payload, { merge: true });
+                      alert('優惠組合已成功儲存！');
+                    }}
+                    className="px-6 py-3 bg-rose-brand text-white font-bold rounded-xl shadow-md hover:bg-rose-brand/90 transition flex-1 md:flex-none"
+                  >
+                    儲存組合設定
+                  </button>
+                  <button 
+                    onClick={() => setEditingRule(null)}
+                    className="px-6 py-3 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold rounded-xl transition flex-1 md:flex-none"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 組合列表 */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {promoRules.length === 0 ? (
+                <div className="col-span-full bg-white p-12 text-center rounded-3xl border border-coffee-100">
+                  <span className="text-gray-400 font-bold">目前尚未建立任何優惠活動組合，請點擊右上角新增。</span>
+                </div>
+              ) : (
+                promoRules.map((rule: any) => {
+                  const baseName = [...(settings?.giftItems || []), ...(settings?.singleItems || [])].find(i => i.id === rule.baseItemId)?.name || rule.baseItemId;
+                  const targetNames = rule.targetGroupItemIds.map((id: string) => [...(settings?.giftItems || []), ...(settings?.singleItems || [])].find(i => i.id === id)?.name || id).join('、');
+                  return (
+                    <div key={rule.id} className="bg-white p-6 rounded-3xl shadow-sm border border-coffee-100 flex flex-col justify-between h-full relative group hover:shadow-md transition-all">
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <h3 className="font-bold text-coffee-800 text-base">{rule.name}</h3>
+                            <span onClick={async () => {
+                              const nextRules = promoRules.map((r: any) => r.id === rule.id ? { ...r, active: !r.active } : r);
+                              setPromoRules(nextRules);
+                              await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), { ...settings, promoRules: nextRules }, { merge: true });
+                            }} className={cn("inline-block text-[10px] font-bold px-2 py-0.5 mt-2 rounded-full cursor-pointer transition-all border", 
+                              rule.active ? "bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100" : "bg-gray-50 text-gray-400 border-gray-200 hover:bg-gray-100")}>
+                              {rule.active ? '● 啟用中' : '○ 已關閉'}
+                            </span>
+                          </div>
+                          <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button onClick={() => setEditingRule(rule)} className="p-1.5 text-blue-500 hover:bg-blue-50 rounded-lg"><Edit2 className="w-4 h-4"/></button>
+                            <button onClick={async () => {
+                              if (confirm('確定要刪除此優惠活動嗎？')) {
+                                const nextRules = promoRules.filter((r: any) => r.id !== rule.id);
+                                setPromoRules(nextRules);
+                                await setDoc(doc(db, 'shops', shopId, 'meta', 'settings'), { ...settings, promoRules: nextRules }, { merge: true });
+                                alert('已刪除優惠組合！');
+                              }
+                            }} className="p-1.5 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                          </div>
+                        </div>
+
+                        <div className="space-y-2 text-xs">
+                          <div className="flex items-start gap-1">
+                            <span className="font-bold text-coffee-400 flex-shrink-0">主商品 A：</span>
+                            <span className="font-bold text-coffee-700">{baseName}</span>
+                          </div>
+                          <div className="flex items-start gap-1">
+                            <span className="font-bold text-coffee-400 flex-shrink-0">搭配商品 B：</span>
+                            <span className="font-bold text-coffee-600 leading-relaxed">{targetNames || '無商品'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-6 pt-4 border-t border-coffee-50 flex items-center justify-between">
+                        <span className="text-xs font-bold text-coffee-400">組合價</span>
+                        <span className="text-xl font-mono font-bold text-rose-brand">${rule.comboPrice}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
         )}
       </div>

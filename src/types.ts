@@ -248,11 +248,21 @@ export interface CustomCategory {
   items: Item[];
 }
 
+export interface PromoRule {
+  id: string;
+  name: string;
+  active: boolean;
+  baseItemId: string;
+  targetGroupItemIds: string[];
+  comboPrice: number;
+}
+
 export interface Settings {
   giftItems: Item[];
   singleItems: Item[];
   packagingItems: Item[];
   customCategories?: CustomCategory[];
+  promoRules?: PromoRule[]; // 優惠活動組合規則
   logo?: string;
   shopName?: string;
   legalName?: string;

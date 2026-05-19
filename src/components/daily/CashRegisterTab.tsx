@@ -25,6 +25,101 @@ import CustomerAutocomplete from './CustomerAutocomplete';
 import OrderSearchModal, { LoadedOrder, isPaidStatus } from './OrderSearchModal';
 import { db } from '../../lib/firebase';
 import { doc, runTransaction } from 'firebase/firestore';
+export interface AppliedPromo {
+  ruleId: string;
+  ruleName: string;
+  count: number;
+  discountAmt: number;
+  comboPrice: number;
+}
+
+export function calculateCartPricing(
+  cart: { item: Item; qty: number }[],
+  promoRules: any[] = []
+) {
+  const subtotal = cart.reduce((sum, entry) => sum + (entry.item.price * entry.qty), 0);
+
+  let itemsPool: any[] = [];
+  cart.forEach(entry => {
+    for (let i = 0; i < entry.qty; i++) {
+      itemsPool.push({ ...entry.item });
+    }
+  });
+
+  const activeRules = (promoRules || [])
+    .filter(r => r.active)
+    .map(r => ({ ...r }));
+
+  // 按組合優惠價升序排序，使低組合價優先成組
+  activeRules.sort((a, b) => a.comboPrice - b.comboPrice);
+
+  const appliedPromos: AppliedPromo[] = [];
+  let finalTotal = 0;
+
+  activeRules.forEach(rule => {
+    let matchCount = 0;
+    let ruleDiscountTotal = 0;
+
+    while (true) {
+      const baseIdx = itemsPool.findIndex(it => it.id === rule.baseItemId);
+      if (baseIdx === -1) break;
+
+      let bestTargetIdx = -1;
+      let maxTargetPrice = -1;
+      
+      itemsPool.forEach((it, idx) => {
+        if (rule.targetGroupItemIds.includes(it.id)) {
+          if (it.price > maxTargetPrice) {
+            maxTargetPrice = it.price;
+            bestTargetIdx = idx;
+          }
+        }
+      });
+
+      if (bestTargetIdx === -1) break;
+
+      const baseItem = itemsPool[baseIdx];
+      const targetItem = itemsPool[bestTargetIdx];
+
+      if (baseIdx > bestTargetIdx) {
+        itemsPool.splice(baseIdx, 1);
+        itemsPool.splice(bestTargetIdx, 1);
+      } else {
+        itemsPool.splice(bestTargetIdx, 1);
+        itemsPool.splice(baseIdx, 1);
+      }
+
+      matchCount++;
+      finalTotal += rule.comboPrice;
+      const originalPairPrice = baseItem.price + targetItem.price;
+      ruleDiscountTotal += Math.max(0, originalPairPrice - rule.comboPrice);
+    }
+
+    if (matchCount > 0) {
+      appliedPromos.push({
+        ruleId: rule.id,
+        ruleName: rule.name,
+        count: matchCount,
+        discountAmt: ruleDiscountTotal,
+        comboPrice: rule.comboPrice
+      });
+    }
+  });
+
+  itemsPool.forEach(it => {
+    finalTotal += it.price;
+  });
+
+  const discount = Math.max(0, subtotal - finalTotal);
+
+  return {
+    subtotal,
+    finalTotal,
+    discount,
+    appliedPromos
+  };
+}
+
 
 interface CashRegisterTabProps {
   dailyData: DailyReport;
@@ -101,9 +196,11 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     expenses: []
   };
 
-  const totalNewItemsAmt = useMemo(() =>
-    cart.reduce((sum, entry) => sum + (entry.item.price * entry.qty), 0)
-  , [cart]);
+  const cartPricing = useMemo(() => 
+    calculateCartPricing(cart, settings?.promoRules || [])
+  , [cart, settings?.promoRules]);
+
+  const totalNewItemsAmt = cartPricing.finalTotal;
 
   // Amount still owed from loaded orders (unpaid ones)
   const totalLoadedUnpaid = useMemo(() =>
@@ -112,6 +209,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
   // Grand total to collect
   const totalCartAmt = totalNewItemsAmt + totalLoadedUnpaid;
+  const finalDueAmount = totalCartAmt - checkoutData.discAmt;
 
   const addToCart = (item: Item) => {
     setCart(prev => {
@@ -281,13 +379,17 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       }
     }
 
+    const totalDiscAmt = cartPricing.discount + checkoutData.discAmt;
+    const finalActualAmt = Math.max(0, cartPricing.subtotal - totalDiscAmt);
+    const promoNotes = cartPricing.appliedPromos.map(ap => `${ap.ruleName} × ${ap.count}`).join(', ');
+
     // ── 2 & 3. Atomically update orders based on the freshest prev state ─────
     const newNormalOrder: Order | null = (cart.length > 0 && !isFuturePickup) ? {
       id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
-      address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
-      discAmt: checkoutData.discAmt, actualAmt: Math.max(0, newItemsAmt),
+      address: '', items: orderItems, prodAmt: cartPricing.subtotal, shipAmt: 0,
+      discAmt: totalDiscAmt, actualAmt: finalActualAmt,
       status: checkoutData.paymentMethod,
-      note: `收銀機交易 - ${checkoutData.paymentMethod}`,
+      note: `收銀機交易 - ${checkoutData.paymentMethod}${promoNotes ? ` (套用優惠: ${promoNotes})` : ''}`,
       source: 'pos', orderType: 'normal', pickupDate: dailyData.date || checkoutData.pickupDate,
       customerId: selectedCust?.id || null,
       deliveryMethod: '現場',
@@ -298,9 +400,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     const newPrepayOrder: Order | null = (cart.length > 0 && isFuturePickup) ? {
       id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
       address: '', items: {}, prodAmt: 0, shipAmt: 0, discAmt: 0,
-      actualAmt: Math.max(0, newItemsAmt),
+      actualAmt: finalActualAmt,
       status: checkoutData.paymentMethod,
-      note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨`,
+      note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨${promoNotes ? ` (套用優惠: ${promoNotes})` : ''}`,
       source: 'pos', orderType: 'prepayment', pickupDate: checkoutData.pickupDate,
       customerId: selectedCust?.id || null,
       createdAt: new Date().toISOString()
@@ -1082,19 +1184,48 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             </div>
     
             <div className="p-4 border-t border-coffee-100 bg-white space-y-3">
+              {/* 已套用優惠折扣清單 */}
+              {cartPricing.discount > 0 && (
+                <div className="bg-emerald-50/50 border border-emerald-100/80 rounded-2xl p-3 space-y-1.5 shadow-sm">
+                  <div className="text-[10px] font-bold text-emerald-700 tracking-wider flex items-center gap-1">
+                    <span>🎉</span> 已自動套用組合優惠：
+                  </div>
+                  {cartPricing.appliedPromos.map((ap, idx) => (
+                    <div key={idx} className="flex justify-between text-xs text-emerald-600 font-bold">
+                      <span>{ap.ruleName} (×{ap.count}組)</span>
+                      <span className="font-mono">-${fmt(ap.discountAmt)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {/* Breakdown if mixed */}
               {loadedOrders.length > 0 && cart.length > 0 && (
-                <div className="space-y-1">
+                <div className="space-y-1 border-b border-coffee-50 pb-2">
                   <div className="flex justify-between text-xs font-bold text-coffee-400">
                     <span>既有訂單應收</span>
                     <span className="font-mono">${fmt(totalLoadedUnpaid)}</span>
                   </div>
                   <div className="flex justify-between text-xs font-bold text-coffee-400">
-                    <span>新增品項小計</span>
-                    <span className="font-mono">${fmt(totalNewItemsAmt)}</span>
+                    <span>新增品項原價</span>
+                    <span className="font-mono">${fmt(cartPricing.subtotal)}</span>
                   </div>
+                  {cartPricing.discount > 0 && (
+                    <div className="flex justify-between text-xs font-bold text-emerald-600">
+                      <span>組合優惠折抵</span>
+                      <span className="font-mono">-${fmt(cartPricing.discount)}</span>
+                    </div>
+                  )}
                 </div>
               )}
+
+              {loadedOrders.length === 0 && cart.length > 0 && cartPricing.discount > 0 && (
+                <div className="flex justify-between text-xs font-bold text-coffee-400 border-b border-coffee-50 pb-2">
+                  <span>商品原價小計</span>
+                  <span className="font-mono">${fmt(cartPricing.subtotal)}</span>
+                </div>
+              )}
+
               <div className="flex justify-between items-end">
                 <div className="text-sm font-bold text-coffee-400">合計應收</div>
                 <div className="text-right">
@@ -1257,16 +1388,28 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     </div>
 
                     <div className="p-4 bg-coffee-50 rounded-2xl space-y-2">
-                      <div className="flex justify-between text-sm font-bold text-coffee-500">
-                        <span>商品小計</span><span className="font-mono">${fmt(totalCartAmt)}</span>
+                      <div className="flex justify-between text-xs font-bold text-coffee-400">
+                        <span>商品原價小計</span><span className="font-mono">${fmt(cartPricing.subtotal)}</span>
                       </div>
-                      <div className="flex justify-between text-sm font-bold text-rose-brand">
-                        <span>折讓金額</span><span className="font-mono">-${fmt(checkoutData.discAmt)}</span>
-                      </div>
+                      {cartPricing.discount > 0 && (
+                        <div className="flex justify-between text-xs font-bold text-emerald-600">
+                          <span>組合優惠折抵</span><span className="font-mono">-${fmt(cartPricing.discount)}</span>
+                        </div>
+                      )}
+                      {totalLoadedUnpaid > 0 && (
+                        <div className="flex justify-between text-xs font-bold text-coffee-400">
+                          <span>既有訂單未收</span><span className="font-mono">${fmt(totalLoadedUnpaid)}</span>
+                        </div>
+                      )}
+                      {checkoutData.discAmt > 0 && (
+                        <div className="flex justify-between text-xs font-bold text-rose-brand">
+                          <span>額外手動折讓</span><span className="font-mono">-${fmt(checkoutData.discAmt)}</span>
+                        </div>
+                      )}
                       <div className="h-px bg-coffee-100 my-2" />
                       <div className="flex justify-between items-center">
-                        <span className="text-lg font-bold text-coffee-800">應收總金額</span>
-                        <span className="text-2xl font-serif-brand font-bold text-rose-brand">${fmt(totalCartAmt - checkoutData.discAmt)}</span>
+                        <span className="text-sm font-bold text-coffee-800">最終應收總額</span>
+                        <span className="text-2xl font-serif-brand font-bold text-rose-brand">${fmt(finalDueAmount)}</span>
                       </div>
                     </div>
                   </div>
@@ -1286,7 +1429,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                       )}>
                         <span className="text-xs text-coffee-400 font-bold">應找零</span>
                         <span className="text-xl font-serif-brand font-bold text-mint-brand">
-                          ${fmt(Math.max(0, checkoutData.receivedAmt - (totalCartAmt - checkoutData.discAmt)))}
+                          ${fmt(Math.max(0, checkoutData.receivedAmt - finalDueAmount))}
                         </span>
                       </div>
                     </div>
@@ -1297,7 +1440,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                         setReceivedInput(val);
                         setCheckoutData({...checkoutData, receivedAmt: Number(val) || 0});
                       }}
-                      dueAmount={totalCartAmt - checkoutData.discAmt}
+                      dueAmount={finalDueAmount}
                     />
                   </div>
                 )}
