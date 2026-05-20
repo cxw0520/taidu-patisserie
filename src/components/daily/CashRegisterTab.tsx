@@ -644,8 +644,14 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   }, [dailyData.orders]);
 
   const posSalesStats = useMemo(() => {
+    const isSameDay = (d1: string | undefined, d2: string | undefined) => {
+      if (!d1 || !d2) return false;
+      return d1.replace(/\//g, '-') === d2.replace(/\//g, '-');
+    };
     const stats: Record<string, number> = {};
     validOrders.forEach(o => {
+      const isPre = o.pickupDate && !isSameDay(o.pickupDate, dailyData.date);
+      if (isPre) return;
       if (o.source === 'pos' || o.note?.includes('收銀機交易')) {
         Object.entries(o.items || {}).forEach(([id, qty]) => {
           const item = allItems.find(i => i.id === id);
@@ -656,9 +662,13 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       }
     });
     return Object.entries(stats).map(([name, qty]) => ({ name, qty }));
-  }, [validOrders, allItems]);
+  }, [validOrders, allItems, dailyData.date]);
 
   const allSalesStats = useMemo(() => {
+    const isSameDay = (d1: string | undefined, d2: string | undefined) => {
+      if (!d1 || !d2) return false;
+      return d1.replace(/\//g, '-') === d2.replace(/\//g, '-');
+    };
     const stats: Record<string, number> = {};
     const itemsList = [
       ...(settings.giftItems || []),
@@ -666,6 +676,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       ...(settings.customCategories || []).flatMap(c => c.items || [])
     ];
     validOrders.forEach(o => {
+      const isPre = o.pickupDate && !isSameDay(o.pickupDate, dailyData.date);
+      if (isPre) return;
       // Exclude topups from item sales count
       if (o.orderType === 'topup') return;
       
@@ -681,7 +693,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     return Object.entries(stats)
       .map(([name, qty]) => ({ name, qty }))
       .filter(item => item.qty > 0);
-  }, [validOrders, settings]);
+  }, [validOrders, settings, dailyData.date]);
 
   if (!shift.isOpen && !shift.closeTime) {
     return (
@@ -764,26 +776,49 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">全天銷售概況 (含 POS、匯入、手動)</h3>
               <table className="w-full border-collapse border border-gray-300 text-left">
                 <tbody>
-                  <tr>
-                    <th className="p-3 bg-gray-50 border border-gray-300 w-1/3">營業日</th>
-                    <td className="p-3 border border-gray-300 font-mono">{dailyData.date}</td>
-                  </tr>
-                  <tr>
-                    <th className="p-3 bg-gray-50 border border-gray-300">營業總額</th>
-                    <td className="p-3 border border-gray-300 font-mono font-bold">${fmt(validOrders.reduce((sum, o) => sum + (o.prodAmt || 0) + (o.shipAmt || 0), 0))}</td>
-                  </tr>
-                  <tr>
-                    <th className="p-3 bg-gray-50 border border-gray-300">運費收入</th>
-                    <td className="p-3 border border-gray-300 font-mono">${fmt(validOrders.reduce((sum, o) => sum + (o.shipAmt || 0), 0))}</td>
-                  </tr>
-                  <tr>
-                    <th className="p-3 bg-gray-50 border border-gray-300">折扣總額</th>
-                    <td className="p-3 border border-gray-300 font-mono text-red-600">-${fmt(validOrders.reduce((sum, o) => sum + (o.discAmt || 0), 0))}</td>
-                  </tr>
-                  <tr>
-                    <th className="p-3 bg-gray-50 border border-gray-300">營業淨額</th>
-                    <td className="p-3 border border-gray-300 font-mono font-bold text-lg">${fmt(validOrders.reduce((sum, o) => sum + (o.actualAmt || 0), 0))}</td>
-                  </tr>
+                  {(() => {
+                    const isSameDay = (d1: string | undefined, d2: string | undefined) => {
+                      if (!d1 || !d2) return false;
+                      return d1.replace(/\//g, '-') === d2.replace(/\//g, '-');
+                    };
+
+                    const nonPreorderOrders = validOrders.filter(o => {
+                      const isPre = o.pickupDate && !isSameDay(o.pickupDate, dailyData.date);
+                      return !isPre;
+                    });
+
+                    const totalProdAmt = nonPreorderOrders.reduce((sum, o) => sum + (o.prodAmt || 0), 0);
+                    const totalShipAmt = nonPreorderOrders.reduce((sum, o) => sum + (o.shipAmt || 0), 0);
+                    const totalDiscAmt = nonPreorderOrders.reduce((sum, o) => sum + (o.discAmt || 0), 0);
+                    
+                    const validNonPre = nonPreorderOrders.filter(o => o.status !== '公關品');
+                    const netAmt = validNonPre.reduce((sum, o) => sum + (o.actualAmt || 0), 0) - validNonPre.reduce((sum, o) => sum + (o.shipAmt || 0), 0);
+
+                    return (
+                      <>
+                        <tr>
+                          <th className="p-3 bg-gray-50 border border-gray-300 w-1/3">營業日</th>
+                          <td className="p-3 border border-gray-300 font-mono">{dailyData.date}</td>
+                        </tr>
+                        <tr>
+                          <th className="p-3 bg-gray-50 border border-gray-300">商品營業總額</th>
+                          <td className="p-3 border border-gray-300 font-mono font-bold">${fmt(totalProdAmt)}</td>
+                        </tr>
+                        <tr>
+                          <th className="p-3 bg-gray-50 border border-gray-300">運費收入</th>
+                          <td className="p-3 border border-gray-300 font-mono">${fmt(totalShipAmt)}</td>
+                        </tr>
+                        <tr>
+                          <th className="p-3 bg-gray-50 border border-gray-300">折扣總額</th>
+                          <td className="p-3 border border-gray-300 font-mono text-red-600">-${fmt(totalDiscAmt)}</td>
+                        </tr>
+                        <tr>
+                          <th className="p-3 bg-gray-50 border border-gray-300">營業淨額 (不含運費、預購)</th>
+                          <td className="p-3 border border-gray-300 font-mono font-bold text-lg text-rose-700 bg-rose-50/20">${fmt(netAmt)}</td>
+                        </tr>
+                      </>
+                    );
+                  })()}
                 </tbody>
               </table>
             </section>
