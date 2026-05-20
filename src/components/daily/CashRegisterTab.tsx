@@ -639,9 +639,13 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     ...(settings.customCategories || []).flatMap(c => c.items || [])
   ].filter(i => i.active);
 
+  const validOrders = useMemo(() => {
+    return (dailyData.orders || []).filter(o => o.status !== '已取消' && o.status !== '已刪除');
+  }, [dailyData.orders]);
+
   const posSalesStats = useMemo(() => {
     const stats: Record<string, number> = {};
-    dailyData.orders.forEach(o => {
+    validOrders.forEach(o => {
       if (o.source === 'pos' || o.note?.includes('收銀機交易')) {
         Object.entries(o.items || {}).forEach(([id, qty]) => {
           const item = allItems.find(i => i.id === id);
@@ -652,7 +656,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       }
     });
     return Object.entries(stats).map(([name, qty]) => ({ name, qty }));
-  }, [dailyData.orders, allItems]);
+  }, [validOrders, allItems]);
 
   const allSalesStats = useMemo(() => {
     const stats: Record<string, number> = {};
@@ -661,7 +665,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       ...(settings.singleItems || []),
       ...(settings.customCategories || []).flatMap(c => c.items || [])
     ];
-    dailyData.orders.forEach(o => {
+    validOrders.forEach(o => {
       // Exclude topups from item sales count
       if (o.orderType === 'topup') return;
       
@@ -677,7 +681,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     return Object.entries(stats)
       .map(([name, qty]) => ({ name, qty }))
       .filter(item => item.qty > 0);
-  }, [dailyData.orders, settings]);
+  }, [validOrders, settings]);
 
   if (!shift.isOpen && !shift.closeTime) {
     return (
@@ -766,19 +770,19 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                   </tr>
                   <tr>
                     <th className="p-3 bg-gray-50 border border-gray-300">營業總額</th>
-                    <td className="p-3 border border-gray-300 font-mono font-bold">${fmt(dailyData.orders.reduce((sum, o) => sum + (o.prodAmt || 0) + (o.shipAmt || 0), 0))}</td>
+                    <td className="p-3 border border-gray-300 font-mono font-bold">${fmt(validOrders.reduce((sum, o) => sum + (o.prodAmt || 0) + (o.shipAmt || 0), 0))}</td>
                   </tr>
                   <tr>
                     <th className="p-3 bg-gray-50 border border-gray-300">運費收入</th>
-                    <td className="p-3 border border-gray-300 font-mono">${fmt(dailyData.orders.reduce((sum, o) => sum + (o.shipAmt || 0), 0))}</td>
+                    <td className="p-3 border border-gray-300 font-mono">${fmt(validOrders.reduce((sum, o) => sum + (o.shipAmt || 0), 0))}</td>
                   </tr>
                   <tr>
                     <th className="p-3 bg-gray-50 border border-gray-300">折扣總額</th>
-                    <td className="p-3 border border-gray-300 font-mono text-red-600">-${fmt(dailyData.orders.reduce((sum, o) => sum + (o.discAmt || 0), 0))}</td>
+                    <td className="p-3 border border-gray-300 font-mono text-red-600">-${fmt(validOrders.reduce((sum, o) => sum + (o.discAmt || 0), 0))}</td>
                   </tr>
                   <tr>
                     <th className="p-3 bg-gray-50 border border-gray-300">營業淨額</th>
-                    <td className="p-3 border border-gray-300 font-mono font-bold text-lg">${fmt(dailyData.orders.reduce((sum, o) => sum + (o.actualAmt || 0), 0))}</td>
+                    <td className="p-3 border border-gray-300 font-mono font-bold text-lg">${fmt(validOrders.reduce((sum, o) => sum + (o.actualAmt || 0), 0))}</td>
                   </tr>
                 </tbody>
               </table>
@@ -822,8 +826,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                   </tr>
                 </thead>
                 <tbody>
-                  {Array.from(new Set(dailyData.orders.map(o => o.status))).map(method => {
-                    const group = dailyData.orders.filter(o => o.status === method);
+                  {Array.from(new Set(validOrders.map(o => o.status))).map(method => {
+                    const group = validOrders.filter(o => o.status === method);
                     const total = group.reduce((sum, o) => sum + (o.actualAmt || 0), 0);
                     return (
                       <tr key={method}>
@@ -839,13 +843,13 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
             {/* 4. 收銀機盤點數據 (即時計算確保報表數值一致) */}
             {(() => {
-              const todaySalesCash = dailyData.orders
+              const todaySalesCash = validOrders
                 .filter(o => o.status === '現結' && o.orderType !== 'topup' && (!o.pickupDate || o.pickupDate === dailyData.date))
                 .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-              const preorderSalesCash = dailyData.orders
+              const preorderSalesCash = validOrders
                 .filter(o => o.status === '現結' && o.orderType !== 'topup' && o.pickupDate && o.pickupDate !== dailyData.date)
                 .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-              const topupCashAmt = dailyData.orders
+              const topupCashAmt = validOrders
                 .filter(o => o.orderType === 'topup' && o.status === '現結')
                 .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
                 
