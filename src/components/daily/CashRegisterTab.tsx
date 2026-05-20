@@ -843,7 +843,26 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
             {/* 今日收錢細項彙整統計 */}
             <section className="space-y-4">
-              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">今日實收細項統計 (今日銷售與預購)</h3>
+              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg flex justify-between items-center">
+                <span>今日實收細項統計 (今日銷售與預購)</span>
+                <button
+                  onClick={() => {
+                    const isSameDay = (d1: string | undefined, d2: string | undefined) => {
+                      if (!d1 || !d2) return false;
+                      return d1.replace(/\//g, '-') === d2.replace(/\//g, '-');
+                    };
+                    const info = validOrders.map(o => {
+                      const isPre = o.pickupDate && !isSameDay(o.pickupDate, dailyData.date);
+                      const cat = o.orderType === 'topup' ? '儲值充值' : (isPre ? '預購商品' : '今日銷售');
+                      return `• ${o.buyer || '無名'}(付款:${o.status}, 類型:${cat}): 金額=${o.actualAmt || 0}, 運費=${o.shipAmt || 0}, 折抵=${o.discAmt || 0}, 取貨日:${o.pickupDate || '現貨'}`;
+                    }).join('\n');
+                    alert(info || "當日無訂單資料");
+                  }}
+                  className="text-xs px-2 py-0.5 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded font-normal"
+                >
+                  金流診斷
+                </button>
+              </h3>
               <table className="w-full border-collapse border border-gray-300 text-left text-sm">
                 <thead className="bg-gray-50">
                   <tr>
@@ -855,20 +874,25 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                 </thead>
                 <tbody>
                   {(() => {
+                    const isSameDay = (d1: string | undefined, d2: string | undefined) => {
+                      if (!d1 || !d2) return false;
+                      return d1.replace(/\//g, '-') === d2.replace(/\//g, '-');
+                    };
+
                     // 1. 今日銷售 (今日取貨/現貨)
                     const todaySalesCash = validOrders
-                      .filter(o => o.status === '現結' && o.orderType !== 'topup' && (!o.pickupDate || o.pickupDate === dailyData.date))
+                      .filter(o => o.status === '現結' && o.orderType !== 'topup' && (!o.pickupDate || isSameDay(o.pickupDate, dailyData.date)))
                       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
                     const todaySalesRemit = validOrders
-                      .filter(o => o.status === '匯款' && o.orderType !== 'topup' && (!o.pickupDate || o.pickupDate === dailyData.date))
+                      .filter(o => o.status === '匯款' && o.orderType !== 'topup' && (!o.pickupDate || isSameDay(o.pickupDate, dailyData.date)))
                       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
                       
                     // 2. 商品預購 (未來取貨)
                     const preorderSalesCash = validOrders
-                      .filter(o => o.status === '現結' && o.orderType !== 'topup' && o.pickupDate && o.pickupDate !== dailyData.date)
+                      .filter(o => o.status === '現結' && o.orderType !== 'topup' && o.pickupDate && !isSameDay(o.pickupDate, dailyData.date))
                       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
                     const preorderSalesRemit = validOrders
-                      .filter(o => o.status === '匯款' && o.orderType !== 'topup' && o.pickupDate && o.pickupDate !== dailyData.date)
+                      .filter(o => o.status === '匯款' && o.orderType !== 'topup' && o.pickupDate && !isSameDay(o.pickupDate, dailyData.date))
                       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
 
                     // 3. 儲值金充值
@@ -924,11 +948,15 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
 
             {/* 4. 收銀機盤點數據 (即時計算確保報表數值一致) */}
             {(() => {
+              const isSameDay = (d1: string | undefined, d2: string | undefined) => {
+                if (!d1 || !d2) return false;
+                return d1.replace(/\//g, '-') === d2.replace(/\//g, '-');
+              };
               const todaySalesCash = validOrders
-                .filter(o => o.status === '現結' && o.orderType !== 'topup' && (!o.pickupDate || o.pickupDate === dailyData.date))
+                .filter(o => o.status === '現結' && o.orderType !== 'topup' && (!o.pickupDate || isSameDay(o.pickupDate, dailyData.date)))
                 .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
               const preorderSalesCash = validOrders
-                .filter(o => o.status === '現結' && o.orderType !== 'topup' && o.pickupDate && o.pickupDate !== dailyData.date)
+                .filter(o => o.status === '現結' && o.orderType !== 'topup' && o.pickupDate && !isSameDay(o.pickupDate, dailyData.date))
                 .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
               const topupCashAmt = validOrders
                 .filter(o => o.orderType === 'topup' && o.status === '現結')
