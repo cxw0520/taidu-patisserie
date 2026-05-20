@@ -841,6 +841,87 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               </table>
             </section>
 
+            {/* 今日收錢細項彙整統計 */}
+            <section className="space-y-4">
+              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">今日實收細項統計 (今日銷售與預購)</h3>
+              <table className="w-full border-collapse border border-gray-300 text-left text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-3 border border-gray-300 w-1/3">分類項目</th>
+                    <th className="p-3 border border-gray-300 text-right">現金 (現結)</th>
+                    <th className="p-3 border border-gray-300 text-right">匯款</th>
+                    <th className="p-3 border border-gray-300 text-right font-bold bg-gray-100/50">小計</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    // 1. 今日銷售 (今日取貨/現貨)
+                    const todaySalesCash = validOrders
+                      .filter(o => o.status === '現結' && o.orderType !== 'topup' && (!o.pickupDate || o.pickupDate === dailyData.date))
+                      .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+                    const todaySalesRemit = validOrders
+                      .filter(o => o.status === '匯款' && o.orderType !== 'topup' && (!o.pickupDate || o.pickupDate === dailyData.date))
+                      .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+                      
+                    // 2. 商品預購 (未來取貨)
+                    const preorderSalesCash = validOrders
+                      .filter(o => o.status === '現結' && o.orderType !== 'topup' && o.pickupDate && o.pickupDate !== dailyData.date)
+                      .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+                    const preorderSalesRemit = validOrders
+                      .filter(o => o.status === '匯款' && o.orderType !== 'topup' && o.pickupDate && o.pickupDate !== dailyData.date)
+                      .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+
+                    // 3. 儲值金充值
+                    const topupCash = validOrders
+                      .filter(o => o.orderType === 'topup' && o.status === '現結')
+                      .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+                    const topupRemit = validOrders
+                      .filter(o => o.orderType === 'topup' && o.status === '匯款')
+                      .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
+
+                    const cashTotal = todaySalesCash + preorderSalesCash + topupCash;
+                    const remitTotal = todaySalesRemit + preorderSalesRemit + topupRemit;
+                    const allTotal = cashTotal + remitTotal;
+
+                    return (
+                      <>
+                        <tr>
+                          <td className="p-3 border border-gray-300 font-bold text-gray-700">今日銷售 (今日取貨/現貨)</td>
+                          <td className="p-3 border border-gray-300 text-right font-mono">${fmt(todaySalesCash)}</td>
+                          <td className="p-3 border border-gray-300 text-right font-mono">${fmt(todaySalesRemit)}</td>
+                          <td className="p-3 border border-gray-300 text-right font-mono font-bold bg-gray-50">${fmt(todaySalesCash + todaySalesRemit)}</td>
+                        </tr>
+                        <tr>
+                          <td className="p-3 border border-gray-300 font-bold text-gray-700">商品預購 (未來取貨)</td>
+                          <td className="p-3 border border-gray-300 text-right font-mono">${fmt(preorderSalesCash)}</td>
+                          <td className="p-3 border border-gray-300 text-right font-mono">${fmt(preorderSalesRemit)}</td>
+                          <td className="p-3 border border-gray-300 text-right font-mono font-bold bg-gray-50">${fmt(preorderSalesCash + preorderSalesRemit)}</td>
+                        </tr>
+                        {(topupCash > 0 || topupRemit > 0) && (
+                          <tr>
+                            <td className="p-3 border border-gray-300 font-bold text-gray-700">儲值金充值</td>
+                            <td className="p-3 border border-gray-300 text-right font-mono">${fmt(topupCash)}</td>
+                            <td className="p-3 border border-gray-300 text-right font-mono">${fmt(topupRemit)}</td>
+                            <td className="p-3 border border-gray-300 text-right font-mono font-bold bg-gray-50">${fmt(topupCash + topupRemit)}</td>
+                          </tr>
+                        )}
+                        <tr className="bg-amber-50/40">
+                          <td className="p-3 border border-gray-300 font-bold text-coffee-800">管道實收總計</td>
+                          <td className="p-3 border border-gray-300 text-right font-mono font-bold text-coffee-700">${fmt(cashTotal)}</td>
+                          <td className="p-3 border border-gray-300 text-right font-mono font-bold text-coffee-700">${fmt(remitTotal)}</td>
+                          <td className="p-3 border border-gray-300 text-right font-mono font-bold text-lg text-rose-600 bg-amber-50">${fmt(allTotal)}</td>
+                        </tr>
+                        <tr className="bg-gray-100">
+                          <td colSpan={3} className="p-3 border border-gray-300 font-bold text-gray-800 text-right">今日全部實際收款 (現金 + 匯款)：</td>
+                          <td className="p-3 border border-gray-300 text-right font-mono font-bold text-xl text-rose-700 bg-gray-200/50">${fmt(allTotal)}</td>
+                        </tr>
+                      </>
+                    );
+                  })()}
+                </tbody>
+              </table>
+            </section>
+
             {/* 4. 收銀機盤點數據 (即時計算確保報表數值一致) */}
             {(() => {
               const todaySalesCash = validOrders
