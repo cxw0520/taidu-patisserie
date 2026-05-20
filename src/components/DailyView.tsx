@@ -1333,15 +1333,10 @@ export default function DailyView({
     dailyData.orders.forEach(o => {
         if (o.status === '已取消' || o.status === '已刪除') return;
         const isPR = o.status === '公關品';
-        m.rev += o.prodAmt; 
-        m.disc += o.discAmt;
-        
-        if(isPR) { 
-            m.prVal += o.prodAmt; 
-            m.prShip += o.shipAmt;
-        } else {
-            m.ship += o.shipAmt;
-            m.recv += o.actualAmt;
+        const isPreorder = o.pickupDate && o.pickupDate !== dailyData.date;
+
+        // 1. 金流管道累加 (包含預購，以便對帳)
+        if (!isPR) {
             if (o.status === '匯款') { 
                 m.remit += o.actualAmt; 
             } else if (o.status === '現結') { 
@@ -1354,6 +1349,20 @@ export default function DailyView({
             } else {
                 m.unpaid += o.actualAmt;
             }
+        }
+
+        // 2. 營業額、折扣、銷量、出庫累加 (排除預購)
+        if (isPreorder) return;
+
+        m.rev += o.prodAmt; 
+        m.disc += o.discAmt;
+        
+        if (isPR) { 
+            m.prVal += o.prodAmt; 
+            m.prShip += o.shipAmt;
+        } else {
+            m.ship += o.shipAmt;
+            m.recv += o.actualAmt;
         }
 
         // Standard categories
