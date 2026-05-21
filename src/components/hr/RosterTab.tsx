@@ -120,6 +120,19 @@ export default function RosterTab({
     const ot2Rate = settings.overtimeTier2Rate || 1.67;
     const holidayRate = settings.holidayPayRate || 2.0;
 
+    // 計算當月一般工作天數上限 (扣除週六、日及國定假日)
+    let workDaysLimit = 0;
+    days.forEach(day => {
+      const dow = getDayOfWeek(day);
+      const dateKey = `${ymKey}-${String(day).padStart(2, '0')}`;
+      const isWeekend = dow === 0 || dow === 6;
+      const isHoliday = settings.exceptionCalendar?.[dateKey] === 'holiday';
+      if (!isWeekend && !isHoliday) {
+        workDaysLimit++;
+      }
+    });
+    const monthlyMinutesLimit = workDaysLimit * 8 * 60;
+
     operators.forEach(op => {
       const baseRate = op.baseRate || 0;
       let totalRegularMinutes = 0;
@@ -127,6 +140,10 @@ export default function RosterTab({
       let totalOt2Minutes = 0;
       let holidayMinutes = 0;
       let scheduledWorkDays = 0;
+
+      // 月薪制專用的累計時數
+      let totalScheduledRegularMinutes = 0;
+      let holidayScheduledMinutes = 0;
 
       days.forEach(day => {
         const entry = getCellEntry(op.id, day);
@@ -150,20 +167,29 @@ export default function RosterTab({
         const dateKey = `${ymKey}-${String(day).padStart(2, '0')}`;
         const isHoliday = entry.isHoliday || settings.exceptionCalendar?.[dateKey] === 'holiday';
 
-        if (isHoliday) {
-          holidayMinutes += effMin;
-        } else {
-          const ot1MinLimit = ot1H * 60;
-          const ot2MinLimit = ot2H * 60;
-          if (effMin <= ot1MinLimit) {
-            totalRegularMinutes += effMin;
-          } else if (effMin <= ot2MinLimit) {
-            totalRegularMinutes += ot1MinLimit;
-            totalOt1Minutes += effMin - ot1MinLimit;
+        if (op.payrollType === 'monthly') {
+          if (isHoliday) {
+            holidayScheduledMinutes += effMin;
           } else {
-            totalRegularMinutes += ot1MinLimit;
-            totalOt1Minutes += ot2MinLimit - ot1MinLimit;
-            totalOt2Minutes += effMin - ot2MinLimit;
+            totalScheduledRegularMinutes += effMin;
+          }
+        } else {
+          // 時薪制維持原樣
+          if (isHoliday) {
+            holidayMinutes += effMin;
+          } else {
+            const ot1MinLimit = ot1H * 60;
+            const ot2MinLimit = ot2H * 60;
+            if (effMin <= ot1MinLimit) {
+              totalRegularMinutes += effMin;
+            } else if (effMin <= ot2MinLimit) {
+              totalRegularMinutes += ot1MinLimit;
+              totalOt1Minutes += effMin - ot1MinLimit;
+            } else {
+              totalRegularMinutes += ot1MinLimit;
+              totalOt1Minutes += ot2MinLimit - ot1MinLimit;
+              totalOt2Minutes += effMin - ot2MinLimit;
+            }
           }
         }
       });
@@ -174,15 +200,27 @@ export default function RosterTab({
       let hPay = 0;
 
       if (op.payrollType === 'monthly') {
-        // Only include base salary if they actually have scheduled shifts this month!
-        if (scheduledWorkDays > 0) {
-          basePay = baseRate;
-          const dailyRate = baseRate / 30;
-          const minuteRate = dailyRate / 8 / 60;
-          ot1Pay = totalOt1Minutes * minuteRate * ot1Rate;
-          ot2Pay = totalOt2Minutes * minuteRate * ot2Rate;
-          hPay = holidayMinutes * minuteRate * holidayRate;
+        // 月薪直接加上去，無須 scheduledWorkDays > 0
+        basePay = baseRate;
+        
+        // 只有排班超過當月規定時數才需要加加班費
+        let ot1Minutes = 0;
+        let ot2Minutes = 0;
+        if (totalScheduledRegularMinutes > monthlyMinutesLimit) {
+          const totalOtMinutes = totalScheduledRegularMinutes - monthlyMinutesLimit;
+          if (totalOtMinutes <= 120) {
+            ot1Minutes = totalOtMinutes;
+          } else {
+            ot1Minutes = 120;
+            ot2Minutes = totalOtMinutes - 120;
+          }
         }
+        
+        const dailyRate = baseRate / 30;
+        const minuteRate = dailyRate / 8 / 60;
+        ot1Pay = ot1Minutes * minuteRate * ot1Rate;
+        ot2Pay = ot2Minutes * minuteRate * ot2Rate;
+        hPay = holidayScheduledMinutes * minuteRate * holidayRate;
       } else {
         basePay = (totalRegularMinutes / 60) * baseRate;
         ot1Pay = (totalOt1Minutes / 60) * baseRate * ot1Rate;
@@ -194,7 +232,8 @@ export default function RosterTab({
 
       // Simulate the exact company cost logic (including labor & health insurance + pension)
       let opCost = grossPay;
-      if (settings.enableInsurance && op.enableInsurance !== false && scheduledWorkDays > 0) {
+      const needInsurance = settings.enableInsurance && op.enableInsurance !== false && (op.payrollType === 'monthly' || scheduledWorkDays > 0);
+      if (needInsurance) {
         const laborInsComp = Math.round(grossPay * 0.1);
         const healthInsComp = Math.round(grossPay * 0.0252 * 0.7);
         const pensionComp = Math.round(grossPay * 0.06);

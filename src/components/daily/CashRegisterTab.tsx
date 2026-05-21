@@ -43,11 +43,30 @@ export function calculateCartPricing(
 
   let itemsPool: any[] = [];
   
+  const expandItemToPool = (item: Item, qty: number) => {
+    const expanded: any[] = [];
+    for (let i = 0; i < qty; i++) {
+      // 保留商品本身 (單品或禮盒)
+      expanded.push({ ...item });
+
+      // 如果是禮盒商品，同時將配方中拆解出來的單顆商品也加入 itemsPool 參與組合優惠配對
+      if (item.category === 'gift' && item.recipe) {
+        Object.entries(item.recipe).forEach(([name, count]) => {
+          const matchSingle = allItems.find(single => single.name === name && single.category !== 'gift');
+          if (matchSingle) {
+            for (let c = 0; c < count; c++) {
+              expanded.push({ ...matchSingle });
+            }
+          }
+        });
+      }
+    }
+    return expanded;
+  };
+
   // 1. 展開現場購物車
   cart.forEach(entry => {
-    for (let i = 0; i < entry.qty; i++) {
-      itemsPool.push({ ...entry.item });
-    }
+    itemsPool.push(...expandItemToPool(entry.item, entry.qty));
   });
 
   // 2. 展開既有載入訂單商品
@@ -56,9 +75,7 @@ export function calculateCartPricing(
     Object.entries(orderItems).forEach(([itemId, qty]) => {
       const matchItem = allItems.find(it => it.id === itemId);
       if (matchItem) {
-        for (let i = 0; i < qty; i++) {
-          itemsPool.push({ ...matchItem });
-        }
+        itemsPool.push(...expandItemToPool(matchItem, Number(qty || 0)));
       }
     });
   });

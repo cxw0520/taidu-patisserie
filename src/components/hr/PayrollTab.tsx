@@ -27,7 +27,9 @@ function fmt(n: number) {
 function calcPayroll(
   op: Operator,
   records: Record<string, AttendanceRecord>,
-  settings: Settings
+  settings: Settings,
+  year: number,
+  month: number
 ): PayrollResult {
   const payrollType = op.payrollType || 'hourly';
   const baseRate = op.baseRate || 0;
@@ -39,6 +41,26 @@ function calcPayroll(
   const holidayRate = settings.holidayPayRate || 2.0;
   const lateGrace = settings.lateGracePeriod || 0;
 
+  const ymKey = `${year}-${String(month).padStart(2, '0')}`;
+  const daysInMonth = new Date(year, month, 0).getDate();
+  
+  const getDayOfWeek = (day: number) => {
+    return new Date(year, month - 1, day).getDay();
+  };
+
+  // 計算當月一般工作天數上限 (扣除週六、日及國定假日)
+  let workDaysLimit = 0;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dow = getDayOfWeek(d);
+    const dateKey = `${ymKey}-${String(d).padStart(2, '0')}`;
+    const isWeekend = dow === 0 || dow === 6;
+    const isHoliday = settings.exceptionCalendar?.[dateKey] === 'holiday';
+    if (!isWeekend && !isHoliday) {
+      workDaysLimit++;
+    }
+  }
+  const monthlyMinutesLimit = workDaysLimit * 8 * 60;
+
   let totalRegularMinutes = 0;
   let totalOt1Minutes = 0;
   let totalOt2Minutes = 0;
@@ -46,24 +68,36 @@ function calcPayroll(
   let lateDeductMinutes = 0;
   let lineItems: PayrollLineItem[] = [];
 
+  // 月薪制專用的累計時數
+  let totalScheduledRegularMinutes = 0;
+  let holidayScheduledMinutes = 0;
+
   Object.values(records).forEach(rec => {
     const effMin = rec.effectiveMinutes || 0;
     if (effMin <= 0) return;
 
-    if (rec.isHoliday) {
-      holidayMinutes += effMin;
-    } else {
-      const ot1MinLimit = ot1H * 60;
-      const ot2MinLimit = ot2H * 60;
-      if (effMin <= ot1MinLimit) {
-        totalRegularMinutes += effMin;
-      } else if (effMin <= ot2MinLimit) {
-        totalRegularMinutes += ot1MinLimit;
-        totalOt1Minutes += effMin - ot1MinLimit;
+    if (payrollType === 'monthly') {
+      if (rec.isHoliday) {
+        holidayScheduledMinutes += effMin;
       } else {
-        totalRegularMinutes += ot1MinLimit;
-        totalOt1Minutes += ot2MinLimit - ot1MinLimit;
-        totalOt2Minutes += effMin - ot2MinLimit;
+        totalScheduledRegularMinutes += effMin;
+      }
+    } else {
+      if (rec.isHoliday) {
+        holidayMinutes += effMin;
+      } else {
+        const ot1MinLimit = ot1H * 60;
+        const ot2MinLimit = ot2H * 60;
+        if (effMin <= ot1MinLimit) {
+          totalRegularMinutes += effMin;
+        } else if (effMin <= ot2MinLimit) {
+          totalRegularMinutes += ot1MinLimit;
+          totalOt1Minutes += effMin - ot1MinLimit;
+        } else {
+          totalRegularMinutes += ot1MinLimit;
+          totalOt1Minutes += ot2MinLimit - ot1MinLimit;
+          totalOt2Minutes += effMin - ot2MinLimit;
+        }
       }
     }
 
@@ -97,16 +131,35 @@ function calcPayroll(
     basePay = baseRate;
     const dailyRate = baseRate / 30;
     const minuteRate = dailyRate / 8 / 60;
-    hPay = holidayMinutes * minuteRate * holidayRate;
     lateDeduction = lateDeductMinutes * minuteRate;
-    ot1Pay = totalOt1Minutes * minuteRate * ot1Rate;
-    ot2Pay = totalOt2Minutes * minuteRate * ot2Rate;
+
+    // 月薪加班費：超過當月基本總工時才需加加班費
+    let ot1Minutes = 0;
+    let ot2Minutes = 0;
+    if (totalScheduledRegularMinutes > monthlyMinutesLimit) {
+      const totalOtMinutes = totalScheduledRegularMinutes - monthlyMinutesLimit;
+      if (totalOtMinutes <= 120) {
+        ot1Minutes = totalOtMinutes;
+      } else {
+        ot1Minutes = 120;
+        ot2Minutes = totalOtMinutes - 120;
+      }
+    }
+
+    ot1Pay = ot1Minutes * minuteRate * ot1Rate;
+    ot2Pay = ot2Minutes * minuteRate * ot2Rate;
+    hPay = holidayScheduledMinutes * minuteRate * holidayRate;
 
     lineItems.push({ label: `月薪本薪`, amount: Math.round(basePay), type: 'add' });
-    if (ot1Pay > 0) lineItems.push({ label: `加班費 T1 (${(totalOt1Minutes/60).toFixed(1)}h)`, amount: Math.round(ot1Pay), type: 'add' });
-    if (ot2Pay > 0) lineItems.push({ label: `加班費 T2 (${(totalOt2Minutes/60).toFixed(1)}h)`, amount: Math.round(ot2Pay), type: 'add' });
-    if (hPay > 0) lineItems.push({ label: `假日出勤加給 (${(holidayMinutes/60).toFixed(1)}h)`, amount: Math.round(hPay), type: 'add' });
+    if (ot1Pay > 0) lineItems.push({ label: `加班費 T1 (${(ot1Minutes/60).toFixed(1)}h)`, amount: Math.round(ot1Pay), type: 'add' });
+    if (ot2Pay > 0) lineItems.push({ label: `加班費 T2 (${(ot2Minutes/60).toFixed(1)}h)`, amount: Math.round(ot2Pay), type: 'add' });
+    if (hPay > 0) lineItems.push({ label: `假日出勤加給 (${(holidayScheduledMinutes/60).toFixed(1)}h)`, amount: Math.round(hPay), type: 'add' });
     if (lateDeduction > 0) lineItems.push({ label: `遲到扣款 (${lateDeductMinutes}分)`, amount: Math.round(lateDeduction), type: 'deduct' });
+
+    totalRegularMinutes = totalScheduledRegularMinutes;
+    totalOt1Minutes = ot1Minutes;
+    totalOt2Minutes = ot2Minutes;
+    holidayMinutes = holidayScheduledMinutes;
   }
 
   const grossPay = Math.round(basePay + ot1Pay + ot2Pay + hPay - lateDeduction);
@@ -194,9 +247,9 @@ export default function PayrollTab({
   const payrollResults = useMemo(() => {
     return operators.map(op => ({
       op,
-      result: calcPayroll(op, allAttendance[op.id] || {}, settings)
+      result: calcPayroll(op, allAttendance[op.id] || {}, settings, viewYear, viewMonth)
     }));
-  }, [operators, allAttendance, settings]);
+  }, [operators, allAttendance, settings, viewYear, viewMonth]);
 
   const totalNetPay = payrollResults.reduce((s, r) => s + r.result.netPay, 0);
   const totalCompanyCost = payrollResults.reduce((s, r) => s + (r.result.companyCost || r.result.netPay), 0);
