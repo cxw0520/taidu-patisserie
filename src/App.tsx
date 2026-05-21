@@ -555,8 +555,8 @@ export default function App() {
             }>
               {activeTab === 'hr' && <HRView forcedSubTab={globalSubTabs['hr']} shopId={shopId} operators={operators} settings={settings} />}
               {activeTab === 'journal' && <JournalView forcedSubTab={globalSubTabs['journal']} selectedYear={selectedYear} shopId={shopId} settings={settings} />}
-              {activeTab === 'daily' && <DailyView forcedSubTab={globalSubTabs['daily']} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
-              {activeTab === 'pos' && <DailyView forcedSubTab={'pos'} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} />}
+              {activeTab === 'daily' && <DailyView forcedSubTab={globalSubTabs['daily']} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} onNavigateToTab={navigateTo} />}
+              {activeTab === 'pos' && <DailyView forcedSubTab={'pos'} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} onNavigateToTab={navigateTo} />}
               {activeTab === 'customers' && <CustomerView shopId={shopId} settings={settings} />}
               {activeTab === 'inventory' && <InventoryView forcedSubTab={globalSubTabs['inventory']} selectedYear={selectedYear} shopId={shopId} />}
               {activeTab === 'monthly' && <MonthlyView forcedSubTab={globalSubTabs['monthly']} settings={settings} shopId={shopId} />}

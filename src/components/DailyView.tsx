@@ -34,11 +34,12 @@ import {
   Phone,
   Search,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  Calculator
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn, normalizeDateKey } from '../lib/utils';
-import CashRegisterTab from './daily/CashRegisterTab';
+import CashRegisterTab, { calculateCartPricing } from './daily/CashRegisterTab';
 import SettingsTab from './daily/SettingsTab';
 import ImportTab from './daily/ImportTab';
 import AddOrderModal from './daily/AddOrderModal';
@@ -155,13 +156,15 @@ export default function DailyView({
   setCurrentDate, 
   settings: baseSettings, 
   shopId,
-  forcedSubTab
+  forcedSubTab,
+  onNavigateToTab
 }: { 
   currentDate: string, 
   setCurrentDate: (d: string) => void, 
   settings: Settings,
   shopId: string,
-  forcedSubTab?: string
+  forcedSubTab?: string,
+  onNavigateToTab?: (tab: string, subTab?: string) => void
 }) {
   const [subTab, setSubTab] = useState<'dashboard' | 'import' | 'settings'>(() => {
     return (localStorage.getItem('daily_sub_tab') as any) || 'dashboard';
@@ -974,6 +977,35 @@ export default function DailyView({
     });
   };
 
+  const handleAutoCalculateDiscount = (order: Order) => {
+    // 1. 取得所有商品設定列表
+    const itemsList = [
+      ...(settings.giftItems || []),
+      ...(settings.singleItems || []),
+      ...(settings.customCategories || []).flatMap(c => c.items || [])
+    ].filter(i => i.active);
+
+    // 2. 將訂單中的 items 轉為 calculateCartPricing 所需的購物車格式
+    const cart: { item: any; qty: number }[] = [];
+    Object.entries(order.items || {}).forEach(([itemId, qty]) => {
+      const matchItem = itemsList.find(it => it.id === itemId);
+      if (matchItem && Number(qty) > 0) {
+        cart.push({ item: matchItem, qty: Number(qty) });
+      }
+    });
+
+    // 3. 呼叫計算促銷價格
+    const pricing = calculateCartPricing(cart, [], itemsList, settings.promoRules || []);
+
+    // 4. 取得計算出的 discount 金額
+    const disc = pricing.discount || 0;
+    
+    // 5. 更新訂單中的 discAmt 和 actualAmt
+    updateOrderInDb(order.id, {
+      discAmt: disc,
+      actualAmt: (order.prodAmt || 0) + (order.shipAmt || 0) - disc
+    });
+  };
 
   const updateOrderInDb = (orderId: string, patch: Partial<Order>) => {
     const targetKey = normalizeDateKey(currentDate);
@@ -1426,62 +1458,6 @@ export default function DailyView({
     return m;
   }, [dailyData, settings]);
 
-  const [syncingInv, setSyncingInv] = useState(false);
-  const syncInventory = async () => {
-    if (!dailyData || syncingInv) return;
-    setSyncingInv(true);
-    try {
-      // Basic consumption auto-deduction based on daily sales
-      const consumption: Record<string, number> = {};
-            dailyData.orders.forEach((o) => {
-        [...(settings.giftItems || []), ...(settings.singleItems || []), ...(settings.customCategories?.flatMap(c => c.items || []) || [])].forEach((item) => {
-          const qty = o.items?.[item.id] || 0;
-          if (qty > 0 && item.materialRecipe) {
-            Object.entries(item.materialRecipe || {}).forEach(([matId, usage]) => {
-              consumption[matId] = (consumption[matId] || 0) + qty * Number(usage || 0);
-            });
-          }
-        });
-      });
-
-      // Execute deduction (transaction-safe)
-      for (const [matId, qty] of Object.entries(consumption)) {
-        await runTransaction(db, async (tx) => {
-          const ref = doc(db, 'shops', shopId, 'materials', matId);
-          const snap = await tx.get(ref);
-
-          if (!snap.exists()) {
-            throw new Error(`MATERIAL_NOT_FOUND:${matId}`);
-          }
-
-          const mat = snap.data() as any;
-          const currentStock = Number(mat.stock || 0);
-          const nextStock = currentStock - Number(qty || 0);
-
-          if (Number.isNaN(nextStock)) {
-            throw new Error(`INVALID_STOCK_CALC:${matId}`);
-          }
-
-          tx.set(
-            ref,
-            {
-              ...mat,
-              stock: nextStock,
-              updatedAt: new Date().toISOString(),
-            },
-            { merge: true }
-          );
-        });
-      }
-
-      alert('庫存扣減完成！');
-    } catch (e: any) {
-      alert(`扣減庫存發生錯誤: ${e?.message || e}`);
-      console.error(e);
-    } finally {
-      setSyncingInv(false);
-    }
-  };
 
   if (loading || !dailyData) return null;
 
@@ -1576,15 +1552,6 @@ export default function DailyView({
             </div>
           </div>
         )}
-        
-        <button 
-          onClick={syncInventory}
-          disabled={syncingInv}
-          className="px-4 py-2 rounded-lg font-bold text-sm text-white bg-mint-brand shadow-sm hover:bg-mint-brand/80 active:scale-95 transition-all flex items-center justify-center gap-2 disabled:opacity-50 mt-4 md:mt-0"
-          title="根據本表配方自動扣減庫存"
-        >
-          {syncingInv ? '扣減中...' : '扣除今日庫存'}
-        </button>
       </div>
 
       {forcedSubTab === 'pos' && (
@@ -1601,7 +1568,13 @@ export default function DailyView({
               }}
               onPosCheckout={handlePosCheckout}
               onAddFutureOrder={handleAddFutureOrder}
-              onGoToDashboard={() => setSubTab('dashboard')}
+              onGoToDashboard={() => {
+                if (onNavigateToTab) {
+                  onNavigateToTab('daily', 'dashboard');
+                } else {
+                  setSubTab('dashboard');
+                }
+              }}
             />
       )}
 
@@ -1932,16 +1905,25 @@ export default function DailyView({
                           className="w-14 bg-transparent text-center font-mono font-bold text-coffee-700 outline-none border-b border-transparent focus:border-rose-brand"
                           value={order.shipAmt || ''} placeholder="0"
                           disabled={isCancelled}
-                          onChange={(e) => { const num = parseNum(e.target.value); updateOrderInDb(order.id, { shipAmt: num, actualAmt: (order.prodAmt || 0) + (order.shipAmt || 0) - (order.discAmt || 0) + (num - (order.shipAmt || 0)) }); }}
+                          onChange={(e) => { const num = parseNum(e.target.value); updateOrderInDb(order.id, { shipAmt: num, actualAmt: (order.prodAmt || 0) + num - (order.discAmt || 0) }); }}
                         />
                       </td>
-                      <td className="px-2 py-3 bg-[#e2ece9]/5">
+                      <td className="px-2 py-3 bg-[#e2ece9]/5 flex items-center justify-center gap-1 min-w-[76px]">
                         <input type="number"
-                          className="w-14 bg-transparent text-center font-mono font-bold text-rose-brand outline-none border-b border-transparent focus:border-rose-brand"
+                          className="w-10 bg-transparent text-center font-mono font-bold text-rose-brand outline-none border-b border-transparent focus:border-rose-brand"
                           value={order.discAmt || ''} placeholder="0"
                           disabled={isCancelled}
-                          onChange={(e) => { const num = parseNum(e.target.value); updateOrderInDb(order.id, { discAmt: num, actualAmt: (order.prodAmt || 0) + (order.shipAmt || 0) - (order.discAmt || 0) + (num - (order.discAmt || 0)) }); }}
+                          onChange={(e) => { const num = parseNum(e.target.value); updateOrderInDb(order.id, { discAmt: num, actualAmt: (order.prodAmt || 0) + (order.shipAmt || 0) - num }); }}
                         />
+                        {!isCancelled && (
+                          <button
+                            title="自動計算促銷折扣"
+                            onClick={() => handleAutoCalculateDiscount(order)}
+                            className="p-1 rounded text-gray-400 hover:text-rose-brand hover:bg-rose-50 transition-colors"
+                          >
+                            <Calculator className="w-3.5 h-3.5" />
+                          </button>
+                        )}
                       </td>
                       <td className="px-2 py-3 font-mono font-bold text-mint-brand bg-[#e2ece9]/10">${fmt(order.actualAmt)}</td>
                       {/* 收款狀態 */}

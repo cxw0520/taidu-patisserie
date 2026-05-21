@@ -695,6 +695,44 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       .filter(item => item.qty > 0);
   }, [validOrders, settings, dailyData.date]);
 
+  const promoUsageSummary = useMemo(() => {
+    const usage: Record<string, number> = {};
+    const isSameDay = (d1: string | undefined, d2: string | undefined) => {
+      if (!d1 || !d2) return false;
+      return d1.replace(/\//g, '-') === d2.replace(/\//g, '-');
+    };
+    const itemsList = [
+      ...(settings.giftItems || []),
+      ...(settings.singleItems || []),
+      ...(settings.customCategories || []).flatMap(c => c.items || [])
+    ].filter(i => i.active);
+
+    const promoRules = settings.promoRules || [];
+
+    validOrders.forEach(o => {
+      // 排除預購單與儲值金充值
+      const isPre = o.pickupDate && !isSameDay(o.pickupDate, dailyData.date);
+      if (isPre || o.orderType === 'topup') return;
+
+      const cart: { item: any; qty: number }[] = [];
+      Object.entries(o.items || {}).forEach(([itemId, qty]) => {
+        const matchItem = itemsList.find(it => it.id === itemId);
+        if (matchItem && Number(qty) > 0) {
+          cart.push({ item: matchItem, qty: Number(qty) });
+        }
+      });
+
+      if (cart.length === 0) return;
+
+      const pricing = calculateCartPricing(cart, [], itemsList, promoRules);
+      (pricing.appliedPromos || []).forEach(ap => {
+        usage[ap.ruleName] = (usage[ap.ruleName] || 0) + ap.count;
+      });
+    });
+
+    return Object.entries(usage).map(([name, count]) => ({ name, count }));
+  }, [validOrders, settings, dailyData.date]);
+
   if (!shift.isOpen && !shift.closeTime) {
     return (
       <div className="flex flex-col items-center justify-center py-20 space-y-6">
@@ -849,7 +887,33 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               </table>
             </section>
 
-            {/* 3. 付款方式彙整 */}
+            {/* 3. 今日套用優惠組合統計 */}
+            <section className="space-y-4">
+              <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">今日套用優惠組合統計</h3>
+              <table className="w-full border-collapse border border-gray-300 text-left text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="p-3 border border-gray-300">優惠組合名稱</th>
+                    <th className="p-3 border border-gray-300 text-right w-1/3">使用組數</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {promoUsageSummary.map(item => (
+                    <tr key={item.name}>
+                      <td className="p-3 border border-gray-300 font-bold text-coffee-800">{item.name}</td>
+                      <td className="p-3 border border-gray-300 text-right font-mono font-bold text-rose-600">{item.count} 組</td>
+                    </tr>
+                  ))}
+                  {promoUsageSummary.length === 0 && (
+                    <tr>
+                      <td colSpan={2} className="p-3 border border-gray-300 text-center text-gray-500 italic">今日無任何優惠組合套用紀錄</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </section>
+
+            {/* 4. 付款方式彙整 */}
             <section className="space-y-4">
               <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">付款方式彙整統計</h3>
               <table className="w-full border-collapse border border-gray-300 text-left text-sm">
