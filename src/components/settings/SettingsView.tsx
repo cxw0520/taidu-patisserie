@@ -521,19 +521,74 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
                       <input type="number" value={editingOp.baseRate || ''} onChange={e => setEditingOp({...editingOp, baseRate: Number(e.target.value)})} className="w-full pl-8 pr-3 py-3 border border-coffee-200 bg-white rounded-xl focus:ring-2 focus:ring-mint-brand outline-none font-mono" placeholder={editingOp.payrollType === 'monthly' ? '例如 36000' : '例如 190'} />
                     </div>
                   </div>
-                  <div className="flex items-center h-full md:pt-6">
-                    <label className="flex items-center gap-2.5 cursor-pointer p-3 border border-coffee-200 rounded-xl w-full bg-white select-none hover:bg-coffee-50 transition-all">
-                      <input 
-                        type="checkbox" 
-                        checked={editingOp.enableInsurance ?? true} 
-                        onChange={e => setEditingOp({...editingOp, enableInsurance: e.target.checked})} 
-                        className="w-5 h-5 text-coffee-600 rounded focus:ring-coffee-500 cursor-pointer" 
-                      />
-                      <div>
-                        <span className="font-bold text-xs text-coffee-800 block">計算勞健保</span>
-                        <span className="text-[9px] text-coffee-400 font-normal">若免保請取消勾選</span>
-                      </div>
-                    </label>
+                  <div className="flex flex-col gap-3 md:pt-1">
+                    <div className="space-y-1.5">
+                      <label className="flex items-center gap-2.5 cursor-pointer p-2 border border-coffee-200 rounded-xl w-full bg-white select-none hover:bg-coffee-50 transition-all">
+                        <input 
+                          type="checkbox" 
+                          checked={editingOp.enableLaborInsurance ?? true} 
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            setEditingOp({
+                              ...editingOp, 
+                              enableLaborInsurance: checked,
+                              laborInsuranceSalary: checked ? (editingOp.laborInsuranceSalary || editingOp.baseRate || 28200) : undefined
+                            });
+                          }} 
+                          className="w-4 h-4 text-coffee-600 rounded focus:ring-coffee-500 cursor-pointer" 
+                        />
+                        <div>
+                          <span className="font-bold text-xs text-coffee-800 block">計算勞保與勞退 (6%)</span>
+                          <span className="text-[9px] text-coffee-400 font-normal">若免保請取消勾選</span>
+                        </div>
+                      </label>
+                      {(editingOp.enableLaborInsurance ?? true) && (
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] font-bold text-coffee-400">勞退保申報薪資</span>
+                          <input 
+                            type="number" 
+                            value={editingOp.laborInsuranceSalary || ''} 
+                            onChange={e => setEditingOp({...editingOp, laborInsuranceSalary: Number(e.target.value)})} 
+                            className="w-full border border-coffee-200 bg-white rounded-xl py-2.5 pl-24 pr-3 text-xs focus:ring-1 focus:ring-mint-brand outline-none font-mono font-bold text-right text-coffee-700" 
+                            placeholder="留空同本薪" 
+                          />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <label className="flex items-center gap-2.5 cursor-pointer p-2 border border-coffee-200 rounded-xl w-full bg-white select-none hover:bg-coffee-50 transition-all">
+                        <input 
+                          type="checkbox" 
+                          checked={editingOp.enableHealthInsurance ?? true} 
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            setEditingOp({
+                              ...editingOp, 
+                              enableHealthInsurance: checked,
+                              healthInsuranceSalary: checked ? (editingOp.healthInsuranceSalary || editingOp.baseRate || 28200) : undefined
+                            });
+                          }} 
+                          className="w-4 h-4 text-coffee-600 rounded focus:ring-coffee-500 cursor-pointer" 
+                        />
+                        <div>
+                          <span className="font-bold text-xs text-coffee-800 block">計算健康保險 (健保)</span>
+                          <span className="text-[9px] text-coffee-400 font-normal">若免保請取消勾選</span>
+                        </div>
+                      </label>
+                      {(editingOp.enableHealthInsurance ?? true) && (
+                        <div className="relative">
+                          <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[9px] font-bold text-coffee-400">健保申報投保薪資</span>
+                          <input 
+                            type="number" 
+                            value={editingOp.healthInsuranceSalary || ''} 
+                            onChange={e => setEditingOp({...editingOp, healthInsuranceSalary: Number(e.target.value)})} 
+                            className="w-full border border-coffee-200 bg-white rounded-xl py-2.5 pl-24 pr-3 text-xs focus:ring-1 focus:ring-mint-brand outline-none font-mono font-bold text-right text-coffee-700" 
+                            placeholder="留空同本薪" 
+                          />
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div className="mt-6">
@@ -565,7 +620,7 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
                             <div>
                               <div className="text-sm font-bold text-coffee-800">{op.name}</div>
                               <div className="text-[10px] text-coffee-400 font-normal mt-0.5">
-                                {op.payrollType === 'monthly' ? '月薪制' : '時薪制'} · {op.enableInsurance !== false ? '🛡️ 計勞健保' : '❌ 不計勞健保'}
+                                {op.payrollType === 'monthly' ? '月薪制' : '時薪制'} · {op.enableLaborInsurance !== false ? '🛡️ 勞保/退' : '❌ 免勞保'} · {op.enableHealthInsurance !== false ? '🏥 健保' : '❌ 免健保'}
                               </div>
                             </div>
                           </td>

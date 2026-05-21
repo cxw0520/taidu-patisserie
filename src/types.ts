@@ -26,7 +26,10 @@ export interface Operator {
   // HR & Payroll
   payrollType?: 'hourly' | 'monthly';
   baseRate?: number; // Hourly rate or Monthly salary
-  enableInsurance?: boolean; // Whether to calculate labor/health insurance for this operator
+  enableLaborInsurance?: boolean; // Whether to calculate labor insurance for this operator
+  enableHealthInsurance?: boolean; // Whether to calculate health insurance for this operator
+  laborInsuranceSalary?: number; // 勞保/勞退申報投保薪資
+  healthInsuranceSalary?: number; // 健保申報投保薪資
 }
 
 export interface Material {

@@ -232,11 +232,17 @@ export default function RosterTab({
 
       // Simulate the exact company cost logic (including labor & health insurance + pension)
       let opCost = grossPay;
-      const needInsurance = settings.enableInsurance && op.enableInsurance !== false && (op.payrollType === 'monthly' || scheduledWorkDays > 0);
-      if (needInsurance) {
-        const laborInsComp = Math.round(grossPay * 0.1);
-        const healthInsComp = Math.round(grossPay * 0.0252 * 0.7);
-        const pensionComp = Math.round(grossPay * 0.06);
+      const hasRosterOrMonthly = op.payrollType === 'monthly' || scheduledWorkDays > 0;
+      if (settings.enableInsurance && hasRosterOrMonthly) {
+        const calcLabor = op.enableLaborInsurance !== false;
+        const calcHealth = op.enableHealthInsurance !== false;
+
+        const laborBase = op.laborInsuranceSalary || grossPay;
+        const healthBase = op.healthInsuranceSalary || grossPay;
+
+        const laborInsComp = calcLabor ? Math.round(laborBase * 0.1) : 0;
+        const pensionComp = calcLabor ? Math.round(laborBase * 0.06) : 0;
+        const healthInsComp = calcHealth ? Math.round(healthBase * 0.0252 * 0.7) : 0;
 
         opCost = grossPay + laborInsComp + healthInsComp + pensionComp;
       }

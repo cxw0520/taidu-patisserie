@@ -73,6 +73,7 @@ function calcPayroll(
   let holidayScheduledMinutes = 0;
 
   Object.values(records).forEach(rec => {
+    if (!rec) return;
     const effMin = rec.effectiveMinutes || 0;
     if (effMin <= 0) return;
 
@@ -166,22 +167,40 @@ function calcPayroll(
 
   // Insurance (when enabled globally AND for this specific employee)
   let laborInsEmp = 0, healthInsEmp = 0, pensionEmp = 0;
-  if (settings.enableInsurance && op.enableInsurance !== false) {
-    laborInsEmp = Math.round(grossPay * 0.021);
-    healthInsEmp = Math.round(grossPay * 0.0252 * 0.3);
-    pensionEmp = 0; // pension is employer-only
-    lineItems.push({ label: `勞保自付額 (2.1%)`, amount: laborInsEmp, type: 'deduct' });
-    lineItems.push({ label: `健保自付額 (2.52%×30%)`, amount: healthInsEmp, type: 'deduct' });
+  let laborInsComp = 0, healthInsComp = 0, pensionComp = 0;
+
+  if (settings.enableInsurance) {
+    const calcLabor = op.enableLaborInsurance !== false;
+    const calcHealth = op.enableHealthInsurance !== false;
+
+    const laborBase = op.laborInsuranceSalary || grossPay;
+    const healthBase = op.healthInsuranceSalary || grossPay;
+
+    if (calcLabor) {
+      laborInsEmp = Math.round(laborBase * 0.021);
+      pensionEmp = 0; // pension is employer-only
+      laborInsComp = Math.round(laborBase * 0.1);
+      pensionComp = Math.round(laborBase * 0.06);
+
+      if (laborInsEmp > 0) {
+        const sourceLabel = op.laborInsuranceSalary ? `申報$${laborBase}` : `薪資$${laborBase}`;
+        lineItems.push({ label: `勞保自付額 (${sourceLabel} × 2.1%)`, amount: laborInsEmp, type: 'deduct' });
+      }
+    }
+
+    if (calcHealth) {
+      healthInsEmp = Math.round(healthBase * 0.0252 * 0.3);
+      healthInsComp = Math.round(healthBase * 0.0252 * 0.7);
+
+      if (healthInsEmp > 0) {
+        const sourceLabel = op.healthInsuranceSalary ? `申報$${healthBase}` : `薪資$${healthBase}`;
+        lineItems.push({ label: `健保自付額 (${sourceLabel} × 2.52%×30%)`, amount: healthInsEmp, type: 'deduct' });
+      }
+    }
   }
 
   const netPay = Math.max(0, grossPay - laborInsEmp - healthInsEmp - pensionEmp);
-
-  let laborInsComp = 0, healthInsComp = 0, pensionComp = 0;
-  if (settings.enableInsurance && op.enableInsurance !== false) {
-    laborInsComp = Math.round(grossPay * 0.1);
-    healthInsComp = Math.round(grossPay * 0.0252 * 0.7);
-    pensionComp = Math.round(grossPay * 0.06);
-  }
+  const companyCost = grossPay + laborInsComp + healthInsComp + pensionComp;
 
   return {
     operatorId: op.id,
@@ -204,7 +223,7 @@ function calcPayroll(
     healthInsuranceCompany: healthInsComp,
     pensionCompany: pensionComp,
     netPay,
-    companyCost: settings.enableInsurance ? (op.enableInsurance !== false ? grossPay + laborInsComp + healthInsComp + pensionComp : grossPay) : grossPay,
+    companyCost,
     lineItems,
   };
 }

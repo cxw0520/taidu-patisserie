@@ -142,9 +142,11 @@ export default function AttendanceTab({
     let lateDays = 0;
     let workedDays = 0;
     (Object.values(attendanceData) as AttendanceRecord[]).forEach(rec => {
-      if ((rec.effectiveMinutes || 0) > 0) workedDays++;
-      totalMinutes += rec.effectiveMinutes || 0;
-      if (rec.isLate) lateDays++;
+      if (rec) {
+        if ((rec.effectiveMinutes || 0) > 0) workedDays++;
+        totalMinutes += rec.effectiveMinutes || 0;
+        if (rec.isLate) lateDays++;
+      }
     });
     return { totalMinutes, lateDays, workedDays };
   }, [attendanceData]);
@@ -334,7 +336,7 @@ export default function AttendanceTab({
                 <button onClick={() => setEditRecord(null)} className="p-1 hover:bg-coffee-50 rounded-full"><X className="w-4 h-4" /></button>
               </div>
               <div className="space-y-2 max-h-64 overflow-y-auto">
-                {editRecord.punches.map(p => (
+                {(editRecord.punches || []).map(p => (
                   <div key={p.id} className="flex items-center gap-3 p-3 bg-coffee-50 rounded-2xl">
                     <span className={cn("text-lg", p.type === 'clock_in' ? '⬆️' : '⬇️')} />
                     <div className="flex-1">
