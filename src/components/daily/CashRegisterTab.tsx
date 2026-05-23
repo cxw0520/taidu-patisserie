@@ -1541,22 +1541,6 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             </div>
     
             <div className="p-4 border-t border-coffee-100 bg-white space-y-3">
-              {/* 今日退款摘要（有退款才顯示） */}
-              {(shift.expenses || []).filter(e => e.type === 'refund').length > 0 && (
-                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 space-y-1.5 shadow-sm">
-                  <div className="text-[10px] font-bold text-amber-600 tracking-wider flex items-center justify-between">
-                    <span className="flex items-center gap-1">📤 今日退款紀錄</span>
-                    <span className="font-mono text-red-500">合計 -${fmt((shift.expenses || []).filter(e => e.type === 'refund').reduce((s, e) => s + e.amount, 0))}</span>
-                  </div>
-                  {(shift.expenses || []).filter(e => e.type === 'refund').map(e => (
-                    <div key={e.id} className="flex justify-between text-xs text-amber-700 font-bold">
-                      <span className="truncate flex-1">{e.reason}</span>
-                      <span className="font-mono text-amber-500 shrink-0 ml-2">{e.time}</span>
-                      <span className="font-mono text-red-500 shrink-0 ml-2">-${fmt(e.amount)}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
               {/* 已套用優惠折扣清單 */}
               {cartPricing.discount > 0 && (
                 <div className="bg-emerald-50/50 border border-emerald-100/80 rounded-2xl p-3 space-y-1.5 shadow-sm">
@@ -2255,6 +2239,7 @@ function CurrencyModal({ title, onClose, onSubmit, currency, setCurrency, isClos
   let todaySalesCash = 0;
   let preorderSalesCash = 0;
   let topupCashAmt = 0;
+  let totalRefundAmt = 0;
   let expected = 0;
 
   if (isClosing && dailyData) {
@@ -2268,8 +2253,9 @@ function CurrencyModal({ title, onClose, onSubmit, currency, setCurrency, isClos
       .filter((o: any) => o.orderType === 'topup' && o.status === '現結')
       .reduce((sum: number, o: any) => sum + (o.actualAmt || 0), 0);
       
+    totalRefundAmt = (shiftData?.expenses || []).filter((e: any) => e.type === 'refund').reduce((s: number, e: any) => s + e.amount, 0);
     const cashSales = todaySalesCash + preorderSalesCash + topupCashAmt;
-    expected = (shiftData?.openingTotal || 0) + cashSales;
+    expected = (shiftData?.openingTotal || 0) + cashSales - totalRefundAmt;
   }
 
   return (
@@ -2326,6 +2312,10 @@ function CurrencyModal({ title, onClose, onSubmit, currency, setCurrency, isClos
                     <span className="font-mono">+${fmt(topupCashAmt)}</span>
                   </div>
                 )}
+                <div className="flex justify-between text-sm text-rose-300">
+                  <span className="opacity-60">退款給客人 (現出)</span>
+                  <span className="font-mono">-${fmt(totalRefundAmt)}</span>
+                </div>
                 <div className="h-px bg-white/10 my-2" />
                 <div className="flex justify-between text-sm font-bold">
                   <span className="opacity-60">應有現金金額</span>
