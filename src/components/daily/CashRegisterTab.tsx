@@ -195,6 +195,10 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   // Keypad state for checkout modal
   const [receivedInput, setReceivedInput] = useState('');
 
+  // Refund modal state
+  const [refundModal, setRefundModal] = useState(false);
+  const [refundForm, setRefundForm] = useState({ amount: '', reason: '' });
+
   // Form states
   const [checkoutData, setCheckoutData] = useState({
     buyer: '現客',
@@ -232,7 +236,14 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     calculateCartPricing(cart, loadedOrders, allItemsList, settings?.promoRules || [])
   , [cart, loadedOrders, allItemsList, settings?.promoRules]);
 
-  const totalNewItemsAmt = Math.max(0, cartPricing.cartSubtotal - cartPricing.discount);
+  // Delta 折扣法：POS 算出的優惠總折扣先扣除已載入舊訂單原本的 discAmt 合計
+  // 確保已折過的舊訂單不會被重複折讓，但品項仍在優惠池中（加購湊組合仍有效）
+  const loadedOrdersOriginalDisc = useMemo(() =>
+    loadedOrders.reduce((s, lo) => s + (lo.order.discAmt || 0), 0)
+  , [loadedOrders]);
+  const effectivePromoDiscount = Math.max(0, cartPricing.discount - loadedOrdersOriginalDisc);
+
+  const totalNewItemsAmt = Math.max(0, cartPricing.cartSubtotal - effectivePromoDiscount);
 
   // Amount still owed from loaded orders (unpaid ones)
   const totalLoadedUnpaid = useMemo(() =>
@@ -240,7 +251,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   , [loadedOrders]);
 
   // Grand total to collect
-  const totalCartAmt = Math.max(0, (cartPricing.cartSubtotal + totalLoadedUnpaid) - cartPricing.discount);
+  const totalCartAmt = Math.max(0, (cartPricing.cartSubtotal + totalLoadedUnpaid) - effectivePromoDiscount);
   const finalDueAmount = totalCartAmt - checkoutData.discAmt;
 
   const addToCart = (item: Item) => {
@@ -423,7 +434,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
       }
     }
 
-    const totalDiscAmt = cartPricing.discount + checkoutData.discAmt;
+    const totalDiscAmt = effectivePromoDiscount + checkoutData.discAmt;
     const finalActualAmt = Math.max(0, cartPricing.cartSubtotal - totalDiscAmt);
     const promoNotes = cartPricing.appliedPromos.map(ap => `${ap.ruleName} × ${ap.count}`).join(', ');
 
@@ -548,7 +559,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     const cashSales = dailyData.orders
       .filter(o => o.status === '現結')
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-    const expected = shift.openingTotal + cashSales;
+    // 扣除退款給客人的現金流出（type === 'refund'）
+    const totalRefunds = (shift.expenses || []).filter(e => e.type === 'refund').reduce((s, e) => s + e.amount, 0);
+    const expected = shift.openingTotal + cashSales - totalRefunds;
     
     updateDaily({
       cashRegister: {
@@ -566,13 +579,35 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     setIsEditing(false);
   };
 
+  const handleAddRefund = () => {
+    const amt = Number(refundForm.amount);
+    if (!amt || amt <= 0) { alert('請輸入有效的退款金額'); return; }
+    if (!refundForm.reason.trim()) { alert('請填寫退款原因（例如：匯款超付）'); return; }
+    const newRefund: CashExpense = {
+      id: uid(),
+      amount: amt,
+      reason: refundForm.reason.trim(),
+      time: new Date().toLocaleTimeString(),
+      type: 'refund'
+    };
+    updateDaily({
+      cashRegister: {
+        ...shift,
+        expenses: [...(shift.expenses || []), newRefund]
+      }
+    });
+    setRefundModal(false);
+    setRefundForm({ amount: '', reason: '' });
+  };
+
   const handleUpdateClosingCash = () => {
     const total = Object.entries(currencyForm).reduce((sum, [val, count]) => sum + (Number(val) * (count as number)), 0);
     // 計算所有現結收入（含 POS、匯入、手動新增）
     const cashSales = dailyData.orders
       .filter(o => o.status === '現結')
       .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-    const expected = shift.openingTotal + cashSales;
+    const totalRefunds = (shift.expenses || []).filter(e => e.type === 'refund').reduce((s, e) => s + e.amount, 0);
+    const expected = shift.openingTotal + cashSales - totalRefunds;
 
     const diffs: string[] = [];
     Object.entries(currencyForm).forEach(([val, count]) => {
@@ -1217,6 +1252,12 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                   <DollarSign className="w-4 h-4" /> 儲值充值
                 </button>
                 <button
+                  onClick={() => { setRefundModal(true); setRefundForm({ amount: '', reason: '' }); }}
+                  className="px-4 py-2 bg-amber-50 text-amber-700 rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-amber-100 transition-all border border-amber-100"
+                >
+                  <TrendingDown className="w-4 h-4" /> 退款給客人
+                </button>
+                <button
                   onClick={() => setCloseShiftModal(true)}
                   className="px-4 py-2 bg-coffee-800 text-white rounded-xl text-sm font-bold flex items-center gap-2 hover:bg-coffee-900 transition-all"
                 >
@@ -1836,6 +1877,76 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               >
                 確定修改
               </button>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Refund Modal ── */}
+      <AnimatePresence>
+        {refundModal && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setRefundModal(false)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel w-full max-w-sm bg-white border-0 shadow-2xl rounded-3xl relative z-10 overflow-hidden">
+              <div className="flex justify-between items-center px-7 pt-6 pb-4 border-b border-coffee-50">
+                <h3 className="text-lg font-bold text-coffee-800 flex items-center gap-2">
+                  <TrendingDown className="w-5 h-5 text-amber-500" /> 退款給客人
+                </h3>
+                <button onClick={() => setRefundModal(false)} className="p-2 hover:bg-coffee-50 rounded-full"><X className="w-5 h-5 text-coffee-400" /></button>
+              </div>
+              <div className="px-7 py-5 space-y-4">
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-700 font-bold">
+                  ⚠️ 退款現金流出將計入當日帳面應有現金，盤點時自動扣除。
+                </div>
+
+                {/* 已登記的退款紀錄 */}
+                {(shift.expenses || []).filter(e => e.type === 'refund').length > 0 && (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-bold text-coffee-400 uppercase tracking-wider">今日退款紀錄</p>
+                    {(shift.expenses || []).filter(e => e.type === 'refund').map(e => (
+                      <div key={e.id} className="flex justify-between items-center p-2.5 bg-amber-50 rounded-xl text-xs font-bold">
+                        <span className="text-amber-700 truncate flex-1">{e.reason}</span>
+                        <span className="font-mono text-amber-800 shrink-0 ml-2">{e.time}</span>
+                        <span className="font-mono text-rose-600 shrink-0 ml-3">-${fmt(e.amount)}</span>
+                      </div>
+                    ))}
+                    <div className="flex justify-between text-xs font-bold text-rose-600 px-2.5">
+                      <span>退款合計</span>
+                      <span className="font-mono">-${fmt((shift.expenses || []).filter(e => e.type === 'refund').reduce((s, e) => s + e.amount, 0))}</span>
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="text-xs font-bold text-coffee-400 block mb-1.5">退款金額（現金）</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">$</span>
+                    <input
+                      type="number"
+                      value={refundForm.amount}
+                      onChange={e => setRefundForm(p => ({ ...p, amount: e.target.value }))}
+                      placeholder="例如：150"
+                      className="w-full pl-7 pr-4 py-3 bg-coffee-50 border border-coffee-100 rounded-xl text-sm font-bold font-mono text-coffee-700 outline-none focus:border-amber-400"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-coffee-400 block mb-1.5">退款原因</label>
+                  <input
+                    type="text"
+                    value={refundForm.reason}
+                    onChange={e => setRefundForm(p => ({ ...p, reason: e.target.value }))}
+                    placeholder="例如：匯款超付退差額"
+                    className="w-full px-4 py-3 bg-coffee-50 border border-coffee-100 rounded-xl text-sm font-bold text-coffee-700 outline-none focus:border-amber-400"
+                  />
+                </div>
+                <button
+                  onClick={handleAddRefund}
+                  className="w-full py-3.5 bg-amber-500 text-white rounded-2xl font-bold shadow-lg shadow-amber-100 hover:bg-amber-600 transition-all active:scale-95 flex items-center justify-center gap-2"
+                >
+                  <TrendingDown className="w-4 h-4" /> 確認退款
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
