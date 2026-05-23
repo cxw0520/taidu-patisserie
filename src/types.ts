@@ -229,6 +229,7 @@ export interface CashExpense {
   amount: number;
   reason: string;
   time: string;
+  type?: 'expense' | 'refund'; // 'refund' = 退款給客人現金
 }
 
 export interface CashRegisterShift {

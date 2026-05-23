@@ -1357,6 +1357,33 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             </div>
     
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {/* Note reminders for selected customer or loaded orders */}
+              {((selectedCust && selectedCust.note) || (loadedOrders.some(lo => lo.order.note))) && (
+                <div className="space-y-2">
+                  {selectedCust && selectedCust.note && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-2xl flex items-start gap-2 text-xs text-amber-800 font-bold shadow-sm">
+                      <span className="shrink-0 text-base">💡</span>
+                      <div className="flex-1">
+                        <span className="text-[10px] text-amber-500 block uppercase tracking-wider font-extrabold mb-0.5">顧客備註（會員: {selectedCust.name}）</span>
+                        <div className="break-all">{selectedCust.note}</div>
+                      </div>
+                    </div>
+                  )}
+                  {loadedOrders.map(lo => {
+                    if (!lo.order.note) return null;
+                    return (
+                      <div key={`note-${lo.order.id}`} className="p-3 bg-rose-50 border border-rose-100 rounded-2xl flex items-start gap-2 text-xs text-rose-800 font-bold shadow-sm">
+                        <span className="shrink-0 text-base">📌</span>
+                        <div className="flex-1">
+                          <span className="text-[10px] text-rose-400 block uppercase tracking-wider font-extrabold mb-0.5">訂單備註（買受人: {lo.order.buyer || '現客'}）</span>
+                          <div className="break-all">{lo.order.note}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
               {/* Loaded existing orders */}
               {loadedOrders.length > 0 && (
                 <div className="space-y-2">
