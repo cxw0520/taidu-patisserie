@@ -1113,8 +1113,9 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                 .filter(o => o.orderType === 'topup' && o.status === '現結')
                 .reduce((sum, o) => sum + (o.actualAmt || 0), 0);
                 
+              const totalRefundAmt = (shift.expenses || []).filter(e => e.type === 'refund').reduce((s, e) => s + e.amount, 0);
               const currentCashSales = todaySalesCash + preorderSalesCash + topupCashAmt;
-              const currentExpected = shift.openingTotal + currentCashSales;
+              const currentExpected = shift.openingTotal + currentCashSales - totalRefundAmt;
               const currentOverShort = (shift.closingTotal || 0) - currentExpected;
 
               return (
@@ -1126,6 +1127,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                       <div className="flex justify-between text-sm"><span>+ 今日銷售 (現結):</span> <span className="font-mono">${fmt(todaySalesCash)}</span></div>
                       <div className="flex justify-between text-sm text-amber-600"><span>+ 商品預購金額 (現結):</span> <span className="font-mono">${fmt(preorderSalesCash)}</span></div>
                       <div className="flex justify-between text-sm text-emerald-600"><span>+ 儲值金額 (現結):</span> <span className="font-mono">${fmt(topupCashAmt)}</span></div>
+                      <div className="flex justify-between text-sm text-red-600 font-bold"><span>− 退款給客人 (現出):</span> <span className="font-mono">-${fmt(totalRefundAmt)}</span></div>
                       <div className="border-t-2 border-gray-800 pt-2 flex justify-between font-bold text-lg">
                         <span>應有現金金額:</span> 
                         <span className="font-mono">${fmt(currentExpected)}</span>
@@ -1147,6 +1149,37 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                 </section>
               );
             })()}
+
+            {/* 退款紀錄 */}
+            {(shift.expenses || []).filter(e => e.type === 'refund').length > 0 && (
+              <section className="space-y-4">
+                <h3 className="font-bold border-b-2 border-gray-800 pb-1 text-lg">今日退款紀錄</h3>
+                <table className="w-full border-collapse border border-gray-300 text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="p-3 border border-gray-300 text-left">退款原因</th>
+                      <th className="p-3 border border-gray-300 text-center w-24">時間</th>
+                      <th className="p-3 border border-gray-300 text-right w-28">退款金額</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(shift.expenses || []).filter(e => e.type === 'refund').map(e => (
+                      <tr key={e.id}>
+                        <td className="p-3 border border-gray-300">{e.reason}</td>
+                        <td className="p-3 border border-gray-300 text-center font-mono text-xs">{e.time}</td>
+                        <td className="p-3 border border-gray-300 text-right font-mono font-bold text-red-600">-${fmt(e.amount)}</td>
+                      </tr>
+                    ))}
+                    <tr className="bg-gray-100">
+                      <td colSpan={2} className="p-3 border border-gray-300 font-bold text-right">退款合計</td>
+                      <td className="p-3 border border-gray-300 text-right font-mono font-bold text-red-700 text-lg">
+                        -${fmt((shift.expenses || []).filter(e => e.type === 'refund').reduce((s, e) => s + e.amount, 0))}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </section>
+            )}
 
             {shift.editLogs && shift.editLogs.length > 0 && (
               <div className="p-4 bg-gray-50 border border-gray-200 text-xs text-gray-500 space-y-1">
@@ -1508,6 +1541,22 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
             </div>
     
             <div className="p-4 border-t border-coffee-100 bg-white space-y-3">
+              {/* 今日退款摘要（有退款才顯示） */}
+              {(shift.expenses || []).filter(e => e.type === 'refund').length > 0 && (
+                <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 space-y-1.5 shadow-sm">
+                  <div className="text-[10px] font-bold text-amber-600 tracking-wider flex items-center justify-between">
+                    <span className="flex items-center gap-1">📤 今日退款紀錄</span>
+                    <span className="font-mono text-red-500">合計 -${fmt((shift.expenses || []).filter(e => e.type === 'refund').reduce((s, e) => s + e.amount, 0))}</span>
+                  </div>
+                  {(shift.expenses || []).filter(e => e.type === 'refund').map(e => (
+                    <div key={e.id} className="flex justify-between text-xs text-amber-700 font-bold">
+                      <span className="truncate flex-1">{e.reason}</span>
+                      <span className="font-mono text-amber-500 shrink-0 ml-2">{e.time}</span>
+                      <span className="font-mono text-red-500 shrink-0 ml-2">-${fmt(e.amount)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
               {/* 已套用優惠折扣清單 */}
               {cartPricing.discount > 0 && (
                 <div className="bg-emerald-50/50 border border-emerald-100/80 rounded-2xl p-3 space-y-1.5 shadow-sm">
