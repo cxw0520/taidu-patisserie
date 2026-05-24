@@ -44,6 +44,7 @@ import SettingsTab from './daily/SettingsTab';
 import ImportTab from './daily/ImportTab';
 import AddOrderModal from './daily/AddOrderModal';
 import PhoneSearchModal from './daily/PhoneSearchModal';
+import BackupModal from './daily/BackupModal';
 import { upsertCustomerFromOrder, MergeConflictModal } from './CustomerView';
 import { Customer } from '../types';
 import { useRef } from 'react';
@@ -196,6 +197,7 @@ export default function DailyView({
   const [loadedDateKey, setLoadedDateKey] = useState('');
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [showBackupModal, setShowBackupModal] = useState(false);
   
   // Offline caching & Conflict resolution states
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -616,19 +618,40 @@ export default function DailyView({
               updateId: ''
             };
 
-            // 立即寫入 Firestore 以防同步衝突
+            // 立即以 Transaction 寫入 Firestore，防範因連線短暫中斷造成的覆寫
             try {
-              await setDoc(
-                doc(db, 'shops', shopId, 'daily', targetDateKey),
-                newData,
-                { merge: false }
-              );
-              setLoadedDateKey(targetDateKey);
-              setDailyData(newData);
+              const docRef = doc(db, 'shops', shopId, 'daily', targetDateKey);
+              await runTransaction(db, async (transaction) => {
+                const sfDoc = await transaction.get(docRef);
+                if (!sfDoc.exists()) {
+                  transaction.set(docRef, newData);
+                  if (!cancelled) {
+                    setLoadedDateKey(targetDateKey);
+                    setDailyData(newData);
+                  }
+                } else {
+                  // 如果伺服器上其實有資料，不做任何覆寫，直接載入已存在的資料
+                  const existingData = sfDoc.data() as DailyReport;
+                  if (!cancelled) {
+                    setLoadedDateKey(targetDateKey);
+                    setDailyData({
+                      ...existingData,
+                      date: targetDateKey,
+                      orders: existingData.orders || [],
+                      losses: existingData.losses || [],
+                      inventory: existingData.inventory || {},
+                      packagingUsage: existingData.packagingUsage || {},
+                      ar: { ...defaultAr(), ...(existingData.ar || {}) }
+                    });
+                  }
+                }
+              });
             } catch (err) {
-              console.error('[帶入] 寫入 Firestore 失敗:', err);
-              setLoadedDateKey(targetDateKey);
-              setDailyData(newData);
+              console.error('[帶入] 寫入/驗證 Firestore 失敗:', err);
+              if (!cancelled) {
+                setLoadedDateKey(targetDateKey);
+                setDailyData(newData);
+              }
             }
           }
           if (!cancelled) setLoading(false);
@@ -694,6 +717,35 @@ export default function DailyView({
     }, 1000);
     return () => clearTimeout(t);
   }, [dailyData, currentDate, loadedDateKey, loading, shopId]);
+
+  // ── Auto Backup Every 30 Minutes ──
+  useEffect(() => {
+    if (!dailyData || !isOnline) return;
+    const currentKey = normalizeDateKey(currentDate);
+    if (loadedDateKey !== currentKey) return;
+
+    const checkAndBackup = async () => {
+      try {
+        const lastBackupStr = localStorage.getItem(`last_backup_${loadedDateKey}`);
+        const lastBackupTime = lastBackupStr ? parseInt(lastBackupStr, 10) : 0;
+        const now = Date.now();
+        if (now - lastBackupTime > 30 * 60 * 1000) {
+          const backupRef = doc(db, 'shops', shopId, 'daily', loadedDateKey, 'backups', `bkp_${now}`);
+          await setDoc(backupRef, {
+             ...dailyData,
+             _backupTimestamp: now
+          });
+          localStorage.setItem(`last_backup_${loadedDateKey}`, now.toString());
+        }
+      } catch (err) {
+        console.error("Auto Backup Failed:", err);
+      }
+    };
+    
+    checkAndBackup();
+    const interval = setInterval(checkAndBackup, 5 * 60 * 1000); // Check every 5 mins
+    return () => clearInterval(interval);
+  }, [dailyData, currentDate, loadedDateKey, isOnline, shopId]);
 
   const updateDaily = (patchOrFn: Partial<DailyReport> | ((prev: DailyReport) => Partial<DailyReport>)) => {
     setDailyData(prev => {
@@ -1478,15 +1530,19 @@ export default function DailyView({
             
             {/* Offline status indicator */}
             {!isOnline && (
-              <span className="ml-3 px-2 py-1 rounded bg-amber-500 text-white font-bold text-[10px] flex items-center gap-1 animate-pulse">
-                <AlertTriangle className="w-3 h-3" /> 離線模式 (已暫存)
-              </span>
+              <div className="flex items-center gap-1.5 px-2 py-1 bg-rose-50 border border-rose-200 text-rose-600 rounded-lg" title="您目前處於離線狀態。所有操作會先暫存，等網路恢復後自動同步。">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>離線模式</span>
+              </div>
             )}
-            {isOnline && offlineActions.length > 0 && (
-              <span className="ml-3 px-2 py-1 rounded bg-mint-brand text-white font-bold text-[10px] flex items-center gap-1">
-                <RefreshCw className="w-3 h-3 animate-spin" /> 連線同步中 ({offlineActions.length})
-              </span>
-            )}
+
+            <button
+              onClick={() => setShowBackupModal(true)}
+              className="ml-2 px-2.5 py-1 bg-coffee-100 hover:bg-coffee-200 text-coffee-600 rounded-lg flex items-center gap-1.5 transition border border-coffee-200 font-bold"
+            >
+              <History className="w-3.5 h-3.5" />
+              <span>時光機</span>
+            </button>
           </div>
         </div>
 
@@ -2075,6 +2131,18 @@ export default function DailyView({
               </table>
             </div>
           </div>
+
+          {/* ── Backup Modal ── */}
+          <AnimatePresence>
+            {showBackupModal && (
+              <BackupModal
+                shopId={shopId}
+                dateKey={loadedDateKey}
+                onClose={() => setShowBackupModal(false)}
+                onRestore={() => setLoadedDateKey('')} // Trigger reload
+              />
+            )}
+          </AnimatePresence>
 
           {/* ── Add Order Modal ── */}
           <AnimatePresence>

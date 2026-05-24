@@ -105,32 +105,45 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
       headers.forEach((h, colIdx) => {
         if (!h || typeof h !== 'string') return;
         const cleanH = h.trim();
+        
+        // 1. 分流判斷 (看有沒有盒/顆等關鍵字)
         const isGBHeader = cleanH.includes('禮盒') || cleanH.includes('盒');
-        const isSGHeader = cleanH.includes('單顆') || cleanH.includes('個');
+        const isSGHeader = cleanH.includes('單顆') || cleanH.includes('個') || cleanH.includes('單');
+
+        // 建立正規化函式：過濾掉所有的全半形括號與空白
+        const normalize = (s: string) => s.replace(/[\s\(\)（）]/g, '');
+        const normH = normalize(cleanH);
 
         let bestMatch = null;
+        let searchPool: any[] = [];
+
         if (isGBHeader) {
-          bestMatch = (settings.giftItems || []).find((i) => cleanH.includes(i.name) || i.name.includes(cleanH));
-          if (!bestMatch) {
-            if (cleanH.includes('綜合')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('綜合'));
-            if (cleanH.includes('原味')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('原味'));
-            if (cleanH.includes('伯爵')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('伯爵'));
-            if (cleanH.includes('可可')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('可可'));
-            if (cleanH.includes('抹茶')) bestMatch = (settings.giftItems || []).find(i => i.name.includes('抹茶'));
-          }
+          searchPool = settings.giftItems || [];
         } else if (isSGHeader) {
-          bestMatch = (settings.singleItems || []).find((i) => cleanH.includes(i.name) || i.name.includes(cleanH));
-          if (!bestMatch) {
-            if (cleanH.includes('原味')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('原味'));
-            if (cleanH.includes('伯爵')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('伯爵'));
-            if (cleanH.includes('可可')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('可可'));
-            if (cleanH.includes('抹茶')) bestMatch = (settings.singleItems || []).find(i => i.name.includes('抹茶'));
-          }
+          searchPool = settings.singleItems || [];
+        } else {
+          // 都沒有關鍵字，兩邊都找
+          searchPool = [...(settings.giftItems || []), ...(settings.singleItems || [])];
         }
 
+        // 2. 進行消除干擾後的雙向模糊比對
+        bestMatch = searchPool.find((i) => {
+          if (!i.name) return false;
+          const normI = normalize(i.name);
+          return normH.includes(normI) || normI.includes(normH);
+        });
+
+        // 3. 救援機制：如果真的找不到，再退回最寬鬆的口味關鍵字搜尋
         if (!bestMatch) {
-          bestMatch = (settings.giftItems || []).find((i) => cleanH.includes(i.name)) || 
-                      (settings.singleItems || []).find((i) => cleanH.includes(i.name));
+          const tryKeywords = (pool: any[]) => {
+            if (normH.includes('綜合')) return pool.find(i => i.name.includes('綜合'));
+            if (normH.includes('原味')) return pool.find(i => i.name.includes('原味'));
+            if (normH.includes('伯爵')) return pool.find(i => i.name.includes('伯爵'));
+            if (normH.includes('可可')) return pool.find(i => i.name.includes('可可'));
+            if (normH.includes('抹茶')) return pool.find(i => i.name.includes('抹茶'));
+            return null;
+          };
+          bestMatch = tryKeywords(searchPool);
         }
 
         if (bestMatch && !itemMap.some((m) => m.colIdx === colIdx)) {
@@ -320,10 +333,6 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
         );
       }
       // ──────────────────────────────────────────────────────────
-
-      if (currentDateOrdersToAppend.length > 0) {
-        updateDaily({ orders: [...dailyData.orders, ...currentDateOrdersToAppend] });
-      }
 
       setRefreshKey(prev => prev + 1);
       setImportText('');
