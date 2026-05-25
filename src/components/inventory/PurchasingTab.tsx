@@ -236,7 +236,8 @@ export default function PurchasingTab({
       vendor: formData.vendor!,
       lines: normalizedLines,
       totalAmount: totalAmt,
-      notes: formData.notes || ''
+      notes: formData.notes || '',
+      paymentType: formData.paymentType || '現結'
     };
 
     let deltaByMaterial: Record<string, { qty: number; amount: number }> = {};
