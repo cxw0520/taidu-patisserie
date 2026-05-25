@@ -23,7 +23,8 @@ import {
   Download,
   Users,
   Clock,
-  Target
+  Target,
+  ChevronDown
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { db, auth } from './lib/firebase';
@@ -75,6 +76,7 @@ export default function App() {
     return JSON.parse(localStorage.getItem('app_global_subtabs') || '{}');
   });
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
+  const [openSection, setOpenSection] = useState<string | null>(null);
 
   useEffect(() => {
     localStorage.setItem('app_active_tab', activeTab);
@@ -87,6 +89,19 @@ export default function App() {
       setGlobalSubTabs(prev => ({ ...prev, [tab]: subTab }));
     }
     setIsDrawerOpen(false);
+  };
+
+  const toggleSection = (section: string) => {
+    setOpenSection(prev => prev === section ? null : section);
+  };
+
+  const openDrawer = () => {
+    const sectionMap: Record<string, string> = {
+      journal: 'finance', daily: 'reports', monthly: 'reports',
+      hr: 'hr', inventory: 'operations', cost: 'operations', customers: 'operations',
+    };
+    setOpenSection(sectionMap[activeTab] || null);
+    setIsDrawerOpen(true);
   };
 
   const NavMenuItem = ({ label, icon, onClick, active }: { label: string, icon: any, onClick: () => void, active: boolean }) => (
@@ -392,7 +407,7 @@ export default function App() {
               <span className="hidden sm:inline font-bold text-sm">鎖定</span>
             </button>
           )}
-          <button onClick={() => setIsDrawerOpen(true)} className="p-2 bg-coffee-800 text-white rounded-xl shadow-lg hover:bg-coffee-900 transition flex items-center gap-2">
+          <button onClick={openDrawer} className="p-2 bg-coffee-800 text-white rounded-xl shadow-lg hover:bg-coffee-900 transition flex items-center gap-2">
             <Menu className="w-6 h-6" />
             <span className="hidden sm:inline font-bold">選單</span>
           </button>
@@ -440,77 +455,109 @@ export default function App() {
                 </div>
               )}
 
-              {hasPermission('finance') && (
-                <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
-                  <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">財務會計</h3>
-                  <div className="space-y-1">
-                    <NavMenuItem label="日記簿" icon={<BookOpen />} onClick={() => navigateTo('journal', 'entries')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'entries'} />
-                    <NavMenuItem label="財務報表" icon={<BarChart3 />} onClick={() => navigateTo('journal', 'reports')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'reports'} />
-                    <NavMenuItem label="分類帳" icon={<Layers />} onClick={() => navigateTo('journal', 'ledger')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'ledger'} />
-                    <NavMenuItem label="雜支與零用金" icon={<FileSpreadsheet />} onClick={() => navigateTo('journal', 'expenses')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'expenses'} />
-                    <NavMenuItem label="會計科目" icon={<Settings2 />} onClick={() => navigateTo('journal', 'coa')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'coa'} />
-                    <NavMenuItem label="資產總表" icon={<Gem />} onClick={() => navigateTo('journal', 'assets')} active={activeTab === 'journal' && globalSubTabs['journal'] === 'assets'} />
+              {/* 手風琴選單 */}
+              {[  
+                {
+                  key: 'finance',
+                  label: '財務會計',
+                  show: hasPermission('finance'),
+                  items: [
+                    { label: '日記簿', icon: <BookOpen />, tab: 'journal', sub: 'entries' },
+                    { label: '財務報表', icon: <BarChart3 />, tab: 'journal', sub: 'reports' },
+                    { label: '分類帳', icon: <Layers />, tab: 'journal', sub: 'ledger' },
+                    { label: '雜支與零用金', icon: <FileSpreadsheet />, tab: 'journal', sub: 'expenses' },
+                    { label: '會計科目', icon: <Settings2 />, tab: 'journal', sub: 'coa' },
+                    { label: '資產總表', icon: <Gem />, tab: 'journal', sub: 'assets' },
+                  ]
+                },
+                {
+                  key: 'reports',
+                  label: '日月報表',
+                  show: hasPermission('daily') || hasPermission('monthly'),
+                  items: [
+                    ...(hasPermission('daily') ? [
+                      { label: '銷售與戰情室', icon: <ClipboardList />, tab: 'daily', sub: 'dashboard' },
+                      { label: '訂單匯入', icon: <Download />, tab: 'daily', sub: 'import' },
+                      { label: '品項設定', icon: <Settings2 />, tab: 'daily', sub: 'settings' },
+                    ] : []),
+                    ...(hasPermission('monthly') ? [
+                      { label: '財務報表', icon: <CalendarDays />, tab: 'monthly', sub: 'reports' },
+                      { label: '產品數據', icon: <BarChart3 />, tab: 'monthly', sub: 'products' },
+                    ] : []),
+                  ]
+                },
+                {
+                  key: 'hr',
+                  label: '人事與薪資',
+                  show: hasPermission('hr'),
+                  items: [
+                    { label: '排班管理', icon: <Calendar />, tab: 'hr', sub: 'roster' },
+                    { label: '出勤打卡紀錄', icon: <Clock />, tab: 'hr', sub: 'attendance' },
+                    { label: '薪資結算總表', icon: <FileSpreadsheet />, tab: 'hr', sub: 'payroll' },
+                  ]
+                },
+                {
+                  key: 'operations',
+                  label: '營運管理',
+                  show: hasPermission('inventory') || hasPermission('cost') || hasPermission('customers'),
+                  items: [
+                    ...(hasPermission('inventory') ? [
+                      { label: '進貨管理', icon: <Package />, tab: 'inventory', sub: 'purchases' },
+                      { label: '安全庫存設定', icon: <ClipboardList />, tab: 'inventory', sub: 'stock' },
+                      { label: '實地盤點 (月末結算)', icon: <Target />, tab: 'inventory', sub: 'periodic_count' },
+                    ] : []),
+                    ...(hasPermission('cost') ? [{ label: '成本分析', icon: <BarChart3 />, tab: 'cost', sub: 'cost' }] : []),
+                    ...(hasPermission('customers') ? [{ label: '顧客資料', icon: <Users />, tab: 'customers', sub: 'customers' }] : []),
+                  ]
+                },
+              ].filter(s => s.show).map(section => {
+                const isOpen = openSection === section.key;
+                const isActive = section.items.some(item => activeTab === item.tab);
+                return (
+                  <div key={section.key} className="bg-white rounded-2xl shadow-sm border border-coffee-50 overflow-hidden">
+                    {/* 分組標題按鈕 */}
+                    <button
+                      onClick={() => toggleSection(section.key)}
+                      className={cn(
+                        "w-full flex items-center justify-between px-4 py-3 font-bold text-sm transition-colors",
+                        isActive ? "text-coffee-800 bg-coffee-50" : "text-coffee-500 hover:bg-coffee-50/50"
+                      )}
+                    >
+                      <span className={cn("uppercase tracking-widest text-[11px]", isActive ? "text-rose-brand" : "text-coffee-400")}>
+                        {section.label}
+                      </span>
+                      <motion.div animate={{ rotate: isOpen ? 180 : 0 }} transition={{ duration: 0.2 }}>
+                        <ChevronDown className="w-4 h-4 text-coffee-300" />
+                      </motion.div>
+                    </button>
+
+                    {/* 展開的子項目 */}
+                    <AnimatePresence initial={false}>
+                      {isOpen && (
+                        <motion.div
+                          initial={{ height: 0, opacity: 0 }}
+                          animate={{ height: 'auto', opacity: 1 }}
+                          exit={{ height: 0, opacity: 0 }}
+                          transition={{ duration: 0.22, ease: 'easeInOut' }}
+                          className="overflow-hidden"
+                        >
+                          <div className="px-2 pb-2 space-y-0.5 border-t border-coffee-50">
+                            {section.items.map(item => (
+                              <NavMenuItem
+                                key={`${item.tab}-${item.sub}`}
+                                label={item.label}
+                                icon={item.icon}
+                                onClick={() => navigateTo(item.tab, item.sub)}
+                                active={activeTab === item.tab && globalSubTabs[item.tab] === item.sub}
+                              />
+                            ))}
+                          </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
-                </div>
-              )}
-
-              {(hasPermission('daily') || hasPermission('monthly')) && (
-                <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
-                  <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">日月報表</h3>
-                  <div className="space-y-1">
-                    {hasPermission('daily') && (
-                      <>
-                        <div className="px-3 py-1 mt-1 text-[11px] font-bold text-coffee-300">日報表</div>
-                        <NavMenuItem label="銷售與戰情室" icon={<ClipboardList />} onClick={() => navigateTo('daily', 'dashboard')} active={activeTab === 'daily' && globalSubTabs['daily'] === 'dashboard'} />
-                        <NavMenuItem label="訂單匯入" icon={<Download />} onClick={() => navigateTo('daily', 'import')} active={activeTab === 'daily' && globalSubTabs['daily'] === 'import'} />
-                        <NavMenuItem label="品項設定" icon={<Settings2 />} onClick={() => navigateTo('daily', 'settings')} active={activeTab === 'daily' && globalSubTabs['daily'] === 'settings'} />
-                      </>
-                    )}
-
-                    {hasPermission('monthly') && (
-                      <>
-                        <div className="px-3 py-1 mt-3 text-[11px] font-bold text-coffee-300">月報表</div>
-                        <NavMenuItem label="財務報表" icon={<CalendarDays />} onClick={() => navigateTo('monthly', 'reports')} active={activeTab === 'monthly' && globalSubTabs['monthly'] === 'reports'} />
-                        <NavMenuItem label="產品數據" icon={<BarChart3 />} onClick={() => navigateTo('monthly', 'products')} active={activeTab === 'monthly' && globalSubTabs['monthly'] === 'products'} />
-                      </>
-                    )}
-                  </div>
-                </div>
-              )}
-
-              {hasPermission('hr') && (
-                <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
-                  <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">人事與薪資</h3>
-                  <div className="space-y-1">
-                    <NavMenuItem label="排班管理" icon={<Calendar />} onClick={() => navigateTo('hr', 'roster')} active={activeTab === 'hr' && globalSubTabs['hr'] === 'roster'} />
-                    <NavMenuItem label="出勤打卡紀錄" icon={<Clock />} onClick={() => navigateTo('hr', 'attendance')} active={activeTab === 'hr' && globalSubTabs['hr'] === 'attendance'} />
-                    <NavMenuItem label="薪資結算總表" icon={<FileSpreadsheet />} onClick={() => navigateTo('hr', 'payroll')} active={activeTab === 'hr' && globalSubTabs['hr'] === 'payroll'} />
-                  </div>
-                </div>
-              )}
-
-              {(hasPermission('inventory') || hasPermission('cost') || hasPermission('customers')) && (
-                <div className="bg-white p-3 rounded-2xl shadow-sm border border-coffee-50">
-                  <h3 className="text-[10px] font-bold text-coffee-400 mb-2 px-3 uppercase tracking-widest">營運管理</h3>
-                  <div className="space-y-1">
-                    {hasPermission('inventory') && (
-                      <>
-                        <div className="px-3 py-1 mt-1 text-[11px] font-bold text-coffee-300">進貨與庫存</div>
-                        <NavMenuItem label="進貨管理" icon={<Package />} onClick={() => navigateTo('inventory', 'purchases')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'purchases'} />
-                        <NavMenuItem label="安全庫存設定" icon={<ClipboardList />} onClick={() => navigateTo('inventory', 'stock')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'stock'} />
-                        <NavMenuItem label="實地盤點 (月末結算)" icon={<Target />} onClick={() => navigateTo('inventory', 'periodic_count')} active={activeTab === 'inventory' && globalSubTabs['inventory'] === 'periodic_count'} />
-                      </>
-                    )}
-
-                    {hasPermission('inventory') && (hasPermission('cost') || hasPermission('customers')) && (
-                      <div className="w-full h-px bg-coffee-50 my-3"></div>
-                    )}
-
-                    {hasPermission('cost') && <NavMenuItem label="成本分析" icon={<BarChart3 />} onClick={() => navigateTo('cost', 'cost')} active={activeTab === 'cost'} />}
-                    {hasPermission('customers') && <NavMenuItem label="顧客資料" icon={<Users />} onClick={() => navigateTo('customers', 'customers')} active={activeTab === 'customers'} />}
-                  </div>
-                </div>
-              )}
+                );
+              })}
 
               <div className="pt-4 pb-12 space-y-3">
                 {hasPermission('manage_system') && (
