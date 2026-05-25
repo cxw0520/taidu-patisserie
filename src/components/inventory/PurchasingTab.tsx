@@ -1,9 +1,9 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, deleteDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
-import { Material, Purchase, PurchaseLine, Vendor } from '../../types';
+import { collection, deleteDoc, doc, getDocs, onSnapshot, query, setDoc, where, writeBatch } from 'firebase/firestore';
+import { Material, Purchase, PurchaseLine, PurchaseSettlement, Vendor } from '../../types';
 import { fmt, uid, cn } from '../../lib/utils';
-import { Eye, Pencil, Plus, Search, Store, Trash2, Users, Phone, Mail, X, CheckCircle2 } from 'lucide-react';
+import { BadgeCheck, Eye, Pencil, Plus, Search, Store, Trash2, Users, Phone, Mail, X, CheckCircle2, ClipboardList } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
 export default function PurchasingTab({
@@ -26,6 +26,10 @@ export default function PurchasingTab({
   const [editingVendor, setEditingVendor] = useState<Partial<Vendor> | null>(null);
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [isNewVendorMode, setIsNewVendorMode] = useState(false);
+  const [settlements, setSettlements] = useState<PurchaseSettlement[]>([]);
+  const [settleModal, setSettleModal] = useState<{ vendor: string; yearMonth: string; totalAmt: number } | null>(null);
+  const [settleForm, setSettleForm] = useState({ paidAmount: '', paidDate: new Date().toISOString().substring(0, 10), note: '' });
+  const [activeSection, setActiveSection] = useState<'analysis' | 'settlement'>('analysis');
 
   React.useEffect(() => {
     const unsub = onSnapshot(collection(db, 'shops', shopId, 'vendors'), snap => {
@@ -33,6 +37,15 @@ export default function PurchasingTab({
     });
     return unsub;
   }, [shopId]);
+
+  // 載入月結付款紀錄
+  useEffect(() => {
+    const q = query(collection(db, 'shops', shopId, 'purchaseSettlements'), where('yearMonth', '>=', `${selectedMonth.substring(0, 4)}-01`));
+    const unsub = onSnapshot(q, snap => {
+      setSettlements(snap.docs.map(d => d.data() as PurchaseSettlement));
+    });
+    return unsub;
+  }, [shopId, selectedMonth]);
 
   const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
     name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '', vendors: []
@@ -46,12 +59,31 @@ export default function PurchasingTab({
   });
 
   const vendorStats = useMemo(() => {
-    const stats: Record<string, number> = {};
+    const stats: Record<string, { monthly: number; cash: number; total: number }> = {};
     purchases.filter(p => p.date.startsWith(selectedMonth)).forEach(p => {
-      stats[p.vendor] = (stats[p.vendor] || 0) + p.totalAmount;
+      if (!stats[p.vendor]) stats[p.vendor] = { monthly: 0, cash: 0, total: 0 };
+      const amt = p.totalAmount;
+      if (p.paymentType === '月結') {
+        stats[p.vendor].monthly += amt;
+      } else {
+        stats[p.vendor].cash += amt;
+      }
+      stats[p.vendor].total += amt;
     });
-    return Object.entries(stats).map(([vendor, total]) => ({ vendor, total })).sort((a, b) => b.total - a.total);
+    return Object.entries(stats)
+      .map(([vendor, s]) => ({ vendor, ...s }))
+      .sort((a, b) => b.total - a.total);
   }, [purchases, selectedMonth]);
+
+  // 月結對帳用：各廠商當月月結總額 & 是否已付
+  const settlementStats = useMemo(() => {
+    return vendorStats
+      .filter(v => v.monthly > 0)
+      .map(v => {
+        const paid = settlements.find(s => s.vendor === v.vendor && s.yearMonth === selectedMonth);
+        return { vendor: v.vendor, totalAmt: v.monthly, paid };
+      });
+  }, [vendorStats, settlements, selectedMonth]);
 
   const vendorPurchases = useMemo(() => {
     if (!vendorDetail) return [];
@@ -64,11 +96,38 @@ export default function PurchasingTab({
     return vendorStats.reduce((sum, v) => sum + v.total, 0);
   }, [vendorStats]);
 
+
   const materialMap = useMemo(() => {
     const m: Record<string, Material> = {};
     materials.forEach(mat => { m[mat.id] = mat; });
     return m;
   }, [materials]);
+
+  // 月結結清儲存
+  const handleSettlementSave = async () => {
+    if (!settleModal) return;
+    const paidAmt = parseFloat(settleForm.paidAmount);
+    if (!settleForm.paidDate || isNaN(paidAmt) || paidAmt <= 0) return alert('請填寫完整的付款日期與金額');
+    const id = uid();
+    const payload: PurchaseSettlement = {
+      id,
+      vendor: settleModal.vendor,
+      yearMonth: settleModal.yearMonth,
+      paidAmount: paidAmt,
+      paidDate: settleForm.paidDate,
+      note: settleForm.note,
+      createdAt: new Date().toISOString(),
+    };
+    await setDoc(doc(db, 'shops', shopId, 'purchaseSettlements', id), payload);
+    setSettleModal(null);
+    setSettleForm({ paidAmount: '', paidDate: new Date().toISOString().substring(0, 10), note: '' });
+  };
+
+  const handleSettlementDelete = async (vendor: string, yearMonth: string) => {
+    if (!confirm(`確定要取消 ${vendor} ${yearMonth} 的月結付款紀錄嗎？`)) return;
+    const existing = settlements.find(s => s.vendor === vendor && s.yearMonth === yearMonth);
+    if (existing) await deleteDoc(doc(db, 'shops', shopId, 'purchaseSettlements', existing.id));
+  };
 
   const openCreateModal = () => {
     setEditingPurchase(null);
@@ -76,11 +135,13 @@ export default function PurchasingTab({
       date: new Date().toISOString().substring(0, 10),
       vendor: '',
       lines: [],
-      notes: ''
+      notes: '',
+      paymentType: '現結',
     });
     setIsNewVendorMode(false);
     setIsModalOpen(true);
   };
+
 
   const openEditModal = (purchase: Purchase) => {
     setEditingPurchase(purchase);
@@ -258,16 +319,30 @@ export default function PurchasingTab({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <div className="xl:col-span-2 glass-panel p-4 md:p-6 bg-white/50 border border-coffee-50 shadow-sm rounded-[24px]">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-            <h3 className="text-lg font-bold text-coffee-800 flex items-center gap-2">
-              <Store className="w-5 h-5 text-coffee-400" /> 各廠商進貨分析
-            </h3>
-            <div className="flex items-center gap-4">
-              <div className="text-right flex items-center gap-2">
-                <span className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest hidden sm:inline">本月總進貨:</span>
-                <span className="text-xl font-serif-brand font-bold text-rose-brand">${fmt(selectedMonthTotal)}</span>
-              </div>
+        {/* 左側：廠商分析 + 月結對帳 切換 */}
+        <div className="xl:col-span-2 glass-panel p-4 md:p-6 bg-white/50 border border-coffee-50 shadow-sm rounded-[24px] space-y-4">
+          {/* 切換標籤 */}
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex bg-coffee-50 rounded-xl p-1 gap-1">
+              <button
+                onClick={() => setActiveSection('analysis')}
+                className={cn("px-4 py-1.5 rounded-lg text-sm font-bold transition-all", activeSection === 'analysis' ? "bg-white text-coffee-800 shadow-sm" : "text-coffee-400 hover:text-coffee-600")}
+              >
+                <Store className="w-4 h-4 inline mr-1.5" />各廠商進貨分析
+              </button>
+              <button
+                onClick={() => setActiveSection('settlement')}
+                className={cn("px-4 py-1.5 rounded-lg text-sm font-bold transition-all flex items-center gap-1.5", activeSection === 'settlement' ? "bg-white text-coffee-800 shadow-sm" : "text-coffee-400 hover:text-coffee-600")}
+              >
+                <ClipboardList className="w-4 h-4" />月結對帳
+                {settlementStats.filter(s => !s.paid).length > 0 && (
+                  <span className="bg-rose-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full">{settlementStats.filter(s => !s.paid).length}</span>
+                )}
+              </button>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest hidden sm:inline">本月總進貨:</span>
+              <span className="text-xl font-serif-brand font-bold text-rose-brand">${fmt(selectedMonthTotal)}</span>
               <input
                 type="month"
                 value={selectedMonth}
@@ -276,39 +351,90 @@ export default function PurchasingTab({
               />
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-left min-w-[360px]">
-              <thead>
-                <tr className="text-xs text-coffee-400 font-bold uppercase border-b border-coffee-100">
-                  <th className="py-3 px-4">廠商（點擊看明細）</th>
-                  <th className="py-3 px-4 text-right">單月總金額</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-coffee-50">
-                {vendorStats.map(stat => (
-                  <tr key={stat.vendor} className="hover:bg-coffee-50/50">
-                    <td className="py-4 px-4">
+
+          {/* 廠商進貨分析 */}
+          {activeSection === 'analysis' && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm text-left min-w-[460px]">
+                <thead>
+                  <tr className="text-xs text-coffee-400 font-bold uppercase border-b border-coffee-100">
+                    <th className="py-3 px-4">廠商（點擊看明細）</th>
+                    <th className="py-3 px-4 text-right text-amber-600">月結</th>
+                    <th className="py-3 px-4 text-right text-mint-brand">現結</th>
+                    <th className="py-3 px-4 text-right">合計</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-coffee-50">
+                  {vendorStats.map(stat => (
+                    <tr key={stat.vendor} className="hover:bg-coffee-50/50">
+                      <td className="py-4 px-4">
+                        <button
+                          onClick={() => setVendorDetail({ vendor: stat.vendor, month: selectedMonth })}
+                          className="font-bold text-coffee-800 hover:text-coffee-600 underline underline-offset-2 inline-flex items-center gap-2"
+                        >
+                          <Eye className="w-4 h-4" />{stat.vendor}
+                        </button>
+                      </td>
+                      <td className="py-4 px-4 text-right font-serif-brand font-bold text-amber-700">
+                        {stat.monthly > 0 ? `$${fmt(stat.monthly)}` : <span className="text-coffee-200">—</span>}
+                      </td>
+                      <td className="py-4 px-4 text-right font-serif-brand font-bold text-mint-brand">
+                        {stat.cash > 0 ? `$${fmt(stat.cash)}` : <span className="text-coffee-200">—</span>}
+                      </td>
+                      <td className="py-4 px-4 text-right font-serif-brand font-bold text-rose-brand">${fmt(stat.total)}</td>
+                    </tr>
+                  ))}
+                  {vendorStats.length === 0 && (
+                    <tr><td colSpan={4} className="py-8 text-center text-coffee-300 font-bold">該月份無進貨紀錄</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* 月結對帳 */}
+          {activeSection === 'settlement' && (
+            <div className="space-y-3">
+              {settlementStats.length === 0 && (
+                <div className="py-10 text-center text-coffee-300 font-bold bg-coffee-50/50 rounded-2xl border border-dashed border-coffee-200">
+                  該月份無月結進貨紀錄
+                </div>
+              )}
+              {settlementStats.map(s => (
+                <div key={s.vendor} className={cn("p-4 rounded-2xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3", s.paid ? "bg-mint-brand/5 border-mint-brand/20" : "bg-amber-50/50 border-amber-200")}>
+                  <div>
+                    <div className="font-bold text-coffee-800 flex items-center gap-2">
+                      {s.paid
+                        ? <BadgeCheck className="w-4 h-4 text-mint-brand" />
+                        : <ClipboardList className="w-4 h-4 text-amber-500" />}
+                      {s.vendor}
+                    </div>
+                    <div className="text-xs text-coffee-500 mt-0.5">
+                      月結總額：<span className="font-bold text-amber-700">${fmt(s.totalAmt)}</span>
+                      {s.paid && <span className="ml-3 text-mint-brand font-bold">已付 ${fmt(s.paid.paidAmount)} ／ {s.paid.paidDate}</span>}
+                      {s.paid?.note && <span className="ml-2 text-coffee-400">（{s.paid.note}）</span>}
+                    </div>
+                  </div>
+                  <div className="flex gap-2 shrink-0">
+                    {s.paid ? (
                       <button
-                        onClick={() => setVendorDetail({ vendor: stat.vendor, month: selectedMonth })}
-                        className="font-bold text-coffee-800 hover:text-coffee-600 underline underline-offset-2 inline-flex items-center gap-2"
-                      >
-                        <Eye className="w-4 h-4" />
-                        {stat.vendor}
-                      </button>
-                    </td>
-                    <td className="py-4 px-4 text-right font-serif-brand font-bold text-rose-brand">${fmt(stat.total)}</td>
-                  </tr>
-                ))}
-                {vendorStats.length === 0 && (
-                  <tr>
-                    <td colSpan={2} className="py-8 text-center text-coffee-300 font-bold">該月份無進貨紀錄</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
+                        onClick={() => handleSettlementDelete(s.vendor, selectedMonth)}
+                        className="text-xs font-bold px-3 py-1.5 rounded-lg bg-white border border-coffee-200 text-coffee-500 hover:text-rose-600 hover:border-rose-300 transition"
+                      >取消結清</button>
+                    ) : (
+                      <button
+                        onClick={() => { setSettleModal({ vendor: s.vendor, yearMonth: selectedMonth, totalAmt: s.totalAmt }); setSettleForm({ paidAmount: String(s.totalAmt), paidDate: new Date().toISOString().substring(0, 10), note: '' }); }}
+                        className="text-xs font-bold px-4 py-1.5 rounded-lg bg-mint-brand text-white hover:opacity-90 transition flex items-center gap-1"
+                      ><CheckCircle2 className="w-3.5 h-3.5" />標記已結清</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
+        {/* 右側：近期進貨紀錄 */}
         <div className="glass-panel p-4 md:p-6 bg-white border border-coffee-50 shadow-sm overflow-y-auto max-h-[600px] rounded-[24px]">
           <h3 className="text-lg font-bold text-coffee-800 mb-4 flex items-center gap-2">
             <Search className="w-5 h-5 text-coffee-400" /> 近期進貨紀錄
@@ -317,7 +443,14 @@ export default function PurchasingTab({
             {purchases.slice(0, 20).map(p => (
               <div key={p.id} className="p-4 bg-coffee-50/50 rounded-2xl border border-coffee-50 space-y-2">
                 <div className="flex justify-between items-center gap-2">
-                  <span className="font-bold text-coffee-800 line-clamp-1">{p.vendor}</span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-bold text-coffee-800 line-clamp-1">{p.vendor}</span>
+                    {p.paymentType && (
+                      <span className={cn("text-[10px] font-bold px-1.5 py-0.5 rounded-full", p.paymentType === '月結' ? "bg-amber-100 text-amber-700" : "bg-mint-brand/10 text-mint-brand")}>
+                        {p.paymentType}
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs font-bold text-coffee-400 whitespace-nowrap">{p.date}</span>
                 </div>
                 <div className="flex justify-between items-end gap-2">
@@ -335,6 +468,7 @@ export default function PurchasingTab({
           </div>
         </div>
       </div>
+
 
       <AnimatePresence>
         {vendorDetail && (
@@ -416,7 +550,7 @@ export default function PurchasingTab({
               </div>
 
               <form onSubmit={handleSave} className="flex-1 overflow-y-auto p-4 md:p-8 space-y-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 md:gap-6">
                   <div>
                     <label className="text-xs font-bold text-coffee-400 uppercase ml-1">進貨日期</label>
                     <input type="date" required value={formData.date} onChange={e => setFormData({ ...formData, date: e.target.value })} className="w-full mt-1 bg-coffee-50/50 border border-coffee-100 rounded-2xl px-5 py-3 outline-none focus:border-mint-brand" />
@@ -437,7 +571,8 @@ export default function PurchasingTab({
                             setIsNewVendorMode(true);
                             setFormData({ ...formData, vendor: '' });
                           } else {
-                            setFormData({ ...formData, vendor: e.target.value });
+                            const selectedVendor = vendors.find(v => v.name === e.target.value);
+                            setFormData({ ...formData, vendor: e.target.value, paymentType: selectedVendor?.defaultPaymentType || formData.paymentType || '現結' });
                           }
                         }} className="w-full bg-coffee-50/50 border border-coffee-100 rounded-2xl px-5 py-3 outline-none focus:border-mint-brand">
                           <option value="" disabled>請選擇廠商...</option>
@@ -447,7 +582,26 @@ export default function PurchasingTab({
                       )}
                     </div>
                   </div>
+                  <div>
+                    <label className="text-xs font-bold text-coffee-400 uppercase ml-1">付款方式</label>
+                    <div className="flex gap-2 mt-1">
+                      {(['現結', '月結'] as const).map(type => (
+                        <button
+                          key={type}
+                          type="button"
+                          onClick={() => setFormData({ ...formData, paymentType: type })}
+                          className={cn(
+                            "flex-1 py-3 rounded-2xl font-bold text-sm transition-all border",
+                            formData.paymentType === type
+                              ? type === '月結' ? "bg-amber-100 text-amber-800 border-amber-300" : "bg-mint-brand/10 text-mint-brand border-mint-brand/30"
+                              : "bg-coffee-50/50 text-coffee-400 border-coffee-100 hover:border-coffee-300"
+                          )}
+                        >{type}</button>
+                      ))}
+                    </div>
+                  </div>
                 </div>
+
 
                 <div className="space-y-4">
                   <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
@@ -774,6 +928,24 @@ export default function PurchasingTab({
                           <label className="text-xs font-bold text-coffee-400 block mb-1">備註 / 匯款帳號</label>
                           <textarea value={editingVendor.notes || ''} onChange={e => setEditingVendor({...editingVendor, notes: e.target.value})} rows={3} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-500 resize-none"></textarea>
                         </div>
+                        <div>
+                          <label className="text-xs font-bold text-coffee-400 block mb-1">預設付款方式</label>
+                          <div className="flex gap-2">
+                            {(['現結', '月結'] as const).map(type => (
+                              <button
+                                key={type}
+                                type="button"
+                                onClick={() => setEditingVendor({ ...editingVendor, defaultPaymentType: type })}
+                                className={cn(
+                                  "flex-1 py-2 rounded-xl font-bold text-sm transition-all border",
+                                  editingVendor.defaultPaymentType === type
+                                    ? type === '月結' ? "bg-amber-100 text-amber-800 border-amber-300" : "bg-mint-brand/10 text-mint-brand border-mint-brand/30"
+                                    : "bg-white text-coffee-400 border-coffee-200 hover:border-coffee-300"
+                                )}
+                              >{type}</button>
+                            ))}
+                          </div>
+                        </div>
                         <div className="flex gap-2 pt-2 border-t border-coffee-100">
                           <button type="button" onClick={() => setEditingVendor(null)} className="flex-1 py-2 bg-white border border-coffee-200 text-coffee-600 rounded-xl font-bold hover:bg-coffee-50">取消</button>
                           <button type="submit" className="flex-1 py-2 bg-coffee-800 text-white rounded-xl font-bold hover:bg-coffee-900 shadow-md">儲存</button>
@@ -787,6 +959,47 @@ export default function PurchasingTab({
                     )}
                   </div>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 月結結清 Modal */}
+      <AnimatePresence>
+        {settleModal && (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setSettleModal(null)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative z-10 bg-white rounded-3xl shadow-2xl w-full max-w-sm p-8 space-y-5">
+              <div>
+                <h3 className="text-xl font-bold text-coffee-800 flex items-center gap-2">
+                  <BadgeCheck className="w-6 h-6 text-mint-brand" />標記月結結清
+                </h3>
+                <p className="text-sm text-coffee-500 mt-1">{settleModal.vendor} — {settleModal.yearMonth}</p>
+                <p className="text-xs text-amber-700 font-bold mt-1">本月月結總額：${fmt(settleModal.totalAmt)}</p>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs font-bold text-coffee-400 block mb-1">付款日期 *</label>
+                  <input type="date" value={settleForm.paidDate} onChange={e => setSettleForm({ ...settleForm, paidDate: e.target.value })} className="w-full bg-coffee-50 border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-500 font-bold" />
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-coffee-400 block mb-1">實付金額 *</label>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">$</span>
+                    <input type="number" min="0" step="1" value={settleForm.paidAmount} onChange={e => setSettleForm({ ...settleForm, paidAmount: e.target.value })} className="w-full bg-coffee-50 border border-coffee-200 rounded-xl px-4 pl-8 py-2 outline-none focus:border-coffee-500 font-bold font-mono" />
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs font-bold text-coffee-400 block mb-1">備註（選填，如匯款末四碼）</label>
+                  <input type="text" value={settleForm.note} onChange={e => setSettleForm({ ...settleForm, note: e.target.value })} placeholder="例如：匯款 #5678" className="w-full bg-coffee-50 border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-500" />
+                </div>
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button type="button" onClick={() => setSettleModal(null)} className="flex-1 py-3 bg-coffee-100 text-coffee-600 rounded-xl font-bold hover:bg-coffee-200 transition">取消</button>
+                <button type="button" onClick={handleSettlementSave} className="flex-1 py-3 bg-mint-brand text-white rounded-xl font-bold hover:opacity-90 transition flex items-center justify-center gap-2">
+                  <CheckCircle2 className="w-4 h-4" />確認結清
+                </button>
               </div>
             </motion.div>
           </div>

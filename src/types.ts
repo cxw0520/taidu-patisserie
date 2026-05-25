@@ -65,6 +65,17 @@ export interface Purchase {
   lines: PurchaseLine[];
   totalAmount: number;
   notes?: string;
+  paymentType?: '月結' | '現結'; // 付款方式
+}
+
+export interface PurchaseSettlement {
+  id: string;
+  vendor: string;
+  yearMonth: string;      // 'YYYY-MM'，對應哪個月份的月結
+  paidAmount: number;     // 實際付款金額
+  paidDate: string;       // 付款日期
+  note?: string;
+  createdAt: string;
 }
 
 export interface PhysicalCountRecord {
@@ -454,6 +465,7 @@ export interface Vendor {
   email?: string;
   category?: string;
   notes?: string;
+  defaultPaymentType?: '月結' | '現結'; // 預設付款方式
 }
 
 export interface MaterialCostRecord {
