@@ -655,122 +655,72 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     // Ingredients cost sum
     const theoreticalIngredCost = itemCostBreakdown.reduce((acc, cur) => acc + cur.subtotal, 0);
 
-    // --- New Periodic Cost Calculation (期初 + 進貨 - 期末) ---
-    const prevMonthDate = new Date(`${selectedMonth}-01`);
-    prevMonthDate.setMonth(prevMonthDate.getMonth() - 1);
-    const prevMonthStr = prevMonthDate.toISOString().slice(0, 7);
+    // --- 新版成本計算邏輯 ---
+    // 1. 食材與包材進貨總金額
+    let materialPurchaseTotal = 0;
+    let packagingPurchaseTotal = 0;
+    const vendorMaterialPurchases: Record<string, number> = {};
 
-    // 1. 期初 (Opening Balance)
-    const currentMonthCount = physicalCounts.find((c: any) => c.yearMonth === selectedMonth);
-    const prevMonthCount = physicalCounts.find((c: any) => c.yearMonth === prevMonthStr);
-    
-    // 如果本月標記為期初開帳，期初庫存就是本月盤點值（此時本月進貨不應被計入開帳前，但實務上期初盤點通常是月底盤的，這裡簡化為若有標記期初開帳，則不計算當月進貨耗用，直接將 ingredCost 設為0或另計。
-    // 但更常見邏輯是：期初開帳盤點代表這是「系統上線第一天」的盤點。
-    let openingInvVal = 0;
-    if (currentMonthCount?.isOpeningBalance) {
-      openingInvVal = currentMonthCount.totalInventoryValue;
-    } else if (prevMonthCount) {
-      openingInvVal = prevMonthCount.totalInventoryValue;
-    }
-
-    // 2. 本月進貨 (Purchases + Material Expenses)
-    let purchaseVal = 0;
-    // 舊進貨單系統
     (purchases || []).forEach((p: any) => {
-      purchaseVal += parseNum(p.totalAmount || p.totalAmt);
-    });
-    // 新雜支系統 (只算 isMaterialCost = true 的明細)
-    let nonMaterialExpenseTotal = 0;
-    (expenses || []).forEach((e: any) => {
-      if (e.isTransfer) return; // 轉帳不計入
-      (e.lines || []).forEach((line: any) => {
-        const cat = settings?.expenseCategories?.find((c: any) => c.id === line.categoryId);
-        if (cat?.isMaterialCost) {
-          purchaseVal += parseNum(line.amount);
-        } else {
-          nonMaterialExpenseTotal += parseNum(line.amount);
+      p.lines.forEach((l: any) => {
+        const mat = materials.find(m => m.id === l.materialId);
+        if (mat?.category === '食材' || !mat?.category) { // 預設食材
+          materialPurchaseTotal += l.amount;
+          vendorMaterialPurchases[p.vendor] = (vendorMaterialPurchases[p.vendor] || 0) + l.amount;
+        } else if (mat?.category === '包材') {
+          packagingPurchaseTotal += l.amount;
         }
       });
     });
 
-    // 3. 期末 (Ending Balance)
-    let endingInvVal = 0;
-    if (currentMonthCount && !currentMonthCount.isOpeningBalance) {
-      endingInvVal = currentMonthCount.totalInventoryValue;
-    } else if (currentMonthCount?.isOpeningBalance) {
-       // 如果本月是期初開帳，則期末庫存就等於期初庫存，本月無耗用（或者手動設定）
-       endingInvVal = openingInvVal;
-    }
+    // 2. 費用支出分類 (人事、食材雜支、包材雜支、其他支出)
+    let staffCost = 0;
+    let otherExpenseTotal = 0;
+    const otherExpenseCategories: Record<string, number> = {};
 
-    let ingredCost = 0;
-    let isEstimatedIngredCost = false;
-    
-    if (currentMonthCount?.isOpeningBalance) {
-       // 第一個月期初開帳時，成本先算0，直到下個月底盤點才有消耗
-       ingredCost = 0;
-    } else if (currentMonthCount) {
-       // 本月已經盤點過，有期末結存
-       ingredCost = openingInvVal + purchaseVal - endingInvVal;
-       if (ingredCost < 0) ingredCost = 0; // 防止盤盈導致成本為負
-    } else {
-       // 尚未進行本月盤點，使用配方預估成本
-       ingredCost = theoreticalIngredCost;
-       isEstimatedIngredCost = true;
-    }
-
-    // 雜支算作其他固定或變動營業費用
-    // 我們將它加到固定費用裡，或者在變動成本中顯示？
-    // 這裡我們將 nonMaterialExpenseTotal 作為 totalMarketingAndFixed 的一部分，或獨立顯示。
-    // 使用者說「其餘雜支總額 ＋ 薪資 ＋ 固定攤提 = 其他營業費用」
-    // 所以我會把它加入到 Fixed Costs 輸入中。
-
-
-    const prIngredCost = Object.entries(itemPR).reduce((acc, [flavor, qty]) => acc + qty * getRecipeCost(flavor), 0);
-
-    // Packaging cost sum — now uses materialId keys (new system) + name keys (legacy fallback)
-    let pkgCostTotal = 0;
-    const pkgDetails = Object.entries(pkgUsage).map(([key, qty]) => {
-      // New system: key is materialId
-      const matById = materials.find((m: Material) => m.id === key && m.category === '包材');
-      // Legacy fallback: key is name string
-      const matByName = materials.find((m: Material) => m.name === key && m.category === '包材');
-      const mat = matById || matByName;
-      const unitCost = mat?.avgCost || 0;
-      const totalCost = qty * unitCost;
-      pkgCostTotal += totalCost;
-      return { name: mat?.name || key, qty, unitCost, totalCost };
+    (expenses || []).forEach((e: any) => {
+      if (e.isTransfer) return;
+      (e.lines || []).forEach((line: any) => {
+        const cat = settings?.expenseCategories?.find((c: any) => c.id === line.categoryId);
+        if (cat) {
+          if (cat.name.includes('人事') || cat.name.includes('薪資') || cat.name.includes('勞保') || cat.name.includes('健保')) {
+            staffCost += line.amount;
+          } else if (cat.name.includes('食材') || cat.name.includes('原料')) {
+            materialPurchaseTotal += line.amount;
+            const vendorName = e.vendor || '雜支零買';
+            vendorMaterialPurchases[vendorName] = (vendorMaterialPurchases[vendorName] || 0) + line.amount;
+          } else if (cat.name.includes('包材') || cat.name.includes('包裝')) {
+            packagingPurchaseTotal += line.amount;
+          } else {
+            otherExpenseTotal += line.amount;
+            otherExpenseCategories[cat.name] = (otherExpenseCategories[cat.name] || 0) + line.amount;
+          }
+        }
+      });
     });
 
     const totalLogisticsCost = logSpent + monthlyLogisticsVal;
     
-    let totalVariableCost = 0;
-    if (currentMonthCount && !currentMonthCount.isOpeningBalance) {
-      // 實際盤點制：ingredCost (期初+進貨-期末) 已經包含了所有原物料、包材的實際消耗與報廢耗損
-      totalVariableCost = ingredCost + totalLogisticsCost;
-    } else {
-      // 預估制：累加理論食材成本、理論包材成本、日報表紀錄的報廢成本
-      totalVariableCost = ingredCost + pkgCostTotal + totalLogisticsCost + lossCost;
-    }
+    // 變動成本 = 食材進貨 + 包材進貨 + 物流
+    const totalVariableCost = materialPurchaseTotal + packagingPurchaseTotal + totalLogisticsCost;
 
-    const prMarketingCost = prIngredCost + prShip;
+    // 固定支出 = 手動輸入項目 + 其他支出 (雜支)
     const totalFixedCostsInput = fixedCosts.reduce((acc: number, cur: any) => acc + parseNum(cur.amount), 0);
-    const totalMarketingAndFixed = totalFixedCostsInput + prMarketingCost + nonMaterialExpenseTotal;
+    const totalFixedCost = totalFixedCostsInput + otherExpenseTotal;
 
-    const netProfit = netRevenue - totalVariableCost - totalMarketingAndFixed;
+    // 淨利 = 營收 - 變動成本 - 人事成本 - 固定支出
+    const netProfit = netRevenue - totalVariableCost - staffCost - totalFixedCost;
 
     return {
       salesTotal, discTotal, prTotal, netRevenue,
       remit, cash, ar,
-      itemSales, ingredCost, theoreticalIngredCost, itemCostBreakdown, itemPR,
-      pkgDetails, pkgCostTotal,
-      logSpent, lossCost, totalLogisticsCost,
+      itemSales, theoreticalIngredCost, itemCostBreakdown, itemPR,
+      materialPurchaseTotal, packagingPurchaseTotal, vendorMaterialPurchases,
+      logSpent, totalLogisticsCost,
       totalVariableCost,
-      prIngredCost, prShip, prMarketingCost,
-      totalFixedCostsInput, nonMaterialExpenseTotal, totalMarketingAndFixed,
-      netProfit,
-      openingInvVal, purchaseVal, endingInvVal,
-      hasCountRecord: !!currentMonthCount,
-      isEstimatedIngredCost
+      staffCost,
+      totalFixedCostsInput, otherExpenseTotal, otherExpenseCategories, totalFixedCost,
+      netProfit
     };
   }, [monthData, settings, getRecipeCost, materials, fixedCosts, costOverrides, monthlyLogisticsVal, expenses, purchases, physicalCounts]);
 
@@ -824,26 +774,38 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
   return (
     <div className="space-y-8">
       {/* KPI Header */}
-      <div className="flex flex-wrap md:flex-nowrap gap-4 items-stretch">
-        <div className="flex-1 min-w-[150px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
+      <div className="flex flex-wrap md:flex-nowrap gap-2 items-stretch">
+        <div className="flex-1 min-w-[120px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
           <span className="text-coffee-400 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">本期淨營業額</span>
           <span className="text-xl md:text-2xl font-mono font-bold text-coffee-800">${fmt(stats.netRevenue)}</span>
+          <span className="text-xs text-transparent mt-1">100%</span>
         </div>
         <div className="flex items-center justify-center text-coffee-300 font-bold text-xl">-</div>
-        <div className="flex-1 min-w-[150px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
-          <span className="text-coffee-400 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">本期變動成本</span>
+        <div className="flex-1 min-w-[120px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
+          <span className="text-coffee-400 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">變動成本</span>
           <span className="text-xl md:text-2xl font-mono font-bold text-rose-brand">${fmt(stats.totalVariableCost)}</span>
+          <span className="text-xs font-bold text-coffee-400 mt-1">{stats.netRevenue > 0 ? ((stats.totalVariableCost / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
         </div>
         <div className="flex items-center justify-center text-coffee-300 font-bold text-xl">-</div>
-        <div className="flex-1 min-w-[150px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
-          <span className="text-coffee-400 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">行銷與固定支出</span>
-          <span className="text-xl md:text-2xl font-mono font-bold text-rose-brand">${fmt(stats.totalMarketingAndFixed)}</span>
+        <div className="flex-1 min-w-[120px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
+          <span className="text-coffee-400 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">人事成本</span>
+          <span className="text-xl md:text-2xl font-mono font-bold text-rose-brand">${fmt(stats.staffCost)}</span>
+          <span className="text-xs font-bold text-coffee-400 mt-1">{stats.netRevenue > 0 ? ((stats.staffCost / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
+        </div>
+        <div className="flex items-center justify-center text-coffee-300 font-bold text-xl">-</div>
+        <div className="flex-1 min-w-[120px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
+          <span className="text-coffee-400 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">固定支出</span>
+          <span className="text-xl md:text-2xl font-mono font-bold text-rose-brand">${fmt(stats.totalFixedCost)}</span>
+          <span className="text-xs font-bold text-coffee-400 mt-1">{stats.netRevenue > 0 ? ((stats.totalFixedCost / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
         </div>
         <div className="flex items-center justify-center text-coffee-300 font-bold text-xl">=</div>
-        <div className="flex-[1.2] min-w-[180px] kpi-card bg-[#faf7f2] border border-coffee-100 shadow-md flex flex-col justify-center items-center py-4 px-2">
+        <div className="flex-[1.2] min-w-[140px] kpi-card bg-[#faf7f2] border border-coffee-100 shadow-md flex flex-col justify-center items-center py-4 px-2 relative overflow-hidden">
           <span className="text-coffee-500 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">本期淨利</span>
           <span className={cn("text-2xl md:text-3xl font-mono font-bold", stats.netProfit >= 0 ? "text-mint-brand" : "text-danger-brand")}>
             ${fmt(stats.netProfit)}
+          </span>
+          <span className={cn("text-xs font-bold mt-1", stats.netProfit >= 0 ? "text-mint-600" : "text-danger-600")}>
+            {stats.netRevenue > 0 ? ((stats.netProfit / stats.netRevenue) * 100).toFixed(1) : 0}%
           </span>
         </div>
       </div>
@@ -905,65 +867,50 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
           </div>
           
           <div className="space-y-4 flex-1">
-            <button 
-              onClick={() => setShowFoodCostModal(true)}
-              className="w-full flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100 hover:border-coffee-300 hover:shadow-md transition active:scale-[0.98] group text-left"
-            >
-              <div className="flex justify-between items-center w-full">
-                <span className="text-coffee-800 font-bold flex items-center gap-2">
-                  {stats.isEstimatedIngredCost ? '配方預估食材成本' : '本月真實食材消耗'} 
-                  <Plus className="w-3 h-3 text-coffee-400 group-hover:text-coffee-600"/>
-                </span>
-                <span className="font-mono font-bold text-rose-brand">${fmt(stats.ingredCost)}</span>
-              </div>
-              <div className="w-full text-[10px] text-coffee-400 font-bold flex justify-between mt-1">
-                {stats.isEstimatedIngredCost ? (
-                  <span className="text-amber-500">⚠️ 本月尚未盤點，目前顯示為預估值</span>
-                ) : (
-                  <span>(期初 ${fmt(stats.openingInvVal)} + 進貨 ${fmt(stats.purchaseVal)} - 期末 ${fmt(stats.endingInvVal)})</span>
-                )}
-              </div>
-              <div className="flex justify-between items-center w-full text-xs text-coffee-500 border-t border-coffee-100/50 pt-1 mt-1">
-                <span>理論配方推算</span>
-                <span className="font-mono font-bold text-coffee-400">${fmt(stats.theoreticalIngredCost)}</span>
-              </div>
-              <div className="flex justify-between items-center w-full text-xs">
-                <span className="font-bold text-coffee-600">隱形耗損 (浪費差額)</span>
-                <span className={cn("font-mono font-bold", stats.ingredCost - stats.theoreticalIngredCost > 0 ? "text-danger-brand" : "text-mint-brand")}>
-                  {stats.ingredCost - stats.theoreticalIngredCost > 0 ? '+' : ''}${fmt(stats.ingredCost - stats.theoreticalIngredCost)}
-                </span>
-              </div>
-            </button>
-
+            {/* 食材進貨 */}
             <div className="flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
               <div className="flex justify-between items-center">
-                <span className="text-coffee-800 font-bold">包材成本</span>
-                <span className="font-mono font-bold text-rose-brand">${fmt(stats.pkgCostTotal)}</span>
+                <span className="text-coffee-800 font-bold flex items-center gap-2">食材進貨總計</span>
+                <div className="flex flex-col items-end">
+                  <span className="font-mono font-bold text-rose-brand">${fmt(stats.materialPurchaseTotal)}</span>
+                  <span className="text-xs text-coffee-400">{stats.netRevenue > 0 ? ((stats.materialPurchaseTotal / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
+                </div>
               </div>
-              {stats.pkgDetails.length > 0 && (
+              {Object.keys(stats.vendorMaterialPurchases).length > 0 && (
                 <div className="mt-2 flex flex-col gap-1 border-t border-coffee-100 pt-2">
-                  <div className="grid grid-cols-4 text-[10px] text-coffee-400 font-bold uppercase">
-                    <span className="col-span-1">項目</span>
-                    <span className="text-right">使用量</span>
-                    <span className="text-right">單價</span>
-                    <span className="text-right">總費</span>
+                  <div className="grid grid-cols-2 text-[10px] text-coffee-400 font-bold uppercase mb-1">
+                    <span>廠商</span>
+                    <span className="text-right">進貨金額</span>
                   </div>
-                  {stats.pkgDetails.map((p, i) => (
-                    <div key={i} className="grid grid-cols-4 text-xs text-coffee-600">
-                      <span className="col-span-1 truncate">{p.name}</span>
-                      <span className="text-right font-mono font-semibold">{p.qty}</span>
-                      <span className="text-right font-mono font-semibold">${fmt(p.unitCost)}</span>
-                      <span className="text-right font-mono font-bold">${fmt(p.totalCost)}</span>
+                  {Object.entries(stats.vendorMaterialPurchases).map(([vendor, amt], i) => (
+                    <div key={i} className="grid grid-cols-2 text-xs text-coffee-600">
+                      <span className="truncate">{vendor}</span>
+                      <span className="text-right font-mono font-semibold">${fmt(amt as number)}</span>
                     </div>
                   ))}
                 </div>
               )}
             </div>
 
+            {/* 包材進貨 */}
             <div className="flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
               <div className="flex justify-between items-center">
-                <span className="text-coffee-800 font-bold">物流成本</span>
-                <span className="font-mono font-bold text-rose-brand">${fmt(stats.totalLogisticsCost)}</span>
+                <span className="text-coffee-800 font-bold">包材進貨總計</span>
+                <div className="flex flex-col items-end">
+                  <span className="font-mono font-bold text-rose-brand">${fmt(stats.packagingPurchaseTotal)}</span>
+                  <span className="text-xs text-coffee-400">{stats.netRevenue > 0 ? ((stats.packagingPurchaseTotal / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
+                </div>
+              </div>
+            </div>
+
+            {/* 物流成本 */}
+            <div className="flex flex-col gap-2 p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
+              <div className="flex justify-between items-center">
+                <span className="text-coffee-800 font-bold">物流成本總計</span>
+                <div className="flex flex-col items-end">
+                  <span className="font-mono font-bold text-rose-brand">${fmt(stats.totalLogisticsCost)}</span>
+                  <span className="text-xs text-coffee-400">{stats.netRevenue > 0 ? ((stats.totalLogisticsCost / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
+                </div>
               </div>
               <div className="mt-2 flex flex-col gap-2 border-t border-coffee-100 pt-2 text-sm">
                 <div className="flex justify-between items-center text-coffee-600">
@@ -989,11 +936,6 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
               </div>
             </div>
 
-            <div className="flex justify-between items-center p-3 bg-[#faf7f2] rounded-xl border border-coffee-100">
-              <span className="text-coffee-800 font-bold">耗損成本</span>
-              <span className="font-mono font-bold text-rose-brand">${fmt(stats.lossCost)}</span>
-            </div>
-
             <div className="flex justify-between items-center bg-rose-50/50 p-4 rounded-xl border border-rose-200 shadow-sm mt-4">
               <span className="text-rose-900 font-bold">本月變動成本</span>
               <span className="font-mono font-bold text-xl text-rose-brand">${fmt(stats.totalVariableCost)}</span>
@@ -1001,11 +943,34 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
           </div>
         </div>
 
+        {/* Staff Costs */}
+        <div className="glass-panel p-6 bg-white flex flex-col gap-6">
+            <div className="flex justify-between items-center p-4 border-b border-coffee-100 bg-[#faf7f2]">
+              <h3 className="font-bold text-coffee-800 flex items-center gap-2">
+                <Users className="w-5 h-5 text-coffee-600" /> 人事成本
+              </h3>
+            </div>
+            <div className="space-y-4 flex-1">
+              <div className="flex flex-col gap-2 p-3 bg-blue-50/50 rounded-xl border border-blue-100">
+                <div className="flex justify-between items-center">
+                  <span className="text-blue-900 font-bold">人事與薪資總額</span>
+                  <div className="flex flex-col items-end">
+                    <span className="font-mono font-bold text-rose-brand text-lg">${fmt(stats.staffCost)}</span>
+                    <span className="text-xs font-bold text-blue-400">{stats.netRevenue > 0 ? ((stats.staffCost / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
+                  </div>
+                </div>
+                <div className="text-xs text-blue-500 font-bold border-t border-blue-100 pt-2 mt-1">
+                  💡 系統已自動將您當月分類為「人事、薪資、勞健保」的支出加總於此。
+                </div>
+              </div>
+            </div>
+        </div>
+
         {/* Fixed Costs */}
         <div className="glass-panel p-6 bg-white flex flex-col gap-6">
             <div className="flex justify-between items-center p-4 border-b border-coffee-100 bg-[#faf7f2]">
               <h3 className="font-bold text-coffee-800 flex items-center gap-2">
-                <Home className="w-5 h-5 text-coffee-600" /> 行銷與固定成本
+                <Home className="w-5 h-5 text-coffee-600" /> 固定支出
               </h3>
               {isAddingFixed ? (
                 <div className="flex items-center gap-1">
@@ -1029,21 +994,15 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                   onClick={() => setIsAddingFixed(true)}
                   className="text-xs bg-coffee-800 text-white px-2 py-1 rounded-md font-bold flex items-center gap-1 hover:bg-coffee-900 transition"
                 >
-                  <Plus className="w-3 h-3" /> 新增
+                  <Plus className="w-3 h-3" /> 新增固定項目
                 </button>
               )}
             </div>
           
           <div className="space-y-3 flex-1 flex flex-col">
-            <button onClick={() => setShowPRModal(true)} className="flex justify-between items-center p-3 bg-indigo-50/50 hover:bg-indigo-50 transition rounded-xl border border-indigo-100 group text-left cursor-pointer active:scale-[0.98]">
-              <div className="flex flex-col">
-                <span className="text-indigo-900 font-bold text-sm flex items-center gap-1">行銷費用-公關品 <Info className="w-3 h-3 text-indigo-400 group-hover:text-indigo-600"/></span>
-                <span className="text-[10px] text-indigo-400">公關品耗材成本 + 寄出運費</span>
-              </div>
-              <span className="font-mono font-bold text-indigo-600">${fmt(stats.prMarketingCost)}</span>
-            </button>
-            
-            <div className="flex-1 overflow-y-auto space-y-2 pr-2" style={{ maxHeight: '250px' }}>
+            <div className="flex-1 overflow-y-auto space-y-2 pr-2" style={{ maxHeight: '350px' }}>
+              
+              {/* 自訂固定支出 */}
               {fixedCosts.map((cost: any) => (
                 <div key={cost.id} className="flex justify-between items-center p-2 hover:bg-coffee-50/50 rounded-lg group transition">
                   <div className="flex items-center gap-2">
@@ -1055,30 +1014,44 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                     </button>
                     <span className="text-coffee-600 text-sm font-bold">{cost.label}</span>
                   </div>
-                  <div className="flex items-end gap-1">
-                    <span className="text-coffee-300 font-mono text-xs mb-1">$</span>
-                    <input 
-                      type="number"
-                      value={cost.amount || ''}
-                      onChange={(e) => updateFixedCostAmount(cost.id, parseNum(e.target.value))}
-                      className="w-20 text-right bg-transparent border-b border-coffee-200 outline-none focus:border-coffee-500 font-mono font-bold text-coffee-800"
-                    />
+                  <div className="flex flex-col items-end gap-1">
+                    <div className="flex items-end gap-1">
+                      <span className="text-coffee-300 font-mono text-xs mb-1">$</span>
+                      <input 
+                        type="number"
+                        value={cost.amount || ''}
+                        onChange={(e) => updateFixedCostAmount(cost.id, parseNum(e.target.value))}
+                        className="w-20 text-right bg-transparent border-b border-coffee-200 outline-none focus:border-coffee-500 font-mono font-bold text-coffee-800"
+                      />
+                    </div>
+                    <span className="text-[10px] text-coffee-400 font-bold">{stats.netRevenue > 0 ? ((parseNum(cost.amount) / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
                   </div>
                 </div>
               ))}
               
-              <div className="flex justify-between items-center p-2 rounded-lg bg-coffee-50/50 border border-coffee-50">
-                <span className="text-coffee-600 text-sm font-bold flex flex-col">
-                  其他營業雜支
-                  <span className="text-[10px] text-coffee-400 font-normal">本月新增雜支總額 (不含食材/轉帳)</span>
-                </span>
-                <span className="font-mono font-bold text-coffee-800">${fmt(stats.nonMaterialExpenseTotal)}</span>
-              </div>
+              {/* 自動加總的其他支出分類 */}
+              {Object.keys(stats.otherExpenseCategories).length > 0 && (
+                <div className="pt-3 pb-1 border-t border-coffee-100 mt-2">
+                  <span className="text-xs font-bold text-coffee-400 uppercase tracking-widest">其他支出 (來自支出總表)</span>
+                </div>
+              )}
+              {Object.entries(stats.otherExpenseCategories).map(([catName, amt]) => (
+                <div key={catName} className="flex justify-between items-center p-2 bg-gray-50/50 rounded-lg border border-gray-100 mt-1">
+                  <span className="text-coffee-600 text-sm font-bold pl-2 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-coffee-300"></span>{catName}
+                  </span>
+                  <div className="flex flex-col items-end">
+                    <span className="font-mono font-bold text-coffee-800">${fmt(amt as number)}</span>
+                    <span className="text-[10px] text-coffee-400 font-bold">{stats.netRevenue > 0 ? (((amt as number) / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
+                  </div>
+                </div>
+              ))}
+
             </div>
 
             <div className="flex justify-between items-center bg-rose-50/50 p-4 rounded-xl border border-rose-200 shadow-sm mt-4">
-              <span className="text-rose-900 font-bold">本月行銷與固定成本</span>
-              <span className="font-mono font-bold text-xl text-rose-brand">${fmt(stats.totalMarketingAndFixed)}</span>
+              <span className="text-rose-900 font-bold">本月固定支出</span>
+              <span className="font-mono font-bold text-xl text-rose-brand">${fmt(stats.totalFixedCost)}</span>
             </div>
           </div>
         </div>
