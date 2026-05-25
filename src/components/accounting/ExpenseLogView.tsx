@@ -23,7 +23,9 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
   
   const [activeTab, setActiveTab] = useState<'records' | 'ledger'>('records');
   const [isVoucherModalOpen, setIsVoucherModalOpen] = useState(false);
+  const [isPettyCashModalOpen, setIsPettyCashModalOpen] = useState(false);
   const [selectedVoucherRecord, setSelectedVoucherRecord] = useState<ExpenseRecord | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const [filterFundingSourceId, setFilterFundingSourceId] = useState<string>('all');
   const [batchQueue, setBatchQueue] = useState<ExpenseRecord[]>([]);
@@ -36,6 +38,11 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
     setBatchQueue(pending);
     setSelectedVoucherRecord(pending[0]);
     setIsVoucherModalOpen(true);
+  };
+
+  const handleGeneratePettyCash = () => {
+    if (selectedIds.size === 0) return alert('請先勾選要撥補的零用金明細！');
+    setIsPettyCashModalOpen(true);
   };
 
   const handleVoucherNext = () => {
@@ -136,9 +143,15 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
                 <option value="all">所有資金來源</option>
                 {fundingSources.map(fs => <option key={fs.id} value={fs.id}>{fs.name}</option>)}
               </select>
-              <button onClick={handleBatchGenerate} className="px-4 py-2 bg-coffee-800 text-white font-bold text-sm rounded-lg shadow-sm hover:bg-coffee-900 transition flex items-center gap-2">
-                <BookOpen className="w-4 h-4"/> 批次產生傳票
-              </button>
+              {selectedIds.size > 0 ? (
+                <button onClick={handleGeneratePettyCash} className="px-4 py-2 bg-blue-600 text-white font-bold text-sm rounded-lg shadow-sm hover:bg-blue-700 transition flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4"/> 產生撥補零用金傳票 ({selectedIds.size})
+                </button>
+              ) : (
+                <button onClick={handleBatchGenerate} className="px-4 py-2 bg-coffee-800 text-white font-bold text-sm rounded-lg shadow-sm hover:bg-coffee-900 transition flex items-center gap-2">
+                  <BookOpen className="w-4 h-4"/> 批次產生傳票
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -162,6 +175,7 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
         <table className="w-full text-left border-collapse">
           <thead className="bg-coffee-50/50 text-coffee-700 text-sm">
             <tr>
+              {activeTab === 'ledger' && <th className="p-4 border-b font-bold w-12 text-center">選取</th>}
               <th className="p-4 border-b font-bold w-32">日期</th>
               <th className="p-4 border-b font-bold">廠商 / 摘要</th>
               <th className="p-4 border-b font-bold w-40 text-right">總金額</th>
@@ -181,6 +195,23 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
               return (
                 <React.Fragment key={r.id}>
                   <tr className={`border-b border-gray-50 hover:bg-gray-50/50 transition-colors cursor-pointer ${r.isTransfer ? 'bg-blue-50/30' : ''}`} onClick={() => setExpandedId(isExpanded ? null : r.id)}>
+                    {activeTab === 'ledger' && (
+                      <td className="p-4 text-center" onClick={e => e.stopPropagation()}>
+                        {!r.voucherId && !r.isTransfer ? (
+                          <input 
+                            type="checkbox" 
+                            checked={selectedIds.has(r.id)}
+                            onChange={(e) => {
+                              const newSet = new Set(selectedIds);
+                              if (e.target.checked) newSet.add(r.id);
+                              else newSet.delete(r.id);
+                              setSelectedIds(newSet);
+                            }}
+                            className="w-4 h-4 text-mint-600 rounded border-gray-300 focus:ring-mint-500 cursor-pointer"
+                          />
+                        ) : null}
+                      </td>
+                    )}
                     <td className="p-4 font-mono text-coffee-600">{r.dateKey}</td>
                     <td className="p-4 font-bold text-coffee-800 flex items-center gap-2">
                       {r.isTransfer ? <ArrowRightLeft className="w-4 h-4 text-blue-500" /> : <FileText className="w-4 h-4 text-coffee-400" />}
@@ -276,11 +307,28 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
           remainingCount={batchQueue.length > 0 ? batchQueue.length - 1 : 0}
         />
       )}
+      {isPettyCashModalOpen && (
+        <PettyCashVoucherModal
+          shopId={shopId}
+          selectedRecords={records.filter(r => selectedIds.has(r.id))}
+          fundingSources={fundingSources}
+          expenseCategories={expenseCategories}
+          coa={coa}
+          entries={entries}
+          onClose={() => setIsPettyCashModalOpen(false)}
+          onSuccess={() => {
+            setIsPettyCashModalOpen(false);
+            setSelectedIds(new Set());
+          }}
+        />
+      )}
     </div>
   );
 }
 
+// ... existing components ...
 function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClose }: { shopId: string, record: ExpenseRecord, fundingSources: FundingSource[], expenseCategories: ExpenseCategory[], onClose: () => void }) {
+// ... (保留不變，在下面找個位置貼 PettyCashVoucherModal)
   const [data, setData] = useState<ExpenseRecord>(record);
 
   const addLine = () => {
@@ -719,6 +767,214 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
           )}
           <button onClick={handleSave} className="px-8 py-2.5 bg-coffee-800 text-white rounded-xl font-bold shadow-md hover:bg-coffee-900 transition flex items-center gap-2">
             {remainingCount !== undefined && remainingCount > 0 ? '儲存並下一筆' : '儲存傳票'}
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+function PettyCashVoucherModal({ shopId, selectedRecords, fundingSources, expenseCategories, coa, entries, onClose, onSuccess }: { shopId: string, selectedRecords: ExpenseRecord[], fundingSources: FundingSource[], expenseCategories: ExpenseCategory[], coa: COAItem[], entries: JournalEntry[], onClose: () => void, onSuccess: () => void }) {
+  const [date, setDate] = useState(todayISO());
+  const [description, setDescription] = useState('撥補零用金');
+  const [lines, setLines] = useState<JournalLine[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const generateVoucherId = (selectedDate: string) => {
+    const parts = selectedDate.split('-');
+    if (parts.length !== 3) return `99999901`;
+    const yy = parts[0].slice(-2);
+    const mm = parts[1].padStart(2, '0');
+    const dd = parts[2].padStart(2, '0');
+    const datePrefix = `${yy}${mm}${dd}`;
+
+    const todayVouchers = (entries || [])
+      .filter(e => e.date === selectedDate)
+      .map(e => e.voucherNo || e.id)
+      .filter(id => id && id.startsWith(datePrefix));
+    
+    let nextSeq = 1;
+    if (todayVouchers.length > 0) {
+      const maxSeq = Math.max(...todayVouchers.map(id => parseInt(id.slice(-2), 10) || 0));
+      nextSeq = maxSeq + 1;
+    }
+    return `${datePrefix}${String(nextSeq).padStart(2, '0')}`;
+  };
+
+  useEffect(() => {
+    // 依據 CategoryId 分群
+    const categoryGroups: Record<string, { totalAmount: number, notes: string[] }> = {};
+    let totalPettyCash = 0;
+
+    selectedRecords.forEach(record => {
+      record.lines.forEach(line => {
+        const catId = line.categoryId || 'unknown';
+        if (!categoryGroups[catId]) {
+          categoryGroups[catId] = { totalAmount: 0, notes: [] };
+        }
+        categoryGroups[catId].totalAmount += line.amount;
+        
+        // 組合摘要: 日期 + 廠商 + 備註
+        const shortDate = record.dateKey.substring(5).replace('-', '/'); // "05/01"
+        const vendorStr = record.vendor ? record.vendor : '';
+        const lineNote = line.note ? line.note : '';
+        const summary = [shortDate, vendorStr, lineNote].filter(Boolean).join(' ');
+        if (summary) {
+          categoryGroups[catId].notes.push(summary);
+        }
+      });
+      totalPettyCash += record.totalAmount;
+    });
+
+    const newLines: JournalLine[] = [];
+
+    // 建立多筆借方
+    Object.keys(categoryGroups).forEach(catId => {
+      const cat = expenseCategories.find(c => c.id === catId);
+      const groupData = categoryGroups[catId];
+      
+      let debitCoa = cat?.defaultCoaId ? coa.find(c => c.id === cat.defaultCoaId) : null;
+      if (!debitCoa) {
+        // Fallback matching logic similar to VoucherModal
+        debitCoa = coa.find(c => c.type === '費用' || c.type === '成本') || coa[0];
+      }
+
+      newLines.push({
+        id: uid(),
+        type: 'debit',
+        accountId: debitCoa?.id || '',
+        amount: groupData.totalAmount,
+        lineDescription: groupData.notes.join(', ') || cat?.name || '雜項支出'
+      });
+    });
+
+    // 建立單筆貸方 (撥補零用金)
+    // 假設撥補來源通常是銀行存款，或可讓使用者選
+    let creditCoa = coa.find(c => c.id === '1102') || coa.find(c => c.name.includes('銀行')) || coa.find(c => c.type === '資產');
+    
+    newLines.push({
+      id: uid(),
+      type: 'credit',
+      accountId: creditCoa?.id || '',
+      amount: totalPettyCash,
+      lineDescription: '撥補零用金'
+    });
+
+    setLines(newLines);
+  }, [selectedRecords, expenseCategories, coa]);
+
+  const debitTotal = lines.filter(l => l.type === 'debit').reduce((sum, l) => sum + Number(l.amount), 0);
+  const creditTotal = lines.filter(l => l.type === 'credit').reduce((sum, l) => sum + Number(l.amount), 0);
+
+  const handleSave = async () => {
+    if (!date) return alert('請填寫日期');
+    if (!description) return alert('請填寫總摘要');
+    if (debitTotal !== creditTotal) return alert('借貸必須平衡！');
+    if (lines.some(l => !l.accountId)) return alert('請為所有明細選擇會計科目！');
+
+    setIsSaving(true);
+    try {
+      const entryId = generateVoucherId(date);
+      const year = parseInt(date.split('-')[0]);
+
+      const mappedLines = lines.map(l => ({
+        ...l,
+        accountName: coa.find(a => a.id === l.accountId)?.name || '未知名稱'
+      }));
+
+      const entry: JournalEntry = {
+        id: entryId,
+        date,
+        year,
+        voucherNo: entryId,
+        description,
+        lines: mappedLines,
+        debitTotal,
+        creditTotal
+      };
+
+      // 1. 寫入日記簿
+      await setDoc(doc(db, 'shops', shopId, 'entries', entryId), entry);
+
+      // 2. 更新所有被勾選的零用金紀錄 (標記 voucherId)
+      for (const record of selectedRecords) {
+        await setDoc(doc(db, 'shops', shopId, 'expenses', record.id), { voucherId: entryId }, { merge: true });
+      }
+
+      alert('撥補零用金傳票產生成功！');
+      onSuccess();
+    } catch (e) {
+      console.error(e);
+      alert('產生失敗，請稍後再試');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const updateLine = (idx: number, field: keyof JournalLine, value: any) => {
+    const newLines = [...lines];
+    newLines[idx] = { ...newLines[idx], [field]: value };
+    setLines(newLines);
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 z-[60] flex flex-col items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl max-w-4xl w-full shadow-2xl flex flex-col max-h-[90vh]">
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-blue-50/80 rounded-t-3xl">
+          <h3 className="text-xl font-bold text-blue-900 flex items-center gap-2">
+            <CheckCircle className="w-5 h-5" /> 產生撥補零用金傳票
+          </h3>
+          <button onClick={onClose} className="p-2 text-blue-400 hover:text-blue-600 rounded-full hover:bg-blue-100 transition"><X className="w-5 h-5"/></button>
+        </div>
+        
+        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+          <div className="bg-blue-50/50 p-4 rounded-xl text-sm text-blue-800 font-bold border border-blue-100 flex gap-2">
+            💡 已自動將您勾選的 {selectedRecords.length} 筆明細依照「支出分類」加總，並將各自的日期與摘要串聯。您可以微調會計科目與摘要。
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">撥補日期</label>
+              <input type="date" value={date} onChange={e => setDate(e.target.value)} className="w-full border border-gray-200 rounded-xl p-3 outline-none" />
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-gray-700 mb-1">傳票總摘要</label>
+              <input type="text" value={description} onChange={e => setDescription(e.target.value)} className="w-full border border-gray-200 rounded-xl p-3 outline-none font-bold text-coffee-800" />
+            </div>
+          </div>
+          
+          <div className="space-y-3">
+            <h4 className="font-bold text-coffee-800 text-sm">合併後的借貸明細</h4>
+            {lines.map((l, idx) => (
+              <div key={l.id} className={`flex gap-2 items-start p-3 rounded-xl border ${l.type === 'debit' ? 'bg-blue-50/30 border-blue-100' : 'bg-red-50/30 border-red-100'}`}>
+                <span className={`px-2 py-1 text-xs font-bold rounded mt-1 ${l.type === 'debit' ? 'bg-blue-100 text-blue-700' : 'bg-red-100 text-red-700'}`}>
+                  {l.type === 'debit' ? '借' : '貸'}
+                </span>
+                <select value={l.accountId} onChange={e => updateLine(idx, 'accountId', e.target.value)} className="w-48 border border-gray-200 rounded-lg p-2 text-sm font-bold text-gray-700 outline-none">
+                  <option value="" disabled>選擇會計科目...</option>
+                  {coa.map(c => <option key={c.id} value={c.id}>{c.id} {c.name}</option>)}
+                </select>
+                <textarea 
+                  value={l.lineDescription || ''} 
+                  onChange={e => updateLine(idx, 'lineDescription', e.target.value)} 
+                  className="flex-1 border border-gray-200 rounded-lg p-2 text-sm outline-none resize-none h-16 leading-tight" 
+                  placeholder="明細摘要" 
+                />
+                <input type="number" value={l.amount || ''} onChange={e => updateLine(idx, 'amount', Number(e.target.value))} className="w-28 border border-gray-200 rounded-lg p-2 text-sm font-mono outline-none text-right font-bold text-coffee-800" placeholder="金額" />
+              </div>
+            ))}
+          </div>
+
+          <div className="flex justify-between items-center bg-gray-50 p-4 rounded-xl border border-gray-100 font-bold font-mono">
+             <div className="text-blue-700 text-lg">借方總計：${debitTotal.toLocaleString()}</div>
+             <div className="text-red-700 text-lg">貸方總計：${creditTotal.toLocaleString()}</div>
+          </div>
+        </div>
+
+        <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50 rounded-b-3xl">
+          <button onClick={onClose} disabled={isSaving} className="px-6 py-2.5 rounded-xl font-bold text-gray-500 hover:bg-gray-200 transition">取消</button>
+          <button onClick={handleSave} disabled={isSaving} className="px-8 py-2.5 bg-blue-600 text-white rounded-xl font-bold shadow-md hover:bg-blue-700 transition flex items-center gap-2">
+            {isSaving ? '儲存中...' : '儲存撥補傳票'}
           </button>
         </div>
       </motion.div>
