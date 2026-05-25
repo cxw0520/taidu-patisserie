@@ -67,6 +67,18 @@ const DEFAULT_SETTINGS: Settings = {
   ]
 };
 
+const NavMenuItem = ({ label, icon, onClick, active }: { key?: string | number, label: string, icon: any, onClick: () => void, active: boolean }) => (
+  <button
+    onClick={onClick}
+    className={cn("w-full flex items-center p-3 rounded-xl transition-all font-bold text-sm", active ? "bg-coffee-100 text-coffee-800 shadow-sm" : "text-coffee-600 hover:bg-coffee-50")}
+  >
+    <div className={cn("mr-3", active ? "text-rose-brand" : "text-coffee-400")}>
+      {React.cloneElement(icon, { className: "w-5 h-5" })}
+    </div>
+    {label}
+  </button>
+);
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers' | 'pos' | 'settings' | 'hr'>(() => {
@@ -104,17 +116,6 @@ export default function App() {
     setIsDrawerOpen(true);
   };
 
-  const NavMenuItem = ({ label, icon, onClick, active }: { label: string, icon: any, onClick: () => void, active: boolean }) => (
-    <button
-      onClick={onClick}
-      className={cn("w-full flex items-center p-3 rounded-xl transition-all font-bold text-sm", active ? "bg-coffee-100 text-coffee-800 shadow-sm" : "text-coffee-600 hover:bg-coffee-50")}
-    >
-      <div className={cn("mr-3", active ? "text-rose-brand" : "text-coffee-400")}>
-        {React.cloneElement(icon, { className: "w-5 h-5" })}
-      </div>
-      {label}
-    </button>
-  );
   const [currentDate, setCurrentDate] = useState(todayISO());
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
