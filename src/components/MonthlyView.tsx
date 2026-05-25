@@ -322,6 +322,8 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
           expenses={expenses}
           purchases={purchases}
           physicalCounts={physicalCounts}
+          assets={assets}
+          depLog={depLog}
           showARModal={showARModal}
           setShowARModal={setShowARModal}
           selectedBuyer={selectedBuyer}
@@ -529,7 +531,7 @@ function ARReconciliationModal({ monthData, settings, shopId, onClose, selectedB
   );
 }
 
-function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, expenses, purchases, physicalCounts, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
+function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, expenses, purchases, physicalCounts, assets, depLog, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
   const [showFoodCostModal, setShowFoodCostModal] = useState(false);
   const [showPRModal, setShowPRModal] = useState(false);
   const stats = useMemo(() => {
@@ -798,6 +800,14 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       console.error(err);
       alert('產生失敗');
     }
+  };
+
+  const updateCostOverride = async (itemId: string, cost: number) => {
+    const next = { ...costOverrides, [itemId]: cost };
+    setCostOverrides(next);
+    await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { 
+      costOverrides: next 
+    }, { merge: true });
   };
 
   return (

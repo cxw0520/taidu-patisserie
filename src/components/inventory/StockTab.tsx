@@ -913,9 +913,9 @@ function MaterialPriceMonitor({ materials, purchases }: { materials: Material[],
         let normalizedQty = l.qty;
         const mat = materials.find(m => m.id === l.materialId);
         if (mat) {
-          if (l.unit === mat.purchaseUnit && mat.purchaseUnitRate) {
+          if (l.purchaseUnit === mat.purchaseUnit && mat.purchaseUnitRate) {
             normalizedQty = l.qty * mat.purchaseUnitRate;
-          } else if (l.unit === mat.midUnit && mat.midUnitRate) {
+          } else if (l.purchaseUnit === mat.midUnit && mat.midUnitRate) {
             normalizedQty = l.qty * mat.midUnitRate;
           }
         }

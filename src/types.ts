@@ -183,6 +183,7 @@ export interface JournalEntry {
   lines: JournalLine[];
   debitTotal: number;
   creditTotal: number;
+  isClosing?: boolean;
 }
 
 export interface InventoryItem {
