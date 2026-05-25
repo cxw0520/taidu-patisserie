@@ -342,7 +342,7 @@ export default function App() {
       category = '營運管理';
       const s = globalSubTabs['inventory'] || 'purchases';
       if (s === 'purchases') sub = '進貨管理';
-      else if (s === 'stock') sub = '安全庫存設定';
+      else if (s === 'stock') sub = '食材資料庫';
       else if (s === 'periodic_count') sub = '實地盤點 (月末結算)';
     } else if (activeTab === 'cost') {
       category = '營運管理';
@@ -504,7 +504,7 @@ export default function App() {
                   items: [
                     ...(hasPermission('inventory') ? [
                       { label: '進貨管理', icon: <Package />, tab: 'inventory', sub: 'purchases' },
-                      { label: '安全庫存設定', icon: <ClipboardList />, tab: 'inventory', sub: 'stock' },
+                      { label: '食材資料庫', icon: <ClipboardList />, tab: 'inventory', sub: 'stock' },
                       { label: '實地盤點 (月末結算)', icon: <Target />, tab: 'inventory', sub: 'periodic_count' },
                     ] : []),
                     ...(hasPermission('cost') ? [{ label: '成本分析', icon: <BarChart3 />, tab: 'cost', sub: 'cost' }] : []),

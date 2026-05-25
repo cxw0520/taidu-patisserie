@@ -45,7 +45,7 @@ export default function InventoryView({ selectedYear, shopId, forcedSubTab }: { 
 
   const subTabs = [
     { id: 'purchases', label: '進貨管理', icon: ShoppingCart },
-    { id: 'stock', label: '材料與安全庫存', icon: Package },
+    { id: 'stock', label: '食材資料庫', icon: Package },
     { id: 'periodic_count', label: '月底實地盤點', icon: Target },
   ];
 
@@ -65,7 +65,7 @@ export default function InventoryView({ selectedYear, shopId, forcedSubTab }: { 
               <PurchasingTab purchases={purchases} materials={materials} selectedYear={selectedYear} shopId={shopId} />
             )}
             {activeSubTab === 'stock' && (
-              <StockTab materials={materials} shopId={shopId} />
+              <StockTab materials={materials} purchases={purchases} shopId={shopId} />
             )}
             {activeSubTab === 'periodic_count' && (
               <PeriodicCountTab materials={materials} shopId={shopId} selectedYear={selectedYear} purchases={purchases} />

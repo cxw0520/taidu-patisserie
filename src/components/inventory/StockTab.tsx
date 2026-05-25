@@ -1,13 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { db } from '../../lib/firebase';
 import { deleteDoc, doc, setDoc, updateDoc, increment, collection, onSnapshot } from 'firebase/firestore';
-import { Material, InventoryAdj } from '../../types';
+import { Material, InventoryAdj, Purchase } from '../../types';
 import { fmt, uid } from '../../lib/utils';
-import { Plus, Target, CheckCircle2, AlertCircle, Save, Trash2, ArrowRightLeft, Edit2, X } from 'lucide-react';
+import { Plus, Target, CheckCircle2, AlertCircle, Save, Trash2, ArrowRightLeft, Edit2, X, LineChart, Package, Search } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../../lib/utils';
 
-export default function StockTab({ materials, shopId }: { materials: Material[], shopId: string }) {
+export default function StockTab({ materials, purchases, shopId }: { materials: Material[], purchases: Purchase[], shopId: string }) {
+  const [activeView, setActiveView] = useState<'stock' | 'price'>('stock');
   const [isAddingMode, setIsAddingMode] = useState(false);
   const [adjModal, setAdjModal] = useState<Material | null>(null);
   const [unitConvModal, setUnitConvModal] = useState<Material | null>(null);
@@ -174,14 +175,32 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
   };
 
   return (
-    <div className="space-y-6 animate-fade-in">
+    <div className="space-y-6 animate-fade-in flex flex-col h-full">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-6">
         <div>
-          <h2 className="text-xl font-bold text-coffee-800">庫存與盤點管理</h2>
-          <p className="text-sm text-coffee-400">登錄原物料與包材，掌握即時庫存，設定安全水位警示。</p>
+          <h2 className="text-xl font-bold text-coffee-800">食材資料庫</h2>
+          <p className="text-sm text-coffee-400">登錄原物料與包材，管理安全水位與監控價格異動。</p>
         </div>
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 w-full md:w-auto">
-          <div className="flex flex-wrap gap-2">
+        <div className="flex bg-coffee-50 p-1 rounded-xl shadow-inner">
+          <button
+            onClick={() => setActiveView('stock')}
+            className={cn("px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-all", activeView === 'stock' ? "bg-white text-coffee-800 shadow-sm" : "text-coffee-500 hover:text-coffee-700 hover:bg-coffee-100/50")}
+          >
+            <Package className="w-4 h-4" /> 庫存與單位設定
+          </button>
+          <button
+            onClick={() => setActiveView('price')}
+            className={cn("px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 transition-all", activeView === 'price' ? "bg-white text-coffee-800 shadow-sm" : "text-coffee-500 hover:text-coffee-700 hover:bg-coffee-100/50")}
+          >
+            <LineChart className="w-4 h-4" /> 單價異動監控
+          </button>
+        </div>
+      </div>
+
+      {activeView === 'stock' ? (
+        <>
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-end gap-4 w-full">
+            <div className="flex flex-wrap gap-2">
             <div className="bg-emerald-50/60 border border-emerald-100/80 rounded-2xl px-4 py-1.5 text-right shadow-sm">
               <div className="text-[8px] font-extrabold text-emerald-600 uppercase tracking-widest">食材庫存價值</div>
               <div className="text-sm font-serif-brand font-bold text-emerald-800">${fmt(categoryTotals['食材'] || 0)}</div>
@@ -208,7 +227,6 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
             <Plus className="w-5 h-5" /> 新增材料
           </button>
         </div>
-      </div>
 
       <AnimatePresence>
         {isAddingMode && (
@@ -868,6 +886,208 @@ export default function StockTab({ materials, shopId }: { materials: Material[],
           </div>
         )}
       </AnimatePresence>
+        </>
+      ) : (
+        <MaterialPriceMonitor materials={materials} purchases={purchases} />
+      )}
+    </div>
+  );
+}
+
+// -------------------------------------------------------------
+// 單價異動監控子視圖 (MaterialPriceMonitor)
+// -------------------------------------------------------------
+function MaterialPriceMonitor({ materials, purchases }: { materials: Material[], purchases: Purchase[] }) {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedMatId, setSelectedMatId] = useState<string | null>(null);
+
+  // 整理每個食材的進貨紀錄
+  const matHistory = useMemo(() => {
+    const history: Record<string, { date: string, vendor: string, qty: number, amount: number, unitPrice: number }[]> = {};
+    materials.forEach(m => history[m.id] = []);
+
+    purchases.forEach(p => {
+      p.lines.forEach(l => {
+        if (!l.materialId || !history[l.materialId]) return;
+        
+        let normalizedQty = l.qty;
+        const mat = materials.find(m => m.id === l.materialId);
+        if (mat) {
+          if (l.unit === mat.purchaseUnit && mat.purchaseUnitRate) {
+            normalizedQty = l.qty * mat.purchaseUnitRate;
+          } else if (l.unit === mat.midUnit && mat.midUnitRate) {
+            normalizedQty = l.qty * mat.midUnitRate;
+          }
+        }
+        
+        const uPrice = normalizedQty > 0 ? l.amount / normalizedQty : 0;
+        
+        history[l.materialId].push({
+          date: p.date,
+          vendor: p.vendor,
+          qty: l.qty, // 原進貨數量
+          amount: l.amount,
+          unitPrice: uPrice // 標準化(最小單位)單價
+        });
+      });
+    });
+
+    // 依日期降冪排序
+    Object.keys(history).forEach(k => {
+      history[k].sort((a, b) => b.date.localeCompare(a.date));
+    });
+
+    return history;
+  }, [purchases, materials]);
+
+  const displayMats = useMemo(() => {
+    let list = materials;
+    if (searchTerm) {
+      list = list.filter(m => m.name.toLowerCase().includes(searchTerm.toLowerCase()));
+    }
+    return list;
+  }, [materials, searchTerm]);
+
+  return (
+    <div className="flex flex-col md:flex-row gap-6 h-full min-h-[600px] animate-fade-in">
+      <div className="w-full md:w-1/3 bg-white/60 border border-coffee-100 rounded-2xl flex flex-col overflow-hidden shadow-sm h-[600px]">
+        <div className="p-4 border-b border-coffee-100 bg-white/50">
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-coffee-400" />
+            <input 
+              type="text" 
+              placeholder="搜尋食材名稱..." 
+              value={searchTerm}
+              onChange={e => setSearchTerm(e.target.value)}
+              className="w-full bg-white border border-coffee-200 rounded-xl pl-9 pr-4 py-2 text-sm outline-none focus:border-coffee-400 font-bold text-coffee-800"
+            />
+          </div>
+        </div>
+        <div className="flex-1 overflow-y-auto p-2 space-y-1 custom-scrollbar">
+          {displayMats.map(m => {
+            const hist = matHistory[m.id] || [];
+            const hasData = hist.length > 0;
+            const latest = hist[0];
+            const prev = hist.find(h => h.date !== latest?.date && h.unitPrice !== latest?.unitPrice); // 找前一個不同單價的紀錄
+            
+            let diff = 0;
+            let diffPercent = 0;
+            if (latest && prev) {
+              diff = latest.unitPrice - prev.unitPrice;
+              diffPercent = (diff / prev.unitPrice) * 100;
+            }
+
+            return (
+              <button
+                key={m.id}
+                onClick={() => setSelectedMatId(m.id)}
+                className={cn(
+                  "w-full text-left p-3 rounded-xl transition-all flex justify-between items-center",
+                  selectedMatId === m.id ? "bg-coffee-100/80 shadow-sm border border-coffee-200" : "hover:bg-coffee-50 border border-transparent"
+                )}
+              >
+                <div>
+                  <div className="font-bold text-coffee-800 text-sm">{m.name}</div>
+                  <div className="text-xs text-coffee-400 mt-1 font-bold">
+                    {hasData ? `最後進貨: ${latest.date}` : '尚無進貨紀錄'}
+                  </div>
+                </div>
+                {hasData && (
+                  <div className="text-right">
+                    <div className="font-mono font-bold text-coffee-800">${fmt(latest.unitPrice)}<span className="text-[10px] text-coffee-400">/{m.unit}</span></div>
+                    {diff !== 0 && (
+                      <div className={cn("text-[10px] font-bold mt-0.5", diff > 0 ? "text-danger-brand" : "text-mint-600")}>
+                        {diff > 0 ? '🔴 +' : '🟢 '}{Math.abs(diffPercent).toFixed(1)}%
+                      </div>
+                    )}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+      
+      <div className="w-full md:w-2/3 bg-white/60 border border-coffee-100 rounded-2xl flex flex-col p-6 shadow-sm h-[600px] overflow-y-auto custom-scrollbar">
+        {!selectedMatId ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-coffee-300">
+            <LineChart className="w-12 h-12 mb-3 opacity-20" />
+            <span className="font-bold text-sm">請從左側選擇食材以查看歷史價格異動</span>
+          </div>
+        ) : (
+          <PriceDetails mat={materials.find(m => m.id === selectedMatId)!} history={matHistory[selectedMatId] || []} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PriceDetails({ mat, history }: { mat: Material, history: any[] }) {
+  if (history.length === 0) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center text-coffee-300 h-full">
+        <span className="font-bold">尚無進貨紀錄</span>
+      </div>
+    );
+  }
+
+  // 整理廠商比價資訊
+  const vendorPrices: Record<string, { lastDate: string, lastPrice: number }> = {};
+  history.forEach(h => {
+    if (!vendorPrices[h.vendor]) {
+      vendorPrices[h.vendor] = { lastDate: h.date, lastPrice: h.unitPrice };
+    }
+  });
+
+  return (
+    <div className="space-y-6 animate-fade-in">
+      <div className="border-b border-coffee-100 pb-4">
+        <h3 className="text-2xl font-bold text-coffee-900">{mat.name}</h3>
+        <p className="text-sm font-bold text-coffee-500 mt-1">基本單位：{mat.unit}</p>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="bg-[#faf7f2] p-5 rounded-2xl border border-coffee-100 shadow-sm">
+          <h4 className="text-xs font-extrabold text-coffee-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-coffee-400"></div>
+            歷史進貨明細
+          </h4>
+          <div className="space-y-3">
+            {history.map((h, i) => (
+              <div key={i} className="flex justify-between items-center text-sm bg-white p-3 rounded-xl border border-coffee-50">
+                <div>
+                  <div className="font-bold text-coffee-700">{h.date}</div>
+                  <div className="text-[10px] font-bold text-coffee-400">{h.vendor}</div>
+                </div>
+                <div className="text-right">
+                  <div className="font-mono font-bold text-coffee-900 text-base">${fmt(h.unitPrice)}<span className="text-coffee-400 text-[10px]">/{mat.unit}</span></div>
+                  <div className="text-[10px] font-bold text-coffee-400 mt-0.5">總額 ${fmt(h.amount)} / 數量 {fmt(h.qty)}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-[#faf7f2] p-5 rounded-2xl border border-coffee-100 shadow-sm self-start">
+          <h4 className="text-xs font-extrabold text-coffee-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+            <div className="w-1.5 h-1.5 rounded-full bg-coffee-400"></div>
+            各廠商最後進貨單價
+          </h4>
+          <div className="space-y-3">
+            {Object.entries(vendorPrices).map(([vendor, data]) => (
+              <div key={vendor} className="flex justify-between items-center text-sm bg-white p-3 rounded-xl border border-coffee-50 shadow-sm">
+                <div>
+                  <div className="font-bold text-coffee-700">{vendor}</div>
+                  <div className="text-[10px] font-bold text-coffee-400">最後進貨: {data.lastDate}</div>
+                </div>
+                <div className="font-mono font-bold text-rose-brand text-base">
+                  ${fmt(data.lastPrice)}<span className="text-coffee-400 text-[10px]">/{mat.unit}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
