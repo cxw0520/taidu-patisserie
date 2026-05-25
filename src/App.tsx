@@ -326,7 +326,7 @@ export default function App() {
       else if (s === 'ledger') sub = '分類帳';
       else if (s === 'coa') sub = '會計科目';
       else if (s === 'assets') sub = '資產總表';
-      else if (s === 'expenses') sub = '雜支與零用金記帳本';
+      else if (s === 'expenses') sub = '支出總表';
     } else if (activeTab === 'daily') {
       category = '日月報表';
       const s = globalSubTabs['daily'] || 'dashboard';
@@ -466,7 +466,7 @@ export default function App() {
                     { label: '日記簿', icon: <BookOpen />, tab: 'journal', sub: 'entries' },
                     { label: '財務報表', icon: <BarChart3 />, tab: 'journal', sub: 'reports' },
                     { label: '分類帳', icon: <Layers />, tab: 'journal', sub: 'ledger' },
-                    { label: '雜支與零用金', icon: <FileSpreadsheet />, tab: 'journal', sub: 'expenses' },
+                    { label: '支出總表', icon: <FileSpreadsheet />, tab: 'journal', sub: 'expenses' },
                     { label: '會計科目', icon: <Settings2 />, tab: 'journal', sub: 'coa' },
                     { label: '資產總表', icon: <Gem />, tab: 'journal', sub: 'assets' },
                   ]

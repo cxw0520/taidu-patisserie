@@ -844,7 +844,7 @@ function PettyCashVoucherModal({ shopId, selectedRecords, fundingSources, expens
         type: 'debit',
         accountId: debitCoa?.id || '',
         amount: groupData.totalAmount,
-        lineDescription: groupData.notes.join(', ') || cat?.name || '雜項支出'
+        lineDescription: groupData.notes.join('，') || cat?.name || '雜項支出'
       });
     });
 

@@ -332,6 +332,7 @@ export interface ExpenseCategory {
   id: string;
   name: string;
   isMaterialCost: boolean; // 若為 true，代表這筆支出會被算進本期「進貨總額」
+  isFixedCost?: boolean; // 若為 true，代表這筆支出為固定支出
   active: boolean;
   defaultCoaId?: string; // 預設對應的會計科目(借方)
 }

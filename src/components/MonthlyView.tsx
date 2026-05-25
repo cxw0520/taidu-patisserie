@@ -34,6 +34,8 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   const [expenses, setExpenses] = useState<import('../types').ExpenseRecord[]>([]);
   const [purchases, setPurchases] = useState<import('../types').Purchase[]>([]);
   const [physicalCounts, setPhysicalCounts] = useState<import('../types').PhysicalCountRecord[]>([]);
+  const [assets, setAssets] = useState<import('../types').FixedAsset[]>([]);
+  const [depLog, setDepLog] = useState<Record<string, boolean>>({});
   const [activeTab, setActiveTab] = useState<'finance' | 'product'>('finance');
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
 
@@ -151,7 +153,15 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
       setPhysicalCounts(snap.docs.map(d => d.data() as import('../types').PhysicalCountRecord));
     });
 
-    return () => { unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); unsubExpenses(); unsubPurchases(); unsubCounts(); };
+    const unsubAssets = onSnapshot(query(collection(db, 'shops', shopId, 'assets')), (snap) => {
+      setAssets(snap.docs.map(d => ({id: d.id, ...d.data()} as import('../types').FixedAsset)));
+    });
+
+    const unsubDepLog = onSnapshot(doc(db, 'shops', shopId, 'meta', 'depLog'), (snap) => {
+      if (snap.exists()) setDepLog(snap.data());
+    });
+
+    return () => { unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); unsubExpenses(); unsubPurchases(); unsubCounts(); unsubAssets(); unsubDepLog(); };
   }, [selectedMonth, shopId]);
 
   // Cost calculation function
@@ -673,10 +683,12 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       });
     });
 
-    // 2. 費用支出分類 (人事、食材雜支、包材雜支、其他支出)
+    // 2. 費用支出分類 (人事、食材雜支、包材雜支、固定支出、其他支出)
     let staffCost = 0;
     let otherExpenseTotal = 0;
-    const otherExpenseCategories: Record<string, number> = {};
+    let totalFixedCostFromExpenses = 0;
+    const fixedExpenseCategories: Record<string, number> = {};
+    const miscExpenseCategories: Record<string, number> = {};
 
     (expenses || []).forEach((e: any) => {
       if (e.isTransfer) return;
@@ -685,15 +697,18 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
         if (cat) {
           if (cat.name.includes('人事') || cat.name.includes('薪資') || cat.name.includes('勞保') || cat.name.includes('健保')) {
             staffCost += line.amount;
-          } else if (cat.name.includes('食材') || cat.name.includes('原料')) {
+          } else if (cat.isMaterialCost || cat.name.includes('食材') || cat.name.includes('原料')) {
             materialPurchaseTotal += line.amount;
             const vendorName = e.vendor || '雜支零買';
             vendorMaterialPurchases[vendorName] = (vendorMaterialPurchases[vendorName] || 0) + line.amount;
           } else if (cat.name.includes('包材') || cat.name.includes('包裝')) {
             packagingPurchaseTotal += line.amount;
+          } else if (cat.isFixedCost) {
+            totalFixedCostFromExpenses += line.amount;
+            fixedExpenseCategories[cat.name] = (fixedExpenseCategories[cat.name] || 0) + line.amount;
           } else {
             otherExpenseTotal += line.amount;
-            otherExpenseCategories[cat.name] = (otherExpenseCategories[cat.name] || 0) + line.amount;
+            miscExpenseCategories[cat.name] = (miscExpenseCategories[cat.name] || 0) + line.amount;
           }
         }
       });
@@ -704,12 +719,39 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     // 變動成本 = 食材進貨 + 包材進貨 + 物流
     const totalVariableCost = materialPurchaseTotal + packagingPurchaseTotal + totalLogisticsCost;
 
-    // 固定支出 = 手動輸入項目 + 其他支出 (雜支)
-    const totalFixedCostsInput = fixedCosts.reduce((acc: number, cur: any) => acc + parseNum(cur.amount), 0);
-    const totalFixedCost = totalFixedCostsInput + otherExpenseTotal;
+    // 計算本月折舊
+    let depreciationTotal = 0;
+    const selYear = parseInt(selectedMonth.split('-')[0]);
+    const selMon = parseInt(selectedMonth.split('-')[1]);
+    
+    assets.forEach(asset => {
+      const purchaseDate = new Date(asset.purchaseDate);
+      const targetDate = new Date(selYear, selMon, 0);
+      const totalMonths = asset.usefulLife * 12;
+      const monthlyDep = totalMonths > 0 ? (asset.totalCost - asset.residualValue) / totalMonths : 0;
+      
+      let monthsUsed = (targetDate.getFullYear() - purchaseDate.getFullYear()) * 12 + (targetDate.getMonth() - purchaseDate.getMonth());
+      if (targetDate.getDate() < purchaseDate.getDate()) monthsUsed--;
+      monthsUsed = Math.max(0, monthsUsed);
+      
+      const accumulated = Math.min(asset.totalCost - asset.residualValue, monthlyDep * monthsUsed);
+      const bookValue = asset.totalCost - accumulated;
+      
+      let status = '折舊中';
+      if (asset.status === '已售出') status = '停止折舊';
+      else if (bookValue <= asset.residualValue || monthsUsed >= totalMonths) status = '折舊結束';
+      else if (targetDate < purchaseDate) status = '尚未開始';
+      
+      if (status === '折舊中') {
+        depreciationTotal += Math.round(monthlyDep);
+      }
+    });
 
-    // 淨利 = 營收 - 變動成本 - 人事成本 - 固定支出
-    const netProfit = netRevenue - totalVariableCost - staffCost - totalFixedCost;
+    // 固定支出 = 支出總表的固定支出 + 本月折舊
+    const totalFixedCost = totalFixedCostFromExpenses + depreciationTotal;
+
+    // 淨利 = 營收 - 變動成本 - 人事成本 - 固定支出 - 其他雜支
+    const netProfit = netRevenue - totalVariableCost - staffCost - totalFixedCost - otherExpenseTotal;
 
     return {
       salesTotal, discTotal, prTotal, netRevenue,
@@ -719,56 +761,43 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       logSpent, totalLogisticsCost,
       totalVariableCost,
       staffCost,
-      totalFixedCostsInput, otherExpenseTotal, otherExpenseCategories, totalFixedCost,
-      netProfit
+      totalFixedCostFromExpenses, depreciationTotal, totalFixedCost,
+      fixedExpenseCategories,
+      otherExpenseTotal, miscExpenseCategories,
+      netProfit,
+      selYear, selMon
     };
-  }, [monthData, settings, getRecipeCost, materials, fixedCosts, costOverrides, monthlyLogisticsVal, expenses, purchases, physicalCounts]);
+  }, [monthData, settings, getRecipeCost, materials, costOverrides, monthlyLogisticsVal, expenses, purchases, physicalCounts, assets]);
 
-  const updateFixedCostAmount = async (id: string, amount: number) => {
-    const next = fixedCosts.map((c: any) => c.id === id ? { ...c, amount } : c);
-    setFixedCosts(next);
-    await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { 
-      ym: selectedMonth, 
-      fixedCostsList: next,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
-  };
+  const handleRecordDepreciation = async () => {
+    const key = `${stats.selYear}-${stats.selMon}`;
+    if (depLog[key] || stats.depreciationTotal === 0) return;
 
-  const [isAddingFixed, setIsAddingFixed] = useState(false);
-  const [newFixedName, setNewFixedName] = useState('');
+    if (!confirm(`確定要產生 ${stats.selYear}年${stats.selMon}月 的折舊傳票嗎？`)) return;
 
-  const confirmAddFixed = async () => {
-    if (!newFixedName.trim()) {
-      setIsAddingFixed(false);
-      return;
+    const entryId = uid();
+    const entry = {
+      id: entryId,
+      date: new Date(stats.selYear, stats.selMon, 0).toISOString().split('T')[0],
+      year: stats.selYear,
+      voucherNo: `DEP-${stats.selYear}${String(stats.selMon).padStart(2, '0')}`,
+      description: `${stats.selYear}/${stats.selMon} 固定資產折舊提列`,
+      lines: [
+        { id: uid(), type: 'debit', accountId: '6105', accountName: '折舊費用', amount: stats.depreciationTotal, lineDescription: '本月資產折舊' },
+        { id: uid(), type: 'credit', accountId: '1402', accountName: '累計折舊', amount: stats.depreciationTotal, lineDescription: '本月資產折舊' }
+      ],
+      debitTotal: stats.depreciationTotal,
+      creditTotal: stats.depreciationTotal
+    };
+
+    try {
+      await setDoc(doc(db, 'shops', shopId, 'entries', entryId), entry);
+      await setDoc(doc(db, 'shops', shopId, 'meta', 'depLog'), { ...depLog, [key]: true }, { merge: true });
+      alert('折舊傳票產生成功！');
+    } catch (err) {
+      console.error(err);
+      alert('產生失敗');
     }
-    const next = [...fixedCosts, { id: uid(), label: newFixedName.trim(), amount: 0 }];
-    setFixedCosts(next);
-    await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { 
-      ym: selectedMonth, 
-      fixedCostsList: next,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
-    setNewFixedName('');
-    setIsAddingFixed(false);
-  };
-
-  const removeFixedCost = async (id: string) => {
-    const next = fixedCosts.filter((c: any) => c.id !== id);
-    setFixedCosts(next);
-    await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { 
-      ym: selectedMonth, 
-      fixedCostsList: next,
-      updatedAt: new Date().toISOString()
-    }, { merge: true });
-  };
-
-  const updateCostOverride = async (itemId: string, cost: number) => {
-    const next = { ...costOverrides, [itemId]: cost };
-    setCostOverrides(next);
-    await setDoc(doc(db, 'shops', shopId, 'monthly', selectedMonth), { 
-      costOverrides: next 
-    }, { merge: true });
   };
 
   return (
@@ -970,72 +999,56 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
         <div className="glass-panel p-6 bg-white flex flex-col gap-6">
             <div className="flex justify-between items-center p-4 border-b border-coffee-100 bg-[#faf7f2]">
               <h3 className="font-bold text-coffee-800 flex items-center gap-2">
-                <Home className="w-5 h-5 text-coffee-600" /> 固定支出
+                <Home className="w-5 h-5 text-coffee-600" /> 固定支出與營業雜支
               </h3>
-              {isAddingFixed ? (
-                <div className="flex items-center gap-1">
-                  <input 
-                    autoFocus
-                    value={newFixedName}
-                    onChange={(e) => setNewFixedName(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && confirmAddFixed()}
-                    placeholder="項目名稱"
-                    className="text-xs border border-coffee-200 rounded px-1 py-1 outline-none w-24"
-                  />
-                  <button onClick={confirmAddFixed} className="text-xs bg-mint-brand text-white px-2 py-1 rounded font-bold hover:bg-mint-brand/80">
-                    確認
-                  </button>
-                  <button onClick={() => setIsAddingFixed(false)} className="text-xs text-coffee-400 hover:text-coffee-600 px-1">
-                    取消
-                  </button>
-                </div>
-              ) : (
-                <button 
-                  onClick={() => setIsAddingFixed(true)}
-                  className="text-xs bg-coffee-800 text-white px-2 py-1 rounded-md font-bold flex items-center gap-1 hover:bg-coffee-900 transition"
-                >
-                  <Plus className="w-3 h-3" /> 新增固定項目
-                </button>
-              )}
             </div>
           
           <div className="space-y-3 flex-1 flex flex-col">
             <div className="flex-1 overflow-y-auto space-y-2 pr-2" style={{ maxHeight: '350px' }}>
               
-              {/* 自訂固定支出 */}
-              {fixedCosts.map((cost: any) => (
-                <div key={cost.id} className="flex justify-between items-center p-2 hover:bg-coffee-50/50 rounded-lg group transition">
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => removeFixedCost(cost.id)}
-                      className="opacity-0 group-hover:opacity-100 text-danger-brand p-1 hover:bg-danger-brand/10 rounded transition"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                    <span className="text-coffee-600 text-sm font-bold">{cost.label}</span>
-                  </div>
-                  <div className="flex flex-col items-end gap-1">
-                    <div className="flex items-end gap-1">
-                      <span className="text-coffee-300 font-mono text-xs mb-1">$</span>
-                      <input 
-                        type="number"
-                        value={cost.amount || ''}
-                        onChange={(e) => updateFixedCostAmount(cost.id, parseNum(e.target.value))}
-                        className="w-20 text-right bg-transparent border-b border-coffee-200 outline-none focus:border-coffee-500 font-mono font-bold text-coffee-800"
-                      />
-                    </div>
-                    <span className="text-[10px] text-coffee-400 font-bold">{stats.netRevenue > 0 ? ((parseNum(cost.amount) / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
+              {/* 固定支出分類 */}
+              {Object.keys(stats.fixedExpenseCategories).length > 0 && (
+                <div className="pt-3 pb-1 mt-2">
+                  <span className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest bg-coffee-100 px-2 py-0.5 rounded-full">設定為「固定支出」的項目</span>
+                </div>
+              )}
+              {Object.entries(stats.fixedExpenseCategories).map(([catName, amt]) => (
+                <div key={catName} className="flex justify-between items-center p-2 bg-gray-50/50 rounded-lg border border-gray-100 mt-1">
+                  <span className="text-coffee-600 text-sm font-bold pl-2 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-300"></span>{catName}
+                  </span>
+                  <div className="flex flex-col items-end">
+                    <span className="font-mono font-bold text-coffee-800">${fmt(amt as number)}</span>
+                    <span className="text-[10px] text-coffee-400 font-bold">{stats.netRevenue > 0 ? (((amt as number) / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
                   </div>
                 </div>
               ))}
               
-              {/* 自動加總的其他支出分類 */}
-              {Object.keys(stats.otherExpenseCategories).length > 0 && (
-                <div className="pt-3 pb-1 border-t border-coffee-100 mt-2">
-                  <span className="text-xs font-bold text-coffee-400 uppercase tracking-widest">其他支出 (來自支出總表)</span>
+              <div className="flex justify-between items-center p-2 bg-gray-50/50 rounded-lg border border-gray-100 mt-1">
+                <span className="text-coffee-600 text-sm font-bold pl-2 flex items-center gap-2">
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-300"></span>本月設備折舊攤提
+                </span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="font-mono font-bold text-coffee-800">${fmt(stats.depreciationTotal)}</span>
+                  <button 
+                    onClick={handleRecordDepreciation} 
+                    disabled={depLog[`${stats.selYear}-${stats.selMon}`] || stats.depreciationTotal === 0} 
+                    className={cn("text-[10px] px-2 py-0.5 rounded font-bold transition",
+                      depLog[`${stats.selYear}-${stats.selMon}`] ? "bg-green-100 text-green-700 cursor-not-allowed" : "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                    )}
+                  >
+                    {depLog[`${stats.selYear}-${stats.selMon}`] ? '已產生折舊傳票' : '產生本月折舊傳票'}
+                  </button>
+                </div>
+              </div>
+
+              {/* 自動加總的其他雜支分類 */}
+              {Object.keys(stats.miscExpenseCategories).length > 0 && (
+                <div className="pt-3 pb-1 mt-2">
+                  <span className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest bg-coffee-100 px-2 py-0.5 rounded-full">其他營業雜支</span>
                 </div>
               )}
-              {Object.entries(stats.otherExpenseCategories).map(([catName, amt]) => (
+              {Object.entries(stats.miscExpenseCategories).map(([catName, amt]) => (
                 <div key={catName} className="flex justify-between items-center p-2 bg-gray-50/50 rounded-lg border border-gray-100 mt-1">
                   <span className="text-coffee-600 text-sm font-bold pl-2 flex items-center gap-2">
                     <span className="w-1.5 h-1.5 rounded-full bg-coffee-300"></span>{catName}

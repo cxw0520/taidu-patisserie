@@ -978,31 +978,43 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
               <div>
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="text-lg font-bold text-coffee-800">🏷️ 支出分類</h3>
-                  <button onClick={() => setExpenseCategories([...expenseCategories, { id: uid(), name: '新分類', isMaterialCost: false, active: true }])} className="text-mint-brand hover:text-mint-600 flex items-center gap-1 text-sm font-bold">
+                  <button onClick={() => setExpenseCategories([...expenseCategories, { id: uid(), name: '新分類', isMaterialCost: false, isFixedCost: false, active: true }])} className="text-mint-brand hover:text-mint-600 flex items-center gap-1 text-sm font-bold">
                     <Plus className="w-4 h-4"/> 新增分類
                   </button>
                 </div>
                 <div className="space-y-3">
                   {expenseCategories.map((cat, idx) => (
-                    <div key={cat.id} className="flex gap-2 items-center p-3 border border-coffee-100 rounded-xl hover:bg-coffee-50">
+                    <div key={cat.id} className="flex gap-2 items-center p-3 border border-coffee-100 rounded-xl hover:bg-coffee-50 flex-wrap">
                       <input type="text" value={cat.name} onChange={e => {
                         const newCat = [...expenseCategories];
                         newCat[idx].name = e.target.value;
                         setExpenseCategories(newCat);
-                      }} className="flex-1 border-none bg-transparent font-bold text-coffee-800 focus:ring-0" placeholder="分類名稱" />
-                      <label className="flex items-center gap-2 cursor-pointer bg-amber-50 px-3 py-1.5 rounded-lg border border-amber-100 hover:bg-amber-100 transition-colors">
-                        <input type="checkbox" checked={cat.isMaterialCost} onChange={e => {
-                          const newCat = [...expenseCategories];
-                          newCat[idx].isMaterialCost = e.target.checked;
-                          setExpenseCategories(newCat);
-                        }} className="w-4 h-4 text-amber-500 rounded focus:ring-amber-500" />
-                        <span className="text-xs font-bold text-amber-800">列入本月食材成本</span>
-                      </label>
+                      }} className="flex-1 min-w-[120px] border-none bg-transparent font-bold text-coffee-800 focus:ring-0" placeholder="分類名稱" />
+                      
+                      <div className="flex gap-2">
+                        <label className="flex items-center gap-1.5 cursor-pointer bg-amber-50 px-2 py-1.5 rounded-lg border border-amber-100 hover:bg-amber-100 transition-colors">
+                          <input type="checkbox" checked={cat.isMaterialCost} onChange={e => {
+                            const newCat = [...expenseCategories];
+                            newCat[idx].isMaterialCost = e.target.checked;
+                            setExpenseCategories(newCat);
+                          }} className="w-3.5 h-3.5 text-amber-500 rounded focus:ring-amber-500" />
+                          <span className="text-[10px] font-bold text-amber-800">列入食材</span>
+                        </label>
+                        <label className="flex items-center gap-1.5 cursor-pointer bg-blue-50 px-2 py-1.5 rounded-lg border border-blue-100 hover:bg-blue-100 transition-colors">
+                          <input type="checkbox" checked={cat.isFixedCost || false} onChange={e => {
+                            const newCat = [...expenseCategories];
+                            newCat[idx].isFixedCost = e.target.checked;
+                            setExpenseCategories(newCat);
+                          }} className="w-3.5 h-3.5 text-blue-500 rounded focus:ring-blue-500" />
+                          <span className="text-[10px] font-bold text-blue-800">固定支出</span>
+                        </label>
+                      </div>
+
                       <button onClick={() => {
                         if (confirm('刪除後無法復原，確定？')) {
                           setExpenseCategories(expenseCategories.filter(c => c.id !== cat.id));
                         }
-                      }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg"><Trash2 className="w-4 h-4"/></button>
+                      }} className="p-2 text-red-500 hover:bg-red-50 rounded-lg ml-auto"><Trash2 className="w-4 h-4"/></button>
                     </div>
                   ))}
                   <div className="mt-4 p-3 bg-blue-50 text-blue-800 text-xs font-bold rounded-xl flex items-start gap-2">
