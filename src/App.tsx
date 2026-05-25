@@ -588,7 +588,7 @@ export default function App() {
       <main className="flex-1 px-3 md:px-10 pb-10">
         <AnimatePresence mode="wait">
           <motion.div
-            key={activeTab}
+            key={`${activeTab}-${globalSubTabs[activeTab] || ''}`}
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
