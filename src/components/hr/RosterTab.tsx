@@ -701,6 +701,9 @@ export default function RosterTab({
                       const isSelected = quickDays.includes(d);
                       const dow = getDayOfWeek(d);
                       const isWeekend = dow === 0 || dow === 6;
+                      const entry = quickOpId !== 'all' ? getCellEntry(quickOpId, d) : null;
+                      const tpl = entry?.shiftTemplateId ? shiftTemplates.find(t => t.id === entry.shiftTemplateId) : null;
+
                       return (
                         <button
                           key={d}
@@ -712,15 +715,27 @@ export default function RosterTab({
                             }
                           }}
                           className={cn(
-                            "aspect-square rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center relative",
+                            "aspect-square rounded-xl text-xs font-bold transition-all flex flex-col items-center justify-center relative overflow-hidden",
                             isSelected
-                              ? "bg-rose-brand text-white shadow-md scale-105"
+                              ? "bg-rose-brand text-white shadow-md scale-105 border-transparent"
                               : isWeekend
-                                ? "bg-white hover:bg-coffee-100 text-blue-500 border border-coffee-100"
-                                : "bg-white hover:bg-coffee-100 text-coffee-700 border border-coffee-100"
+                                ? "bg-white hover:bg-coffee-100 text-blue-500 border-coffee-100"
+                                : "bg-white hover:bg-coffee-100 text-coffee-700 border-coffee-100",
+                            "border"
                           )}
                         >
-                          <span>{d}</span>
+                          <span className={entry ? "mb-3" : ""}>{d}</span>
+                          {entry && (
+                            <div className="absolute bottom-1 left-1 right-1 flex justify-center">
+                              {entry.isOff ? (
+                                <span className={cn("text-[9px] px-1 rounded-sm truncate w-full leading-tight", isSelected ? "bg-white/30 text-white" : "bg-gray-200 text-gray-500")}>休</span>
+                              ) : tpl ? (
+                                <span className={cn("text-[9px] px-1 rounded-sm truncate w-full text-white leading-tight", isSelected ? "ring-1 ring-white/50" : "")} style={{ backgroundColor: tpl.color || '#ccc' }}>
+                                  {tpl.name}
+                                </span>
+                              ) : null}
+                            </div>
+                          )}
                         </button>
                       );
                     })}
