@@ -1391,7 +1391,7 @@ export default function DailyView({
     if (!dailyData) return null;
     let m = {
         rev: 0, ship: 0, prShip: 0, disc: 0, prVal: 0, recv: 0, act: 0, remit: 0, cash: 0, unpaid: 0,
-        topup: 0, prepaidPay: 0,
+        topup: 0, topupCash: 0, topupRemit: 0, prepaidPay: 0,
         qty: { 
             gb: {} as Record<string,number>, 
             sg: {} as Record<string,number>, 
@@ -1428,6 +1428,11 @@ export default function DailyView({
         if (!isPR && !isPickupLinked) {
             if (o.orderType === 'topup') {
                 m.topup += o.actualAmt;
+                if (o.status === '現結') {
+                    m.topupCash += o.actualAmt;
+                } else if (o.status === '匯款') {
+                    m.topupRemit += o.actualAmt;
+                }
             } else {
                 if (o.status === '匯款') { 
                     m.remit += o.actualAmt; 
@@ -1437,11 +1442,10 @@ export default function DailyView({
                     m.prepaidPay += o.actualAmt;
                 }
                 
-                if (o.status !== '未結帳款') {
-                    m.act += o.actualAmt;
-                } else {
+                if (o.status === '未結帳款' || o.status === '已收帳款') {
                     m.unpaid += o.actualAmt;
                 }
+                m.act += o.actualAmt;
             }
         }
 
@@ -2210,27 +2214,12 @@ export default function DailyView({
                   <span className="font-bold font-mono text-rose-brand">${fmt(metrics?.recv || 0)}</span>
                 </div>
                 <div className="grid grid-cols-[1fr_auto_auto] gap-2 items-center text-xs text-coffee-500 font-bold uppercase tracking-wider">
-                  <span></span>
-                  <span className="text-right">系統應收</span>
+                  <span>營業淨額項目</span>
+                  <span className="text-right">系統應有</span>
                   <span className="text-right">今日實收</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-coffee-600">已收-匯款</span>
-                  <span className="font-bold font-mono text-right min-w-[96px]">${fmt(metrics?.remit || 0)}</span>
-                  <input
-                    type="number"
-                    value={dailyData?.ar?.actualRemit || ''}
-                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), actualRemit: parseNum(e.target.value) } })}
-                    className="w-28 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
-                  />
-                </div>
-                <div className="flex justify-between items-center text-xs text-coffee-500 font-semibold pl-2">
-                  <span>↳ 預收貨款 (儲值充值)</span>
-                  <span className="font-mono">${fmt(metrics?.topup || 0)}</span>
-                  <span className="w-28"></span>
-                </div>
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-coffee-600">已收-現金</span>
+                  <span className="text-coffee-600">現金收入 (現結)</span>
                   <span className="font-bold font-mono text-right min-w-[96px]">${fmt(metrics?.cash || 0)}</span>
                   <input
                     type="number"
@@ -2240,7 +2229,17 @@ export default function DailyView({
                   />
                 </div>
                 <div className="flex items-center justify-between gap-2">
-                  <span className="text-coffee-600">今日未結帳款</span>
+                  <span className="text-coffee-600">匯款收入 (匯款)</span>
+                  <span className="font-bold font-mono text-right min-w-[96px]">${fmt(metrics?.remit || 0)}</span>
+                  <input
+                    type="number"
+                    value={dailyData?.ar?.actualRemit || ''}
+                    onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), actualRemit: parseNum(e.target.value) } })}
+                    className="w-28 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
+                  />
+                </div>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-coffee-600">應收帳款 (未結)</span>
                   <span className="font-bold font-mono text-right min-w-[96px] text-danger-brand">${fmt(metrics?.unpaid || 0)}</span>
                   <input
                     type="number"
@@ -2250,13 +2249,31 @@ export default function DailyView({
                   />
                 </div>
                 <div className="flex justify-between items-center border-t border-dashed border-coffee-100 pt-2">
-                  <span className="text-coffee-600">儲值金扣款支付</span>
+                  <span className="text-coffee-600">儲值金付款</span>
                   <span className="font-bold font-mono text-right min-w-[96px] text-emerald-600">${fmt(metrics?.prepaidPay || 0)}</span>
                   <span className="w-28"></span>
                 </div>
+
+                <div className="mt-2 text-xs font-bold text-coffee-400 uppercase tracking-wider">儲值金充值 (金流獨立)</div>
+                <div className="flex justify-between items-center text-xs text-coffee-600 pl-2">
+                  <span>↳ 現金儲值</span>
+                  <span className="font-mono font-semibold">${fmt(metrics?.topupCash || 0)}</span>
+                  <span className="w-28"></span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-coffee-600 pl-2">
+                  <span>↳ 匯款儲值</span>
+                  <span className="font-mono font-semibold">${fmt(metrics?.topupRemit || 0)}</span>
+                  <span className="w-28"></span>
+                </div>
+                <div className="flex justify-between items-center text-xs font-bold text-emerald-600 pl-2 border-b border-dashed border-coffee-100 pb-2">
+                  <span>儲值金充值總額</span>
+                  <span className="font-mono">${fmt(metrics?.topup || 0)}</span>
+                  <span className="w-28"></span>
+                </div>
+
                 <div className="h-px bg-coffee-100 my-2" />
                 <div className="flex justify-between items-center">
-                  <span className="font-bold text-coffee-800">實收總額</span>
+                  <span className="font-bold text-coffee-800">今日實收總額 (現金+匯款+應收)</span>
                   <span className="font-bold font-mono text-mint-brand">
                     ${fmt((dailyData?.ar?.actualRemit || 0) + (dailyData?.ar?.actualCash || 0) + (dailyData?.ar?.actualUnpaid || 0))}
                   </span>

@@ -543,6 +543,8 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     let ar = 0;
     let normalShip = 0;
     let topup = 0;
+    let topupCash = 0;
+    let topupRemit = 0;
     let prepaidPay = 0;
 
     let prShip = 0;
@@ -582,6 +584,11 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
           if (o.status === '已取消' || o.status === '已刪除') return;
           if (o.orderType === 'topup') {
             topup += parseNum(o.actualAmt);
+            if (o.status === '現結') {
+              topupCash += parseNum(o.actualAmt);
+            } else if (o.status === '匯款') {
+              topupRemit += parseNum(o.actualAmt);
+            }
             return;
           }
 
@@ -596,13 +603,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
             if (o.status === '匯款') remit += o.actualAmt || 0;
             else if (o.status === '現結') cash += o.actualAmt || 0;
             else if (o.status === '儲值金扣款') prepaidPay += o.actualAmt || 0;
-
-            cash += parseNum((o as any).arCollectedCash);
-            remit += parseNum((o as any).arCollectedRemit);
-            if (o.status === '未結帳款' || o.status === '已收帳款') {
-              const remaining = Math.max(0, parseNum(o.actualAmt) - parseNum((o as any).arCollectedCash) - parseNum((o as any).arCollectedRemit));
-              ar += remaining;
-            }
+            else if (o.status === '未結帳款' || o.status === '已收帳款') ar += o.actualAmt || 0;
           }
 
         // Calculate sold items / components
@@ -770,7 +771,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
     return {
       salesTotal, discTotal, prTotal, netRevenue,
-      remit, cash, ar, normalShip, topup, prepaidPay,
+      remit, cash, ar, normalShip, topup, topupCash, topupRemit, prepaidPay,
       itemSales, theoreticalIngredCost, itemCostBreakdown, itemPR,
       materialPurchaseTotal, packagingPurchaseTotal, vendorMaterialPurchases,
       logSpent, totalLogisticsCost,
@@ -865,7 +866,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     });
 
     const netRevenue = stats.netRevenue;
-    const cashRemitArSum = stats.cash + stats.remit + stats.ar;
+    const cashRemitArSum = stats.cash + stats.remit + stats.ar + stats.prepaidPay;
     const diff = netRevenue - cashRemitArSum;
 
     return {
@@ -880,7 +881,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       normalOrdersWithShip,
       otherStatusOrders
     };
-  }, [monthData, stats.netRevenue, stats.cash, stats.remit, stats.ar]);
+  }, [monthData, stats.netRevenue, stats.cash, stats.remit, stats.ar, stats.prepaidPay]);
 
   return (
     <div className="space-y-8">
@@ -915,12 +916,12 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
           </div>
           <div className="flex items-center justify-center text-coffee-300 font-bold font-mono">─</div>
           <div className="bg-coffee-50/30 p-3 rounded-xl border border-coffee-50 text-center">
-            <span className="text-[10px] text-coffee-400 font-bold block mb-1">B. 金流總額 (現金+匯款+應收)</span>
+            <span className="text-[10px] text-coffee-400 font-bold block mb-1">B. 金流與付款加總 (現金+匯款+應收+儲值付款)</span>
             <span className="text-lg font-mono font-bold text-coffee-800">${fmt(diagnostic.cashRemitArSum)}</span>
           </div>
           <div className="flex items-center justify-center text-coffee-300 font-bold font-mono">＝</div>
           <div className="bg-rose-50/50 p-3 rounded-xl border border-rose-100 text-center col-span-1">
-            <span className="text-[10px] text-rose-500 font-bold block mb-1">實際數學差額 (A ─ B)</span>
+            <span className="text-[10px] text-rose-500 font-bold block mb-1">對帳差額 (A ─ B)</span>
             <span className={cn("text-lg font-mono font-bold", diagnostic.diff === 0 ? "text-mint-brand" : "text-rose-brand")}>
               ${fmt(diagnostic.diff)}
             </span>
@@ -940,8 +941,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                 <h4 className="font-bold text-coffee-800 text-sm">💡 為什麼會有這個差額？</h4>
                 <p>
                   當前系統已將<strong>已取消與已刪除訂單完全排除</strong>在營業額外，且<strong>營業淨額 (A) 已計入運費收入</strong>。<br />
-                  此時，營業淨額與實收款之間的唯一差額來源為：<strong>儲值金扣款支付 (prepaidPay)</strong>。<br />
-                  使用儲值金支付的訂單，商品已正式售出並計入營業淨額 (A)，但因為金流是顧客先前儲值時收取的（當期無實際現金或匯款流入），所以金流總額 (B) 不會重複計算，從而產生該對帳差額。
+                  此時，營業淨額與各管道實收總額（包含現金收入、匯款收入、應收帳款、以及儲值金付款）之間應完全相符，無任何數學差額。
                 </p>
                 <div className="p-3 bg-white rounded-lg border border-coffee-100 font-mono text-xs space-y-1">
                   <div className="font-bold text-coffee-800 mb-1">對帳數學公式：</div>
@@ -1128,17 +1128,13 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
             </div>
 
             <div className="pt-4 mt-4 border-t border-coffee-100 space-y-3">
-              <h4 className="text-sm font-bold text-coffee-400 uppercase tracking-widest mb-2">金流情況</h4>
+              <h4 className="text-sm font-bold text-coffee-400 uppercase tracking-widest mb-2">營業淨額組成 (不含儲值)</h4>
               <div className="flex justify-between items-center px-2">
-                <span className="text-coffee-600 text-sm font-bold">現金收款</span>
+                <span className="text-coffee-600 text-sm font-bold">現金收入 (現結)</span>
                 <span className="font-mono font-bold text-mint-brand">${fmt(stats.cash)}</span>
               </div>
-              <div className="flex justify-between items-center px-2 text-xs text-coffee-500 font-semibold pl-4">
-                <span>↳ 預收貨款 (儲值充值)</span>
-                <span className="font-mono">${fmt(stats.topup)}</span>
-              </div>
               <div className="flex justify-between items-center px-2">
-                <span className="text-coffee-600 text-sm font-bold">銀行匯款</span>
+                <span className="text-coffee-600 text-sm font-bold">匯款收入 (匯款)</span>
                 <span className="font-mono font-bold text-mint-brand">${fmt(stats.remit)}</span>
               </div>
               <button 
@@ -1149,8 +1145,23 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                 <span className="font-mono font-bold text-rose-brand">${fmt(stats.ar)}</span>
               </button>
               <div className="flex justify-between items-center px-2 border-t border-dashed border-coffee-100 pt-2">
-                <span className="text-coffee-600 text-sm font-bold">儲值金扣款支付</span>
+                <span className="text-coffee-600 text-sm font-bold">儲值金付款</span>
                 <span className="font-mono font-bold text-emerald-600">${fmt(stats.prepaidPay)}</span>
+              </div>
+              <div className="text-[10px] text-coffee-400 text-right font-semibold italic">↳ 以上四項加總即為營業淨額</div>
+
+              <h4 className="text-sm font-bold text-coffee-400 uppercase tracking-widest mb-2 pt-2 border-t border-coffee-50">儲值金充值 (金流獨立)</h4>
+              <div className="flex justify-between items-center px-2 text-xs text-coffee-600">
+                <span>現金儲值</span>
+                <span className="font-mono font-semibold">${fmt(stats.topupCash)}</span>
+              </div>
+              <div className="flex justify-between items-center px-2 text-xs text-coffee-600">
+                <span>匯款儲值</span>
+                <span className="font-mono font-semibold">${fmt(stats.topupRemit)}</span>
+              </div>
+              <div className="flex justify-between items-center px-2 font-bold text-emerald-600 border-t border-dashed border-coffee-100 pt-2">
+                <span>儲值金充值總額</span>
+                <span className="font-mono">${fmt(stats.topup)}</span>
               </div>
             </div>
           </div>
