@@ -628,7 +628,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
             if (o.status === '匯款') remit += o.actualAmt || 0;
             else if (o.status === '現結') cash += o.actualAmt || 0;
             else if (o.status === '儲值金扣款') prepaidPay += o.actualAmt || 0;
-            else if (o.status === '未結帳款' || o.status === '已收帳款') ar += o.actualAmt || 0;
+            else if (o.status === '未結帳款' || o.status === '已收帳款' || o.status === '已付訂金') ar += o.actualAmt || 0;
           }
 
         // Calculate sold items / components
@@ -896,7 +896,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
         if (status === '儲值金扣款') {
           totalPrepaidRevenue += actualAmt;
           prepaidOrders.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, netAmt, actualAmt });
-        } else if (status === '匯款' || status === '現結' || status === '未結帳款' || status === '已收帳款') {
+        } else if (status === '匯款' || status === '現結' || status === '未結帳款' || status === '已收帳款' || status === '已付訂金') {
           if (shipAmt > 0) {
             totalShippingNormal += shipAmt;
             normalOrdersWithShip.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, shipAmt, actualAmt: parseNum(o.actualAmt) });
@@ -1029,6 +1029,40 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                             <td className="px-4 py-2 font-mono truncate max-w-[120px]">{o.id}</td>
                             <td className="px-4 py-2">{o.buyer}</td>
                             <td className="px-4 py-2"><span className="px-1.5 py-0.5 rounded bg-red-50 text-red-600 font-bold">{o.status}</span></td>
+                            <td className="px-4 py-2 text-right font-mono font-semibold">${fmt(o.actualAmt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 未識別付款狀態的訂單 */}
+              {diagnostic.otherStatusOrders.length > 0 && (
+                <div className="space-y-2">
+                  <h5 className="font-bold text-xs text-coffee-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                    未列入金流統計之其他狀態訂單 (共計 {diagnostic.otherStatusOrders.length} 筆，這會導致對帳差額)
+                  </h5>
+                  <div className="overflow-x-auto border border-coffee-100 rounded-xl">
+                    <table className="min-w-full text-xs text-left text-coffee-600">
+                      <thead className="bg-coffee-50 text-[10px] uppercase font-bold text-coffee-400">
+                        <tr>
+                          <th className="px-4 py-2">日期</th>
+                          <th className="px-4 py-2">訂單ID</th>
+                          <th className="px-4 py-2">顧客</th>
+                          <th className="px-4 py-2">付款狀態</th>
+                          <th className="px-4 py-2 text-right">訂單金額</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diagnostic.otherStatusOrders.map((o: any) => (
+                          <tr key={o.id} className="border-t border-coffee-50 bg-white">
+                            <td className="px-4 py-2 font-mono">{o.date}</td>
+                            <td className="px-4 py-2 font-mono truncate max-w-[120px]">{o.id}</td>
+                            <td className="px-4 py-2">{o.buyer}</td>
+                            <td className="px-4 py-2"><span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 font-bold">{o.status}</span></td>
                             <td className="px-4 py-2 text-right font-mono font-semibold">${fmt(o.actualAmt)}</td>
                           </tr>
                         ))}

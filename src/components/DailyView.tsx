@@ -1450,7 +1450,7 @@ export default function DailyView({
                     m.prepaidPay += o.actualAmt;
                 }
                 
-                if (o.status === '未結帳款' || o.status === '已收帳款') {
+                if (o.status === '未結帳款' || o.status === '已收帳款' || o.status === '已付訂金') {
                     m.unpaid += o.actualAmt;
                 }
                 m.act += o.actualAmt;
