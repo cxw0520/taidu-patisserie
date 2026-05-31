@@ -881,8 +881,8 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                     const totalShipAmt = nonPreorderOrders.reduce((sum, o) => sum + (o.shipAmt || 0), 0);
                     const totalDiscAmt = nonPreorderOrders.reduce((sum, o) => sum + (o.discAmt || 0), 0);
                     
-                    const validNonPre = nonPreorderOrders.filter(o => o.status !== '公關品');
-                    const netAmt = validNonPre.reduce((sum, o) => sum + (o.actualAmt || 0), 0) - validNonPre.reduce((sum, o) => sum + (o.shipAmt || 0), 0);
+                    const validNonPre = nonPreorderOrders.filter(o => o.status !== '公關品' && o.orderType !== 'topup');
+                    const netAmt = validNonPre.reduce((sum, o) => sum + (o.actualAmt || 0), 0);
 
                     return (
                       <>
@@ -903,7 +903,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                           <td className="p-3 border border-gray-300 font-mono text-red-600">-${fmt(totalDiscAmt)}</td>
                         </tr>
                         <tr>
-                          <th className="p-3 bg-gray-50 border border-gray-300">營業淨額 (不含運費、預購)</th>
+                          <th className="p-3 bg-gray-50 border border-gray-300">營業淨額 (含運費、不含預購及儲值)</th>
                           <td className="p-3 border border-gray-300 font-mono font-bold text-lg text-rose-700 bg-rose-50/20">${fmt(netAmt)}</td>
                         </tr>
                       </>

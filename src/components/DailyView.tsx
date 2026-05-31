@@ -1391,6 +1391,7 @@ export default function DailyView({
     if (!dailyData) return null;
     let m = {
         rev: 0, ship: 0, prShip: 0, disc: 0, prVal: 0, recv: 0, act: 0, remit: 0, cash: 0, unpaid: 0,
+        topup: 0, prepaidPay: 0,
         qty: { 
             gb: {} as Record<string,number>, 
             sg: {} as Record<string,number>, 
@@ -1425,24 +1426,29 @@ export default function DailyView({
 
         // 1. 金流累加：prepayment（付款日收款）與一般訂單都計；pickup 不重複計
         if (!isPR && !isPickupLinked) {
-            if (o.status === '匯款') { 
-                m.remit += o.actualAmt; 
-            } else if (o.status === '現結') { 
-                m.cash += o.actualAmt; 
-            }
-            
-            if (o.status !== '未結帳款') {
-                m.act += o.actualAmt;
+            if (o.orderType === 'topup') {
+                m.topup += o.actualAmt;
             } else {
-                m.unpaid += o.actualAmt;
+                if (o.status === '匯款') { 
+                    m.remit += o.actualAmt; 
+                } else if (o.status === '現結') { 
+                    m.cash += o.actualAmt; 
+                } else if (o.status === '儲值金扣款') {
+                    m.prepaidPay += o.actualAmt;
+                }
+                
+                if (o.status !== '未結帳款') {
+                    m.act += o.actualAmt;
+                } else {
+                    m.unpaid += o.actualAmt;
+                }
             }
         }
 
         // 2. 營業額、折扣、銷量、出庫累加：
         //    - prepayment（僅付款，商品未交）→ 跳過
-        //    - pickup（取貨日，商品正式交出）→ 計入
-        //    - 其他一般訂單（現客、POS）→ 計入
-        if (isPrepayment) return;
+        //    - topup（儲值金充值，不計入商品銷售營業額）→ 跳過
+        if (isPrepayment || o.orderType === 'topup') return;
 
         m.rev += o.prodAmt; 
         m.disc += o.discAmt;
@@ -2200,13 +2206,13 @@ export default function DailyView({
                 <div className="flex justify-between items-center"><span className="text-coffee-600">公關品折算總額</span><span className="font-bold font-mono">${fmt(metrics?.prVal || 0)}</span></div>
                 <div className="h-px bg-coffee-100 my-2" />
                 <div className="flex justify-between items-center text-lg">
-                  <span className="font-bold text-coffee-800">營業淨額</span>
-                  <span className="font-bold font-mono text-rose-brand">${fmt((metrics?.recv || 0) - (metrics?.ship || 0))}</span>
+                  <span className="font-bold text-coffee-800">營業淨額 (含運費)</span>
+                  <span className="font-bold font-mono text-rose-brand">${fmt(metrics?.recv || 0)}</span>
                 </div>
                 <div className="grid grid-cols-[1fr_auto_auto] gap-2 items-center text-xs text-coffee-500 font-bold uppercase tracking-wider">
                   <span></span>
-                  <span className="text-right">應收</span>
-                  <span className="text-right">實收</span>
+                  <span className="text-right">系統應收</span>
+                  <span className="text-right">今日實收</span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-coffee-600">已收-匯款</span>
@@ -2217,6 +2223,11 @@ export default function DailyView({
                     onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), actualRemit: parseNum(e.target.value) } })}
                     className="w-28 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
                   />
+                </div>
+                <div className="flex justify-between items-center text-xs text-coffee-500 font-semibold pl-2">
+                  <span>↳ 預收貨款 (儲值充值)</span>
+                  <span className="font-mono">${fmt(metrics?.topup || 0)}</span>
+                  <span className="w-28"></span>
                 </div>
                 <div className="flex items-center justify-between gap-2">
                   <span className="text-coffee-600">已收-現金</span>
@@ -2237,6 +2248,11 @@ export default function DailyView({
                     onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), actualUnpaid: parseNum(e.target.value) } })}
                     className="w-28 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
                   />
+                </div>
+                <div className="flex justify-between items-center border-t border-dashed border-coffee-100 pt-2">
+                  <span className="text-coffee-600">儲值金扣款支付</span>
+                  <span className="font-bold font-mono text-right min-w-[96px] text-emerald-600">${fmt(metrics?.prepaidPay || 0)}</span>
+                  <span className="w-28"></span>
                 </div>
                 <div className="h-px bg-coffee-100 my-2" />
                 <div className="flex justify-between items-center">

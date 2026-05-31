@@ -541,6 +541,9 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     let remit = 0;
     let cash = 0;
     let ar = 0;
+    let normalShip = 0;
+    let topup = 0;
+    let prepaidPay = 0;
 
     let prShip = 0;
     let logSpent = 0;
@@ -576,14 +579,24 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       });
 
       (d.orders || []).forEach(o => {
+          if (o.status === '已取消' || o.status === '已刪除') return;
+          if (o.orderType === 'topup') {
+            topup += parseNum(o.actualAmt);
+            return;
+          }
+
           if (o.status === '公關品') {
             prTotal += o.prodAmt || 0;
             prShip += o.shipAmt || 0; 
           } else {
             salesTotal += o.prodAmt || 0;
             discTotal += o.discAmt || 0;
+            normalShip += o.shipAmt || 0;
+
             if (o.status === '匯款') remit += o.actualAmt || 0;
-            if (o.status === '現結') cash += o.actualAmt || 0;
+            else if (o.status === '現結') cash += o.actualAmt || 0;
+            else if (o.status === '儲值金扣款') prepaidPay += o.actualAmt || 0;
+
             cash += parseNum((o as any).arCollectedCash);
             remit += parseNum((o as any).arCollectedRemit);
             if (o.status === '未結帳款' || o.status === '已收帳款') {
@@ -662,7 +675,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       };
     }).filter((i: any) => i.qty > 0);
 
-    const netRevenue = salesTotal - discTotal - prTotal; 
+    const netRevenue = salesTotal - discTotal + normalShip; 
     
     // Ingredients cost sum
     const theoreticalIngredCost = itemCostBreakdown.reduce((acc, cur) => acc + cur.subtotal, 0);
@@ -757,7 +770,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
     return {
       salesTotal, discTotal, prTotal, netRevenue,
-      remit, cash, ar,
+      remit, cash, ar, normalShip, topup, prepaidPay,
       itemSales, theoreticalIngredCost, itemCostBreakdown, itemPR,
       materialPurchaseTotal, packagingPurchaseTotal, vendorMaterialPurchases,
       logSpent, totalLogisticsCost,
@@ -810,8 +823,241 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     }, { merge: true });
   };
 
+  const [showDiagDetails, setShowDiagDetails] = useState(false);
+  const diagnostic = useMemo(() => {
+    let totalShippingNormal = 0;
+    let totalPrepaidRevenue = 0;
+    let totalCancelledRevenue = 0;
+    const cancelledOrders: any[] = [];
+    const prepaidOrders: any[] = [];
+    const normalOrdersWithShip: any[] = [];
+    const otherStatusOrders: any[] = [];
+
+    monthData.forEach((d: DailyReport) => {
+      (d.orders || []).forEach(o => {
+        if (!o) return;
+        const status = o.status;
+        const prodAmt = parseNum(o.prodAmt);
+        const discAmt = parseNum(o.discAmt);
+        const shipAmt = parseNum(o.shipAmt);
+        const netAmt = prodAmt - discAmt;
+
+        if (status === '公關品') {
+          return;
+        }
+
+        if (status === '已取消' || status === '已刪除') {
+          totalCancelledRevenue += netAmt;
+          cancelledOrders.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, netAmt, actualAmt: parseNum(o.actualAmt) });
+        } else if (status === '儲值金扣款') {
+          totalPrepaidRevenue += netAmt;
+          prepaidOrders.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, netAmt, actualAmt: parseNum(o.actualAmt) });
+        } else if (status === '匯款' || status === '現結' || status === '未結帳款' || status === '已收帳款') {
+          if (shipAmt > 0) {
+            totalShippingNormal += shipAmt;
+            normalOrdersWithShip.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, shipAmt, actualAmt: parseNum(o.actualAmt) });
+          }
+        } else {
+          otherStatusOrders.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, netAmt, actualAmt: parseNum(o.actualAmt) });
+        }
+      });
+    });
+
+    const netRevenue = stats.netRevenue;
+    const cashRemitArSum = stats.cash + stats.remit + stats.ar;
+    const diff = netRevenue - cashRemitArSum;
+
+    return {
+      diff,
+      netRevenue,
+      cashRemitArSum,
+      totalShippingNormal,
+      totalPrepaidRevenue,
+      totalCancelledRevenue,
+      cancelledOrders,
+      prepaidOrders,
+      normalOrdersWithShip,
+      otherStatusOrders
+    };
+  }, [monthData, stats.netRevenue, stats.cash, stats.remit, stats.ar]);
+
   return (
     <div className="space-y-8">
+      {/* 財務對帳與差額診斷工具 */}
+      <div className="glass-panel p-6 bg-white border border-coffee-100 shadow-sm flex flex-col gap-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-coffee-100 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-brand">
+              <Info className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-lg font-bold text-coffee-800">
+                本月報表對帳與差額診斷
+              </h3>
+              <p className="text-xs text-coffee-500 mt-0.5">
+                比較「營業淨額」與「金流收款（現金 + 匯款 + 應收帳款）」之間的數學差額與原因分析
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowDiagDetails(!showDiagDetails)}
+            className="px-4 py-2 bg-coffee-50 text-coffee-700 hover:bg-coffee-100 rounded-xl text-xs font-bold transition-all border border-coffee-200"
+          >
+            {showDiagDetails ? "隱藏詳細對帳明細" : "顯示對帳與差額明細"}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="bg-coffee-50/30 p-3 rounded-xl border border-coffee-50 text-center">
+            <span className="text-[10px] text-coffee-400 font-bold block mb-1">A. 營業淨額</span>
+            <span className="text-lg font-mono font-bold text-coffee-800">${fmt(diagnostic.netRevenue)}</span>
+          </div>
+          <div className="flex items-center justify-center text-coffee-300 font-bold font-mono">─</div>
+          <div className="bg-coffee-50/30 p-3 rounded-xl border border-coffee-50 text-center">
+            <span className="text-[10px] text-coffee-400 font-bold block mb-1">B. 金流總額 (現金+匯款+應收)</span>
+            <span className="text-lg font-mono font-bold text-coffee-800">${fmt(diagnostic.cashRemitArSum)}</span>
+          </div>
+          <div className="flex items-center justify-center text-coffee-300 font-bold font-mono">＝</div>
+          <div className="bg-rose-50/50 p-3 rounded-xl border border-rose-100 text-center col-span-1">
+            <span className="text-[10px] text-rose-500 font-bold block mb-1">實際數學差額 (A ─ B)</span>
+            <span className={cn("text-lg font-mono font-bold", diagnostic.diff === 0 ? "text-mint-brand" : "text-rose-brand")}>
+              ${fmt(diagnostic.diff)}
+            </span>
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {showDiagDetails && (
+            <motion.div
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.2 }}
+              className="space-y-4 pt-3 border-t border-coffee-50 overflow-hidden"
+            >
+              <div className="bg-[#faf7f2] p-4 rounded-xl border border-coffee-100 text-sm text-coffee-700 space-y-3 leading-relaxed">
+                <h4 className="font-bold text-coffee-800 text-sm">💡 為什麼會有這個差額？</h4>
+                <p>
+                  當前系統已將<strong>已取消與已刪除訂單完全排除</strong>在營業額外，且<strong>營業淨額 (A) 已計入運費收入</strong>。<br />
+                  此時，營業淨額與實收款之間的唯一差額來源為：<strong>儲值金扣款支付 (prepaidPay)</strong>。<br />
+                  使用儲值金支付的訂單，商品已正式售出並計入營業淨額 (A)，但因為金流是顧客先前儲值時收取的（當期無實際現金或匯款流入），所以金流總額 (B) 不會重複計算，從而產生該對帳差額。
+                </p>
+                <div className="p-3 bg-white rounded-lg border border-coffee-100 font-mono text-xs space-y-1">
+                  <div className="font-bold text-coffee-800 mb-1">對帳數學公式：</div>
+                  <div>A ─ B ＝ 儲值金扣款支付總額</div>
+                  <div className="text-rose-brand font-bold mt-1">
+                    實際對帳：
+                    營業淨額 A (${fmt(diagnostic.netRevenue)}) ─ 金流總額 B (${fmt(diagnostic.cashRemitArSum)}) ＝ 儲值金扣款支付 (${fmt(stats.prepaidPay)}) 元
+                  </div>
+                </div>
+              </div>
+
+              {/* 已取消訂單 */}
+              {diagnostic.cancelledOrders.length > 0 && (
+                <div className="space-y-2">
+                  <h5 className="font-bold text-xs text-coffee-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-400"></span>
+                    已取消 / 已刪除的訂單 (共計 ${fmt(diagnostic.totalCancelledRevenue)} 元，已完全排除於月報表外)
+                  </h5>
+                  <div className="overflow-x-auto border border-coffee-100 rounded-xl">
+                    <table className="min-w-full text-xs text-left text-coffee-600">
+                      <thead className="bg-coffee-50 text-[10px] uppercase font-bold text-coffee-400">
+                        <tr>
+                          <th className="px-4 py-2">日期</th>
+                          <th className="px-4 py-2">訂單ID</th>
+                          <th className="px-4 py-2">顧客</th>
+                          <th className="px-4 py-2">付款狀態</th>
+                          <th className="px-4 py-2 text-right">商品淨額</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diagnostic.cancelledOrders.map((o: any) => (
+                          <tr key={o.id} className="border-t border-coffee-50 bg-white">
+                            <td className="px-4 py-2 font-mono">{o.date}</td>
+                            <td className="px-4 py-2 font-mono truncate max-w-[120px]">{o.id}</td>
+                            <td className="px-4 py-2">{o.buyer}</td>
+                            <td className="px-4 py-2"><span className="px-1.5 py-0.5 rounded bg-red-50 text-red-600 font-bold">{o.status}</span></td>
+                            <td className="px-4 py-2 text-right font-mono font-semibold">${fmt(o.netAmt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 儲值金扣款 */}
+              {diagnostic.prepaidOrders.length > 0 && (
+                <div className="space-y-2">
+                  <h5 className="font-bold text-xs text-coffee-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    儲值金扣款訂單 (共計 ${fmt(diagnostic.totalPrepaidRevenue)} 元，已計入營業淨額，於金流中獨立核算)
+                  </h5>
+                  <div className="overflow-x-auto border border-coffee-100 rounded-xl">
+                    <table className="min-w-full text-xs text-left text-coffee-600">
+                      <thead className="bg-coffee-50 text-[10px] uppercase font-bold text-coffee-400">
+                        <tr>
+                          <th className="px-4 py-2">日期</th>
+                          <th className="px-4 py-2">訂單ID</th>
+                          <th className="px-4 py-2">顧客</th>
+                          <th className="px-4 py-2">付款狀態</th>
+                          <th className="px-4 py-2 text-right">商品淨額</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diagnostic.prepaidOrders.map((o: any) => (
+                          <tr key={o.id} className="border-t border-coffee-50 bg-white">
+                            <td className="px-4 py-2 font-mono">{o.date}</td>
+                            <td className="px-4 py-2 font-mono truncate max-w-[120px]">{o.id}</td>
+                            <td className="px-4 py-2">{o.buyer}</td>
+                            <td className="px-4 py-2"><span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 font-bold">{o.status}</span></td>
+                            <td className="px-4 py-2 text-right font-mono font-semibold">${fmt(o.netAmt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 運費項目 */}
+              {diagnostic.normalOrdersWithShip.length > 0 && (
+                <div className="space-y-2">
+                  <h5 className="font-bold text-xs text-coffee-500 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400"></span>
+                    包含運費之訂單 (共計 ${fmt(diagnostic.totalShippingNormal)} 元，已納入營業淨額與實收金流中)
+                  </h5>
+                  <div className="overflow-x-auto border border-coffee-100 rounded-xl">
+                    <table className="min-w-full text-xs text-left text-coffee-600">
+                      <thead className="bg-coffee-50 text-[10px] uppercase font-bold text-coffee-400">
+                        <tr>
+                          <th className="px-4 py-2">日期</th>
+                          <th className="px-4 py-2">訂單ID</th>
+                          <th className="px-4 py-2">顧客</th>
+                          <th className="px-4 py-2">付款狀態</th>
+                          <th className="px-4 py-2 text-right">運費金額</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diagnostic.normalOrdersWithShip.map((o: any) => (
+                          <tr key={o.id} className="border-t border-coffee-50 bg-white">
+                            <td className="px-4 py-2 font-mono">{o.date}</td>
+                            <td className="px-4 py-2 font-mono truncate max-w-[120px]">{o.id}</td>
+                            <td className="px-4 py-2">{o.buyer}</td>
+                            <td className="px-4 py-2"><span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 font-bold">{o.status}</span></td>
+                            <td className="px-4 py-2 text-right font-mono font-semibold">${fmt(o.shipAmt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+
       {/* KPI Header */}
       <div className="flex flex-wrap md:flex-nowrap gap-2 items-stretch">
         <div className="flex-1 min-w-[120px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
@@ -868,11 +1114,15 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
               <span className="font-mono font-bold text-rose-brand">-${fmt(stats.discTotal)}</span>
             </div>
             <div className="flex justify-between items-center bg-coffee-50/50 p-3 rounded-xl border border-coffee-50">
+              <span className="text-coffee-600 font-bold text-sm">運費收入總額</span>
+              <span className="font-mono font-bold">${fmt(stats.normalShip)}</span>
+            </div>
+            <div className="flex justify-between items-center bg-coffee-50/50 p-3 rounded-xl border border-coffee-50">
               <span className="text-coffee-600 font-bold text-sm">公關品總價值</span>
               <span className="font-mono font-bold text-coffee-500">(${fmt(stats.prTotal)})</span>
             </div>
             <div className="flex justify-between items-center bg-coffee-100/50 p-4 rounded-xl border border-coffee-200 shadow-sm mt-2">
-              <span className="text-coffee-800 font-bold">本月淨營業額</span>
+              <span className="text-coffee-800 font-bold">本月淨營業額 (含運費)</span>
               <span className="font-mono font-bold text-xl">${fmt(stats.netRevenue)}</span>
             </div>
 
@@ -881,6 +1131,10 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
               <div className="flex justify-between items-center px-2">
                 <span className="text-coffee-600 text-sm font-bold">現金收款</span>
                 <span className="font-mono font-bold text-mint-brand">${fmt(stats.cash)}</span>
+              </div>
+              <div className="flex justify-between items-center px-2 text-xs text-coffee-500 font-semibold pl-4">
+                <span>↳ 預收貨款 (儲值充值)</span>
+                <span className="font-mono">${fmt(stats.topup)}</span>
               </div>
               <div className="flex justify-between items-center px-2">
                 <span className="text-coffee-600 text-sm font-bold">銀行匯款</span>
@@ -893,6 +1147,10 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                 <span className="text-rose-brand text-sm font-bold flex items-center gap-1">應收帳款 <Info className="w-3 h-3 group-hover:scale-110 transition"/></span>
                 <span className="font-mono font-bold text-rose-brand">${fmt(stats.ar)}</span>
               </button>
+              <div className="flex justify-between items-center px-2 border-t border-dashed border-coffee-100 pt-2">
+                <span className="text-coffee-600 text-sm font-bold">儲值金扣款支付</span>
+                <span className="font-mono font-bold text-emerald-600">${fmt(stats.prepaidPay)}</span>
+              </div>
             </div>
           </div>
         </div>
