@@ -840,6 +840,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
         const prodAmt = parseNum(o.prodAmt);
         const discAmt = parseNum(o.discAmt);
         const shipAmt = parseNum(o.shipAmt);
+        const actualAmt = parseNum(o.actualAmt);
         const netAmt = prodAmt - discAmt;
 
         if (status === '公關品') {
@@ -847,11 +848,11 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
         }
 
         if (status === '已取消' || status === '已刪除') {
-          totalCancelledRevenue += netAmt;
-          cancelledOrders.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, netAmt, actualAmt: parseNum(o.actualAmt) });
+          totalCancelledRevenue += actualAmt;
+          cancelledOrders.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, netAmt, actualAmt });
         } else if (status === '儲值金扣款') {
-          totalPrepaidRevenue += netAmt;
-          prepaidOrders.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, netAmt, actualAmt: parseNum(o.actualAmt) });
+          totalPrepaidRevenue += actualAmt;
+          prepaidOrders.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, netAmt, actualAmt });
         } else if (status === '匯款' || status === '現結' || status === '未結帳款' || status === '已收帳款') {
           if (shipAmt > 0) {
             totalShippingNormal += shipAmt;
@@ -967,7 +968,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                           <th className="px-4 py-2">訂單ID</th>
                           <th className="px-4 py-2">顧客</th>
                           <th className="px-4 py-2">付款狀態</th>
-                          <th className="px-4 py-2 text-right">商品淨額</th>
+                          <th className="px-4 py-2 text-right">訂單金額</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -977,7 +978,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                             <td className="px-4 py-2 font-mono truncate max-w-[120px]">{o.id}</td>
                             <td className="px-4 py-2">{o.buyer}</td>
                             <td className="px-4 py-2"><span className="px-1.5 py-0.5 rounded bg-red-50 text-red-600 font-bold">{o.status}</span></td>
-                            <td className="px-4 py-2 text-right font-mono font-semibold">${fmt(o.netAmt)}</td>
+                            <td className="px-4 py-2 text-right font-mono font-semibold">${fmt(o.actualAmt)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -1001,7 +1002,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                           <th className="px-4 py-2">訂單ID</th>
                           <th className="px-4 py-2">顧客</th>
                           <th className="px-4 py-2">付款狀態</th>
-                          <th className="px-4 py-2 text-right">商品淨額</th>
+                          <th className="px-4 py-2 text-right">扣款金額</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1011,7 +1012,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                             <td className="px-4 py-2 font-mono truncate max-w-[120px]">{o.id}</td>
                             <td className="px-4 py-2">{o.buyer}</td>
                             <td className="px-4 py-2"><span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 font-bold">{o.status}</span></td>
-                            <td className="px-4 py-2 text-right font-mono font-semibold">${fmt(o.netAmt)}</td>
+                            <td className="px-4 py-2 text-right font-mono font-semibold">${fmt(o.actualAmt)}</td>
                           </tr>
                         ))}
                       </tbody>
