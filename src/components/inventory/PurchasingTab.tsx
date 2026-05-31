@@ -1,9 +1,9 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, deleteDoc, doc, getDocs, onSnapshot, query, setDoc, where, writeBatch } from 'firebase/firestore';
+import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, where, writeBatch } from 'firebase/firestore';
 import { Material, Purchase, PurchaseLine, PurchaseSettlement, Vendor } from '../../types';
 import { fmt, uid, cn } from '../../lib/utils';
-import { BadgeCheck, Eye, Pencil, Plus, Search, Store, Trash2, Users, Phone, Mail, X, CheckCircle2, ClipboardList } from 'lucide-react';
+import { AlertCircle, BadgeCheck, Eye, Pencil, Plus, Search, Store, Trash2, Users, Phone, Mail, X, CheckCircle2, ClipboardList } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
 export default function PurchasingTab({
@@ -30,6 +30,10 @@ export default function PurchasingTab({
   const [settleModal, setSettleModal] = useState<{ vendor: string; yearMonth: string; totalAmt: number } | null>(null);
   const [settleForm, setSettleForm] = useState({ paidAmount: '', paidDate: new Date().toISOString().substring(0, 10), note: '' });
   const [activeSection, setActiveSection] = useState<'analysis' | 'settlement'>('analysis');
+  const [isSyncingVouchers, setIsSyncingVouchers] = useState(false);
+  const [pendingVoucher, setPendingVoucher] = useState<any | null>(null);
+  const [pendingPurchasePayload, setPendingPurchasePayload] = useState<any | null>(null);
+  const [pendingDeltaByMaterial, setPendingDeltaByMaterial] = useState<any | null>(null);
 
   React.useEffect(() => {
     const unsub = onSnapshot(collection(db, 'shops', shopId, 'vendors'), snap => {
@@ -47,6 +51,17 @@ export default function PurchasingTab({
     return unsub;
   }, [shopId, selectedMonth]);
 
+  const [coa, setCoa] = useState<any[]>([]);
+
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'shops', shopId, 'meta', 'coa'), snap => {
+      if (snap.exists() && snap.data()?.list) {
+        setCoa(snap.data().list);
+      }
+    });
+    return unsub;
+  }, [shopId]);
+
   const [newMaterial, setNewMaterial] = useState<Partial<Material>>({
     name: '', category: '食材', unit: 'g', minAlert: 0, stock: 0, avgCost: 0, vendor: '', vendors: []
   });
@@ -57,6 +72,169 @@ export default function PurchasingTab({
     lines: [],
     notes: ''
   });
+
+  const handleSyncMissingVouchers = async () => {
+    setIsSyncingVouchers(true);
+    try {
+      // 1. Fetch all entries to see which ones already exist
+      const entriesSnap = await getDocs(collection(db, 'shops', shopId, 'entries'));
+      const existingEntryIds = new Set(entriesSnap.docs.map(d => d.id));
+
+      // 2. Filter purchases that don't have an entry
+      const missingPurchases = purchases.filter(p => !existingEntryIds.has(p.id));
+
+      if (missingPurchases.length === 0) {
+        alert('所有進貨單皆已建立傳票！');
+        return;
+      }
+
+      if (!confirm(`發現 ${missingPurchases.length} 筆歷史進貨單尚未建立傳票，是否自動補建？`)) return;
+
+      const batch = writeBatch(db);
+      for (const p of missingPurchases) {
+        const dateParts = p.date.split('-');
+        const yy = dateParts[0].slice(-2);
+        const mm = dateParts[1];
+        const dd = dateParts[2];
+        const datePrefix = `${yy}${mm}${dd}`;
+
+        const todayVouchers = entriesSnap.docs
+          .map(doc => doc.data().voucherNo || doc.id)
+          .filter(id => id && id.startsWith(datePrefix));
+
+        let nextSeq = 1;
+        if (todayVouchers.length > 0) {
+          const seqs = todayVouchers.map(id => parseInt(id.slice(-2), 10) || 0);
+          nextSeq = Math.max(...seqs) + 1;
+        }
+        const voucherNo = `${datePrefix}${String(nextSeq).padStart(2, '0')}`;
+
+        let foodAmt = 0;
+        let pkgAmt = 0;
+        p.lines.forEach(l => {
+          const mat = materialMap[l.materialId];
+          if (mat?.category === '包材') {
+            pkgAmt += l.amount;
+          } else {
+            foodAmt += l.amount;
+          }
+        });
+
+        const entryLines: any[] = [];
+        const findAccountName = (accId: string, def: string) => {
+          return coa.find(c => c.id === accId)?.name || def;
+        };
+
+        if (foodAmt > 0) {
+          entryLines.push({
+            id: uid(),
+            type: 'debit',
+            accountId: '5101',
+            accountName: findAccountName('5101', '食材成本'),
+            amount: foodAmt,
+            lineDescription: `${p.vendor} 進貨 - 食材`
+          });
+        }
+        if (pkgAmt > 0) {
+          entryLines.push({
+            id: uid(),
+            type: 'debit',
+            accountId: '5102',
+            accountName: findAccountName('5102', '包材成本'),
+            amount: pkgAmt,
+            lineDescription: `${p.vendor} 進貨 - 包材`
+          });
+        }
+
+        if (p.paymentType === '現結') {
+          entryLines.push({
+            id: uid(),
+            type: 'credit',
+            accountId: '1101',
+            accountName: findAccountName('1101', '現金'),
+            amount: p.totalAmount,
+            lineDescription: `${p.vendor} 進貨現結`
+          });
+        } else {
+          entryLines.push({
+            id: uid(),
+            type: 'credit',
+            accountId: '2101',
+            accountName: findAccountName('2101', '應付帳款'),
+            amount: p.totalAmount,
+            lineDescription: `${p.vendor} 進貨月結`
+          });
+        }
+
+        const entryPayload = {
+          id: p.id,
+          date: p.date,
+          year: p.year,
+          voucherNo,
+          description: `${p.vendor} 進貨自動結轉傳票`,
+          lines: entryLines,
+          debitTotal: p.totalAmount,
+          creditTotal: p.totalAmount,
+          isAutoGenerated: true,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString()
+        };
+
+        batch.set(doc(db, 'shops', shopId, 'entries', p.id), entryPayload);
+      }
+
+      await batch.commit();
+      alert(`已成功補建 ${missingPurchases.length} 筆進貨傳票！`);
+    } catch (error) {
+      console.error(error);
+      alert('自動補建傳票失敗，請重試！');
+    } finally {
+      setIsSyncingVouchers(false);
+    }
+  };
+
+  const handleConfirmVoucher = async (finalVoucher: any) => {
+    try {
+      const purchaseId = pendingPurchasePayload.id;
+
+      // 1. 更新庫存平均成本
+      await applyMaterialUpdates(pendingDeltaByMaterial);
+
+      // 2. 儲存進貨單
+      await setDoc(doc(db, 'shops', shopId, 'purchases', purchaseId), pendingPurchasePayload);
+
+      // 3. 儲存廠商（新廠商時）
+      if (formData.vendor && !vendors.find(v => v.name === formData.vendor)) {
+        const vId = uid();
+        await setDoc(doc(db, 'shops', shopId, 'vendors', vId), { id: vId, name: formData.vendor });
+      }
+
+      // 4. 儲存傳票
+      const debitTotal = finalVoucher.lines.filter((l: any) => l.type === 'debit').reduce((s: number, l: any) => s + (Number(l.amount) || 0), 0);
+      const creditTotal = finalVoucher.lines.filter((l: any) => l.type === 'credit').reduce((s: number, l: any) => s + (Number(l.amount) || 0), 0);
+
+      const entryPayload = {
+        ...finalVoucher,
+        debitTotal,
+        creditTotal,
+        updatedAt: new Date().toISOString()
+      };
+
+      await setDoc(doc(db, 'shops', shopId, 'entries', purchaseId), entryPayload);
+
+      alert(editingPurchase ? '進貨單與傳票已成功更新！' : '進貨單已儲存，傳票已成功建立！');
+      
+      setPendingVoucher(null);
+      setPendingPurchasePayload(null);
+      setPendingDeltaByMaterial(null);
+      setIsModalOpen(false);
+      setEditingPurchase(null);
+      setFormData({ date: new Date().toISOString().substring(0, 10), vendor: '', lines: [], notes: '' });
+    } catch (err) {
+      console.error(err);
+      alert('儲存資料時發生錯誤，請重試！');
+    }
+  };
 
   const vendorStats = useMemo(() => {
     const stats: Record<string, { monthly: number; cash: number; total: number }> = {};
@@ -102,6 +280,29 @@ export default function PurchasingTab({
     materials.forEach(mat => { m[mat.id] = mat; });
     return m;
   }, [materials]);
+
+  const { selectedMonthIngredientTotal, selectedMonthPackageTotal } = useMemo(() => {
+    let ingredientSum = 0;
+    let packageSum = 0;
+    purchases
+      .filter(p => p.date.startsWith(selectedMonth))
+      .forEach(p => {
+        p.lines.forEach(l => {
+          const mat = materialMap[l.materialId];
+          if (mat) {
+            if (mat.category === '食材') {
+              ingredientSum += l.amount;
+            } else if (mat.category === '包材') {
+              packageSum += l.amount;
+            }
+          }
+        });
+      });
+    return {
+      selectedMonthIngredientTotal: ingredientSum,
+      selectedMonthPackageTotal: packageSum
+    };
+  }, [purchases, selectedMonth, materialMap]);
 
   // 月結結清儲存
   const handleSettlementSave = async () => {
@@ -255,17 +456,114 @@ export default function PurchasingTab({
       deltaByMaterial = collectLineDeltas(payload.lines, 1);
     }
 
-    await applyMaterialUpdates(deltaByMaterial);
-    await setDoc(doc(db, 'shops', shopId, 'purchases', purchaseId), payload);
-
-    if (formData.vendor && !vendors.find(v => v.name === formData.vendor)) {
-      const vId = uid();
-      await setDoc(doc(db, 'shops', shopId, 'vendors', vId), { id: vId, name: formData.vendor });
+    // 建立/更新自動結轉傳票
+    let voucherNo = '';
+    const entryRef = doc(db, 'shops', shopId, 'entries', purchaseId);
+    if (editingPurchase) {
+      const existingEntrySnap = await getDoc(entryRef);
+      if (existingEntrySnap.exists()) {
+        voucherNo = existingEntrySnap.data().voucherNo;
+      }
     }
 
-    setIsModalOpen(false);
-    setEditingPurchase(null);
-    setFormData({ date: new Date().toISOString().substring(0, 10), vendor: '', lines: [], notes: '' });
+    if (!voucherNo) {
+      const dateParts = formData.date!.split('-');
+      const yy = dateParts[0].slice(-2);
+      const mm = dateParts[1];
+      const dd = dateParts[2];
+      const datePrefix = `${yy}${mm}${dd}`;
+
+      const q = query(
+        collection(db, 'shops', shopId, 'entries'),
+        where('date', '==', formData.date!)
+      );
+      const snap = await getDocs(q);
+      const todayVouchers = snap.docs
+        .map(doc => doc.data().voucherNo || doc.id)
+        .filter(id => id && id.startsWith(datePrefix));
+      
+      let nextSeq = 1;
+      if (todayVouchers.length > 0) {
+        const seqs = todayVouchers.map(id => parseInt(id.slice(-2), 10) || 0);
+        nextSeq = Math.max(...seqs) + 1;
+      }
+      voucherNo = `${datePrefix}${String(nextSeq).padStart(2, '0')}`;
+    }
+
+    let foodAmt = 0;
+    let pkgAmt = 0;
+    normalizedLines.forEach(l => {
+      const mat = materialMap[l.materialId];
+      if (mat?.category === '包材') {
+        pkgAmt += l.amount;
+      } else {
+        foodAmt += l.amount;
+      }
+    });
+
+    const entryLines: any[] = [];
+    const findAccountName = (accId: string, def: string) => {
+      return coa.find(c => c.id === accId)?.name || def;
+    };
+
+    if (foodAmt > 0) {
+      entryLines.push({
+        id: uid(),
+        type: 'debit',
+        accountId: '5101',
+        accountName: findAccountName('5101', '食材成本'),
+        amount: foodAmt,
+        lineDescription: `${payload.vendor} 進貨 - 食材`
+      });
+    }
+    if (pkgAmt > 0) {
+      entryLines.push({
+        id: uid(),
+        type: 'debit',
+        accountId: '5102',
+        accountName: findAccountName('5102', '包材成本'),
+        amount: pkgAmt,
+        lineDescription: `${payload.vendor} 進貨 - 包材`
+      });
+    }
+
+    if (payload.paymentType === '現結') {
+      entryLines.push({
+        id: uid(),
+        type: 'credit',
+        accountId: '1101',
+        accountName: findAccountName('1101', '現金'),
+        amount: totalAmt,
+        lineDescription: `${payload.vendor} 進貨現結`
+      });
+    } else {
+      entryLines.push({
+        id: uid(),
+        type: 'credit',
+        accountId: '2101',
+        accountName: findAccountName('2101', '應付帳款'),
+        amount: totalAmt,
+        lineDescription: `${payload.vendor} 進貨月結`
+      });
+    }
+
+    const defaultVoucher = {
+      id: purchaseId,
+      date: payload.date,
+      year: payload.year,
+      voucherNo,
+      description: `${payload.vendor} 進貨自動結轉傳票`,
+      lines: entryLines,
+      debitTotal: totalAmt,
+      creditTotal: totalAmt,
+      isAutoGenerated: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+
+    setPendingVoucher(defaultVoucher);
+    setPendingPurchasePayload(payload);
+    setPendingDeltaByMaterial(deltaByMaterial);
   };
 
   const handleDeletePurchase = async (purchase: Purchase) => {
@@ -273,6 +571,7 @@ export default function PurchasingTab({
     const revertDelta = collectLineDeltas(purchase.lines, -1);
     await applyMaterialUpdates(revertDelta);
     await deleteDoc(doc(db, 'shops', shopId, 'purchases', purchase.id));
+    await deleteDoc(doc(db, 'shops', shopId, 'entries', purchase.id));
   };
 
   const handleSaveVendor = async (e: React.FormEvent) => {
@@ -303,7 +602,14 @@ export default function PurchasingTab({
           <h2 className="text-xl font-bold text-coffee-800">進貨紀錄與廠商帳款</h2>
           <p className="text-sm text-coffee-400">登錄/編輯進貨單，系統自動更新庫存與平均成本。</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
+          <button
+            onClick={handleSyncMissingVouchers}
+            disabled={isSyncingVouchers}
+            className="bg-white border border-coffee-200 text-coffee-700 px-6 py-3 rounded-full font-bold flex items-center gap-2 hover:bg-coffee-50 transition shadow-sm active:scale-95 disabled:opacity-50"
+          >
+            {isSyncingVouchers ? '補建中...' : '補建歷史傳票'}
+          </button>
           <button
             onClick={() => setIsVendorDbOpen(true)}
             className="bg-white border border-coffee-200 text-coffee-700 px-6 py-3 rounded-full font-bold flex items-center gap-2 hover:bg-coffee-50 transition shadow-sm active:scale-95"
@@ -341,9 +647,21 @@ export default function PurchasingTab({
                 )}
               </button>
             </div>
-            <div className="flex items-center gap-3">
-              <span className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest hidden sm:inline">本月總進貨:</span>
-              <span className="text-xl font-serif-brand font-bold text-rose-brand">${fmt(selectedMonthTotal)}</span>
+            <div className="flex items-center flex-wrap gap-3 gap-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest">本月總進貨:</span>
+                <span className="text-xl font-serif-brand font-bold text-rose-brand">${fmt(selectedMonthTotal)}</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs font-bold">
+                <span className="bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-xl border border-emerald-100 flex items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+                  食材: ${fmt(selectedMonthIngredientTotal)}
+                </span>
+                <span className="bg-sky-50 text-sky-700 px-2.5 py-1 rounded-xl border border-sky-100 flex items-center gap-1">
+                  <div className="w-1.5 h-1.5 rounded-full bg-sky-500"></div>
+                  包材: ${fmt(selectedMonthPackageTotal)}
+                </span>
+              </div>
               <input
                 type="month"
                 value={selectedMonth}
@@ -1006,6 +1324,268 @@ export default function PurchasingTab({
           </div>
         )}
       </AnimatePresence>
+
+      {/* 傳票預覽 Modal */}
+      <AnimatePresence>
+        {pendingVoucher && (
+          <VoucherPreviewModal
+            voucher={pendingVoucher}
+            coa={coa}
+            onCancel={() => {
+              setPendingVoucher(null);
+              setPendingPurchasePayload(null);
+              setPendingDeltaByMaterial(null);
+            }}
+            onConfirm={handleConfirmVoucher}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// ── 傳票編輯預覽子元件 ──────────────────────────────────────────
+function VoucherPreviewModal({ 
+  voucher, 
+  coa, 
+  onCancel, 
+  onConfirm 
+}: { 
+  voucher: any, 
+  coa: any[], 
+  onCancel: () => void, 
+  onConfirm: (finalVoucher: any) => Promise<void> 
+}) {
+  const [localVoucher, setLocalVoucher] = useState(() => ({
+    ...voucher,
+    lines: voucher.lines.map((l: any) => ({ ...l }))
+  }));
+
+  const debitSum = React.useMemo(() => {
+    return localVoucher.lines.filter((l: any) => l.type === 'debit').reduce((s: number, l: any) => s + (Number(l.amount) || 0), 0);
+  }, [localVoucher.lines]);
+
+  const creditSum = React.useMemo(() => {
+    return localVoucher.lines.filter((l: any) => l.type === 'credit').reduce((s: number, l: any) => s + (Number(l.amount) || 0), 0);
+  }, [localVoucher.lines]);
+
+  const isBalanced = Math.abs(debitSum - creditSum) < 0.01;
+
+  const handleUpdateLine = (id: string, field: string, val: any) => {
+    setLocalVoucher((prev: any) => ({
+      ...prev,
+      lines: prev.lines.map((l: any) => {
+        if (l.id === id) {
+          const updated = { ...l, [field]: val };
+          if (field === 'accountId') {
+            updated.accountName = coa.find(c => c.id === val)?.name || '未知';
+          }
+          return updated;
+        }
+        return l;
+      })
+    }));
+  };
+
+  const handleAddLine = () => {
+    const firstCoa = coa[0] || { id: '1101', name: '現金' };
+    setLocalVoucher((prev: any) => ({
+      ...prev,
+      lines: [
+        ...prev.lines,
+        {
+          id: uid(),
+          accountId: firstCoa.id,
+          accountName: firstCoa.name,
+          type: 'debit',
+          amount: 0,
+          lineDescription: '手動新增調整分錄'
+        }
+      ]
+    }));
+  };
+
+  const handleRemoveLine = (id: string) => {
+    if (localVoucher.lines.length <= 1) return;
+    setLocalVoucher((prev: any) => ({
+      ...prev,
+      lines: prev.lines.filter((l: any) => l.id !== id)
+    }));
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[250] p-4 animate-in fade-in duration-200">
+      <div className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+        
+        {/* Header */}
+        <div className="p-6 border-b border-coffee-50 bg-coffee-50 flex justify-between items-center shrink-0">
+          <div>
+            <h3 className="text-xl font-bold text-coffee-800">📊 進貨傳票預覽與編輯</h3>
+            <p className="text-xs text-coffee-400 mt-1">此為系統根據進貨品項及付款方式自動推薦的分錄。您可以自由修改任何欄位，確認借貸平衡後即可建立。</p>
+          </div>
+          <button onClick={onCancel} className="text-gray-400 hover:text-gray-600 transition text-2xl font-light">✕</button>
+        </div>
+
+        {/* Form Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-coffee-50/20 p-4 rounded-2xl border border-coffee-100/30">
+            <div>
+              <label className="block text-xs font-bold text-coffee-500 mb-1.5">傳票日期</label>
+              <input
+                type="date"
+                value={localVoucher.date}
+                onChange={e => setLocalVoucher((prev: any) => ({ ...prev, date: e.target.value }))}
+                className="w-full bg-white border border-coffee-200 rounded-xl px-3.5 py-2 font-mono font-bold text-sm text-coffee-800 focus:border-coffee-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-coffee-500 mb-1.5">傳票編號</label>
+              <input
+                type="text"
+                value={localVoucher.voucherNo}
+                onChange={e => setLocalVoucher((prev: any) => ({ ...prev, voucherNo: e.target.value }))}
+                className="w-full bg-white border border-coffee-200 rounded-xl px-3.5 py-2 font-mono font-bold text-sm text-coffee-800 focus:border-coffee-500 outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-coffee-500 mb-1.5">總摘要</label>
+              <input
+                type="text"
+                value={localVoucher.description}
+                onChange={e => setLocalVoucher((prev: any) => ({ ...prev, description: e.target.value }))}
+                className="w-full bg-white border border-coffee-200 rounded-xl px-3.5 py-2 font-bold text-sm text-coffee-800 focus:border-coffee-500 outline-none"
+              />
+            </div>
+          </div>
+
+          {/* Lines Table */}
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <span className="text-sm font-extrabold text-coffee-800">借貸平衡分錄明細</span>
+              <button
+                type="button"
+                onClick={handleAddLine}
+                className="px-3.5 py-1.5 bg-coffee-50 hover:bg-coffee-100 text-coffee-600 rounded-xl text-xs font-bold transition flex items-center gap-1"
+              >
+                <Plus className="w-3.5 h-3.5" /> 新增分錄行
+              </button>
+            </div>
+
+            <div className="border border-coffee-100 rounded-2xl overflow-hidden">
+              <table className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-coffee-50 border-b border-coffee-100 text-coffee-600 font-bold">
+                    <th className="p-3 text-left w-20">借/貸</th>
+                    <th className="p-3 text-left w-64">會計科目</th>
+                    <th className="p-3 text-right w-44">金額 (TWD)</th>
+                    <th className="p-3 text-left">行摘要</th>
+                    <th className="p-3 text-center w-12">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {localVoucher.lines.map((line: any) => (
+                    <tr key={line.id} className="border-b border-coffee-50 hover:bg-coffee-50/20 transition-colors">
+                      <td className="p-2">
+                        <select
+                          value={line.type}
+                          onChange={e => handleUpdateLine(line.id, 'type', e.target.value)}
+                          className="w-full bg-white border border-coffee-200 rounded-lg p-1.5 font-bold text-xs text-coffee-700 outline-none"
+                        >
+                          <option value="debit">借 (Dr)</option>
+                          <option value="credit">貸 (Cr)</option>
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <select
+                          value={line.accountId}
+                          onChange={e => handleUpdateLine(line.id, 'accountId', e.target.value)}
+                          className="w-full bg-white border border-coffee-200 rounded-lg p-1.5 font-bold text-xs text-coffee-700 outline-none"
+                        >
+                          {coa.map(c => (
+                            <option key={c.id} value={c.id}>{c.id} - {c.name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="p-2">
+                        <input
+                          type="number"
+                          step="any"
+                          value={line.amount || ''}
+                          placeholder="0.00"
+                          onChange={e => handleUpdateLine(line.id, 'amount', parseFloat(e.target.value) || 0)}
+                          className="w-full bg-white border border-coffee-200 rounded-lg p-1.5 font-mono font-bold text-xs text-right text-rose-brand outline-none"
+                        />
+                      </td>
+                      <td className="p-2">
+                        <input
+                          type="text"
+                          value={line.lineDescription || ''}
+                          placeholder="分錄說明..."
+                          onChange={e => handleUpdateLine(line.id, 'lineDescription', e.target.value)}
+                          className="w-full bg-white border border-coffee-200 rounded-lg p-1.5 font-medium text-xs text-coffee-700 outline-none"
+                        />
+                      </td>
+                      <td className="p-2 text-center">
+                        <button
+                          type="button"
+                          disabled={localVoucher.lines.length <= 1}
+                          onClick={() => handleRemoveLine(line.id)}
+                          className="text-gray-400 hover:text-red-500 disabled:opacity-30 transition"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="p-6 border-t border-coffee-50 bg-coffee-50/50 flex flex-col sm:flex-row justify-between items-center gap-4 shrink-0">
+          <div className="flex items-center gap-4">
+            <div className="text-right">
+              <span className="text-[10px] font-extrabold text-coffee-450 uppercase block tracking-wider">借方總計</span>
+              <span className="font-mono font-bold text-base text-coffee-800">${debitSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            <div className="text-right">
+              <span className="text-[10px] font-extrabold text-coffee-450 uppercase block tracking-wider">貸方總計</span>
+              <span className="font-mono font-bold text-base text-coffee-800">${creditSum.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            </div>
+            
+            {isBalanced ? (
+              <div className="bg-emerald-50 border border-emerald-100 text-emerald-700 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1">
+                <CheckCircle2 className="w-4 h-4" /> 借貸已平衡
+              </div>
+            ) : (
+              <div className="bg-rose-50 border border-rose-100 text-rose-700 px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 animate-pulse">
+                <AlertCircle className="w-4 h-4" /> 借貸不平衡 (差額: ${(debitSum - creditSum).toFixed(2)})
+              </div>
+            )}
+          </div>
+
+          <div className="flex gap-3 w-full sm:w-auto">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 sm:flex-none px-6 py-2.5 bg-white border border-coffee-200 text-gray-500 rounded-xl font-bold hover:bg-gray-100 transition"
+            >
+              取消
+            </button>
+            <button
+              type="button"
+              disabled={!isBalanced}
+              onClick={() => onConfirm(localVoucher)}
+              className="flex-1 sm:flex-none px-8 py-2.5 bg-coffee-800 text-white rounded-xl font-bold shadow-lg hover:bg-coffee-900 transition disabled:opacity-40 flex items-center justify-center gap-2"
+            >
+              <CheckCircle2 className="w-4 h-4" /> 確認建立傳票並儲存進貨單
+            </button>
+          </div>
+        </div>
+
+      </div>
     </div>
   );
 }
