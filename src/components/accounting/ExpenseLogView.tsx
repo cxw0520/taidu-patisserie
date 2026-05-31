@@ -385,7 +385,7 @@ function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClo
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex flex-col items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-coffee-50/50 rounded-t-3xl">
           <h3 className="text-xl font-bold text-coffee-800">{data.id ? '編輯記帳' : '新增記帳'}</h3>
@@ -736,7 +736,7 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex flex-col items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl max-w-3xl w-full shadow-2xl flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-coffee-50/50 rounded-t-3xl">
           <h3 className="text-xl font-bold text-coffee-800">
@@ -939,7 +939,7 @@ function PettyCashVoucherModal({ shopId, selectedRecords, fundingSources, expens
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 z-[60] flex flex-col items-center justify-center p-4">
+    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl max-w-4xl w-full shadow-2xl flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-blue-50/80 rounded-t-3xl">
           <h3 className="text-xl font-bold text-blue-900 flex items-center gap-2">
