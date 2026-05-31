@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { db } from '../../lib/firebase';
 import { collection, query, where, onSnapshot, doc, setDoc, deleteDoc } from 'firebase/firestore';
 import { ExpenseRecord, ExpenseLine, FundingSource, ExpenseCategory, COAItem, JournalEntry, JournalLine } from '../../types';
@@ -384,8 +385,8 @@ function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClo
     }
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl max-w-2xl w-full shadow-2xl flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-coffee-50/50 rounded-t-3xl">
           <h3 className="text-xl font-bold text-coffee-800">{data.id ? '編輯記帳' : '新增記帳'}</h3>
@@ -525,7 +526,8 @@ function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClo
           </div>
         </div>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -735,8 +737,8 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
     setLines(newLines);
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl max-w-3xl w-full shadow-2xl flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-coffee-50/50 rounded-t-3xl">
           <h3 className="text-xl font-bold text-coffee-800">
@@ -791,7 +793,8 @@ function VoucherModal({ shopId, record, fundingSources, expenseCategories, coa, 
           </button>
         </div>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 }
 
@@ -938,8 +941,8 @@ function PettyCashVoucherModal({ shopId, selectedRecords, fundingSources, expens
     setLines(newLines);
   };
 
-  return (
-    <div className="fixed inset-0 bg-black/60 z-[60] flex items-center justify-center p-4">
+  return createPortal(
+    <div className="fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4">
       <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="bg-white rounded-3xl max-w-4xl w-full shadow-2xl flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-blue-50/80 rounded-t-3xl">
           <h3 className="text-xl font-bold text-blue-900 flex items-center gap-2">
@@ -999,6 +1002,7 @@ function PettyCashVoucherModal({ shopId, selectedRecords, fundingSources, expens
           </button>
         </div>
       </motion.div>
-    </div>
+    </div>,
+    document.body
   );
 }
