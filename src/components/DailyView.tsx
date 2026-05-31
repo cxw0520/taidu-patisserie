@@ -1392,6 +1392,7 @@ export default function DailyView({
     let m = {
         rev: 0, ship: 0, prShip: 0, disc: 0, prVal: 0, recv: 0, act: 0, remit: 0, cash: 0, unpaid: 0,
         topup: 0, topupCash: 0, topupRemit: 0, prepaidPay: 0,
+        prepay: 0, prepayCash: 0, prepayRemit: 0, preorderPay: 0,
         qty: { 
             gb: {} as Record<string,number>, 
             sg: {} as Record<string,number>, 
@@ -1433,6 +1434,13 @@ export default function DailyView({
                 } else if (o.status === '匯款') {
                     m.topupRemit += o.actualAmt;
                 }
+            } else if (o.orderType === 'prepayment') {
+                m.prepay += o.actualAmt;
+                if (o.status === '現結') {
+                    m.prepayCash += o.actualAmt;
+                } else if (o.status === '匯款') {
+                    m.prepayRemit += o.actualAmt;
+                }
             } else {
                 if (o.status === '匯款') { 
                     m.remit += o.actualAmt; 
@@ -1449,6 +1457,11 @@ export default function DailyView({
             }
         }
 
+        // On pickup day, record that it is paid from preorder unearned revenue
+        if (!isPR && isPickupLinked) {
+            m.preorderPay += (o.prodAmt - o.discAmt + o.shipAmt);
+        }
+
         // 2. 營業額、折扣、銷量、出庫累加：
         //    - prepayment（僅付款，商品未交）→ 跳過
         //    - topup（儲值金充值，不計入商品銷售營業額）→ 跳過
@@ -1462,7 +1475,11 @@ export default function DailyView({
             m.prShip += o.shipAmt;
         } else {
             m.ship += o.shipAmt;
-            m.recv += o.actualAmt;
+            if (o.orderType === 'pickup') {
+                m.recv += (o.prodAmt - o.discAmt + o.shipAmt);
+            } else {
+                m.recv += o.actualAmt;
+            }
         }
 
         // Standard categories
@@ -2253,6 +2270,11 @@ export default function DailyView({
                   <span className="font-bold font-mono text-right min-w-[96px] text-emerald-600">${fmt(metrics?.prepaidPay || 0)}</span>
                   <span className="w-28"></span>
                 </div>
+                <div className="flex justify-between items-center border-t border-dashed border-coffee-100 pt-2">
+                  <span className="text-coffee-600">預定金付款 (預購取貨)</span>
+                  <span className="font-bold font-mono text-right min-w-[96px] text-amber-600">${fmt(metrics?.preorderPay || 0)}</span>
+                  <span className="w-28"></span>
+                </div>
 
                 <div className="mt-2 text-xs font-bold text-coffee-400 uppercase tracking-wider">儲值金充值 (金流獨立)</div>
                 <div className="flex justify-between items-center text-xs text-coffee-600 pl-2">
@@ -2268,6 +2290,23 @@ export default function DailyView({
                 <div className="flex justify-between items-center text-xs font-bold text-emerald-600 pl-2 border-b border-dashed border-coffee-100 pb-2">
                   <span>儲值金充值總額</span>
                   <span className="font-mono">${fmt(metrics?.topup || 0)}</span>
+                  <span className="w-28"></span>
+                </div>
+
+                <div className="mt-2 text-xs font-bold text-coffee-400 uppercase tracking-wider">預定商品預付款 (金流獨立)</div>
+                <div className="flex justify-between items-center text-xs text-coffee-600 pl-2">
+                  <span>↳ 現金預收</span>
+                  <span className="font-mono font-semibold">${fmt(metrics?.prepayCash || 0)}</span>
+                  <span className="w-28"></span>
+                </div>
+                <div className="flex justify-between items-center text-xs text-coffee-600 pl-2">
+                  <span>↳ 匯款預收</span>
+                  <span className="font-mono font-semibold">${fmt(metrics?.prepayRemit || 0)}</span>
+                  <span className="w-28"></span>
+                </div>
+                <div className="flex justify-between items-center text-xs font-bold text-amber-600 pl-2 border-b border-dashed border-coffee-100 pb-2">
+                  <span>預定商品預收總額</span>
+                  <span className="font-mono">${fmt(metrics?.prepay || 0)}</span>
                   <span className="w-28"></span>
                 </div>
 

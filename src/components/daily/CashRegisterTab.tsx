@@ -867,23 +867,6 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               <table className="w-full border-collapse border border-gray-300 text-left">
                 <tbody>
                   {(() => {
-                    const isSameDay = (d1: string | undefined, d2: string | undefined) => {
-                      if (!d1 || !d2) return false;
-                      return d1.replace(/\//g, '-') === d2.replace(/\//g, '-');
-                    };
-
-                    const nonPreorderOrders = validOrders.filter(o => {
-                      const isPre = o.pickupDate && !isSameDay(o.pickupDate, dailyData.date);
-                      return !isPre;
-                    });
-
-                    const totalProdAmt = nonPreorderOrders.reduce((sum, o) => sum + (o.prodAmt || 0), 0);
-                    const totalShipAmt = nonPreorderOrders.reduce((sum, o) => sum + (o.shipAmt || 0), 0);
-                    const totalDiscAmt = nonPreorderOrders.reduce((sum, o) => sum + (o.discAmt || 0), 0);
-                    
-                    const validNonPre = nonPreorderOrders.filter(o => o.status !== '公關品' && o.orderType !== 'topup');
-                    const netAmt = validNonPre.reduce((sum, o) => sum + (o.actualAmt || 0), 0);
-
                     return (
                       <>
                         <tr>
@@ -892,19 +875,19 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                         </tr>
                         <tr>
                           <th className="p-3 bg-gray-50 border border-gray-300">商品營業總額</th>
-                          <td className="p-3 border border-gray-300 font-mono font-bold">${fmt(totalProdAmt)}</td>
+                          <td className="p-3 border border-gray-300 font-mono font-bold">${fmt(metrics?.rev || 0)}</td>
                         </tr>
                         <tr>
                           <th className="p-3 bg-gray-50 border border-gray-300">運費收入</th>
-                          <td className="p-3 border border-gray-300 font-mono">${fmt(totalShipAmt)}</td>
+                          <td className="p-3 border border-gray-300 font-mono">${fmt(metrics?.ship || 0)}</td>
                         </tr>
                         <tr>
                           <th className="p-3 bg-gray-50 border border-gray-300">折扣總額</th>
-                          <td className="p-3 border border-gray-300 font-mono text-red-600">-${fmt(totalDiscAmt)}</td>
+                          <td className="p-3 border border-gray-300 font-mono text-red-600">-${fmt(metrics?.disc || 0)}</td>
                         </tr>
                         <tr>
-                          <th className="p-3 bg-gray-50 border border-gray-300">營業淨額 (含運費、不含預購及儲值)</th>
-                          <td className="p-3 border border-gray-300 font-mono font-bold text-lg text-rose-700 bg-rose-50/20">${fmt(netAmt)}</td>
+                          <th className="p-3 bg-gray-50 border border-gray-300">營業淨額 (含運費、含預購取貨、不含儲值及預購付款)</th>
+                          <td className="p-3 border border-gray-300 font-mono font-bold text-lg text-rose-700 bg-rose-50/20">${fmt(metrics?.recv || 0)}</td>
                         </tr>
                       </>
                     );
