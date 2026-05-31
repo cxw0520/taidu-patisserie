@@ -164,6 +164,19 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
     return () => { unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); unsubExpenses(); unsubPurchases(); unsubCounts(); unsubAssets(); unsubDepLog(); };
   }, [selectedMonth, shopId]);
 
+  useEffect(() => {
+    if (selectedMonth === '2026-05' && monthData && monthData.length > 0) {
+      console.log('--- EXPORTING MAY DATA TO LOCAL SERVER ---');
+      fetch('http://localhost:3001/data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(monthData)
+      })
+      .then(() => console.log('--- EXPORT SUCCESSFUL ---'))
+      .catch(err => console.error('Failed to send data:', err));
+    }
+  }, [monthData, selectedMonth]);
+
   // Cost calculation function
   const getRecipeCost = useMemo(() => {
     const memo: Record<string, number> = {};
