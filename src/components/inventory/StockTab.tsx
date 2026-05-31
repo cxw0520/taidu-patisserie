@@ -903,31 +903,35 @@ function MaterialPriceMonitor({ materials, purchases }: { materials: Material[],
 
   // 整理每個食材的進貨紀錄
   const matHistory = useMemo(() => {
-    const history: Record<string, { date: string, vendor: string, qty: number, amount: number, unitPrice: number }[]> = {};
+    const history: Record<
+      string,
+      {
+        date: string;
+        vendor: string;
+        qty: number;
+        amount: number;
+        unitPrice: number;
+        purchaseQty?: number;
+        purchaseUnit?: string;
+      }[]
+    > = {};
     materials.forEach(m => history[m.id] = []);
 
     purchases.forEach(p => {
       p.lines.forEach(l => {
         if (!l.materialId || !history[l.materialId]) return;
         
-        let normalizedQty = l.qty;
-        const mat = materials.find(m => m.id === l.materialId);
-        if (mat) {
-          if (l.purchaseUnit === mat.purchaseUnit && mat.purchaseUnitRate) {
-            normalizedQty = l.qty * mat.purchaseUnitRate;
-          } else if (l.purchaseUnit === mat.midUnit && mat.midUnitRate) {
-            normalizedQty = l.qty * mat.midUnitRate;
-          }
-        }
-        
+        const normalizedQty = l.qty;
         const uPrice = normalizedQty > 0 ? l.amount / normalizedQty : 0;
         
         history[l.materialId].push({
           date: p.date,
           vendor: p.vendor,
-          qty: l.qty, // 原進貨數量
+          qty: l.qty, // 標準化數量
           amount: l.amount,
-          unitPrice: uPrice // 標準化(最小單位)單價
+          unitPrice: uPrice, // 標準化(最小單位)單價
+          purchaseQty: l.purchaseQty,
+          purchaseUnit: l.purchaseUnit
         });
       });
     });
@@ -1061,7 +1065,19 @@ function PriceDetails({ mat, history }: { mat: Material, history: any[] }) {
                 </div>
                 <div className="text-right">
                   <div className="font-mono font-bold text-coffee-900 text-base">${fmt(h.unitPrice)}<span className="text-coffee-400 text-[10px]">/{mat.unit}</span></div>
-                  <div className="text-[10px] font-bold text-coffee-400 mt-0.5">總額 ${fmt(h.amount)} / 數量 {fmt(h.qty)}</div>
+                  <div className="text-[10px] font-bold text-coffee-400 mt-0.5">
+                    總額 ${fmt(h.amount)} / 數量{' '}
+                    {h.purchaseQty ? (
+                      <>
+                        {fmt(h.purchaseQty)} {h.purchaseUnit}
+                        <span className="text-coffee-300 font-normal">
+                          （= {fmt(h.qty)} {mat.unit}）
+                        </span>
+                      </>
+                    ) : (
+                      `${fmt(h.qty)} ${mat.unit}`
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
