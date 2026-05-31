@@ -1417,17 +1417,20 @@ export default function DailyView({
     dailyData.orders.forEach(o => {
         if (o.status === '已取消' || o.status === '已刪除') return;
         const isPR = o.status === '公關品';
-        const isPreorder = o.pickupDate && o.pickupDate !== dailyData.date;
+        // 預付款單(prepayment)：付款日，只計金流，不計營業額（商品尚未取出）
+        // 取貨單(pickup)：取貨日，計入營業額與銷量，不重複計金流（錢已在 prepayment 日收）
+        // 其他（現客/POS）：金流與營業額同日，兩者都計
+        const isPickupLinked = o.orderType === 'pickup'; // 取貨日的關聯取貨單
+        const isPrepayment = o.orderType === 'prepayment'; // 付款日的預付款單
 
-        // 1. 金流管道累加 (包含預購，以便對帳)
-        if (!isPR) {
+        // 1. 金流累加：prepayment（付款日收款）與一般訂單都計；pickup 不重複計
+        if (!isPR && !isPickupLinked) {
             if (o.status === '匯款') { 
                 m.remit += o.actualAmt; 
             } else if (o.status === '現結') { 
                 m.cash += o.actualAmt; 
             }
             
-            // 只要不是未結帳款，都算進今日實收 (Actual Received)
             if (o.status !== '未結帳款') {
                 m.act += o.actualAmt;
             } else {
@@ -1435,8 +1438,11 @@ export default function DailyView({
             }
         }
 
-        // 2. 營業額、折扣、銷量、出庫累加 (排除預購)
-        if (isPreorder) return;
+        // 2. 營業額、折扣、銷量、出庫累加：
+        //    - prepayment（僅付款，商品未交）→ 跳過
+        //    - pickup（取貨日，商品正式交出）→ 計入
+        //    - 其他一般訂單（現客、POS）→ 計入
+        if (isPrepayment) return;
 
         m.rev += o.prodAmt; 
         m.disc += o.discAmt;
