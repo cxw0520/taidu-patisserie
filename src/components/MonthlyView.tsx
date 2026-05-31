@@ -876,6 +876,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     const otherStatusOrders: any[] = [];
     const prepaymentOrders: any[] = [];
     const pickupOrders: any[] = [];
+    const amountMismatchOrders: any[] = [];
 
     monthData.forEach((d: DailyReport) => {
       (d.orders || []).forEach(o => {
@@ -904,6 +905,18 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
           const itemVal = prodAmt - discAmt + shipAmt;
           totalPickupProdAmt += itemVal;
           pickupOrders.push({ id: o.id, date: d.date, buyer: o.buyer || '無', status, netAmt: itemVal, actualAmt });
+        } else {
+          // 一般直接銷售：檢查 actualAmt 是否與 prodAmt-discAmt+shipAmt 一致
+          const expectedAmt = prodAmt - discAmt + shipAmt;
+          if (Math.abs(actualAmt - expectedAmt) > 0 && status !== '儲值金扣款') {
+            amountMismatchOrders.push({
+              id: o.id, date: d.date, buyer: o.buyer || '無', status,
+              prodAmt, discAmt, shipAmt,
+              expectedAmt,
+              actualAmt,
+              diff: actualAmt - expectedAmt
+            });
+          }
         }
 
         if (status === '儲值金扣款') {
@@ -938,7 +951,8 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       normalOrdersWithShip,
       otherStatusOrders,
       prepaymentOrders,
-      pickupOrders
+      pickupOrders,
+      amountMismatchOrders
     };
   }, [monthData, stats.netRevenue, stats.cash, stats.remit, stats.ar, stats.prepaidPay, stats.preorderPay]);
 
@@ -1077,6 +1091,52 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                             <td className="px-4 py-2">{o.buyer}</td>
                             <td className="px-4 py-2"><span className="px-1.5 py-0.5 rounded bg-rose-50 text-rose-600 font-bold">{o.status}</span></td>
                             <td className="px-4 py-2 text-right font-mono font-semibold">${fmt(o.actualAmt)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 實收金額與應收金額不符的訂單 */}
+              {diagnostic.amountMismatchOrders.length > 0 && (
+                <div className="space-y-2">
+                  <h5 className="font-bold text-xs text-amber-600 uppercase tracking-wider flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                    ⚠️ 實收金額與應收金額不符的訂單 (這是對帳差額的來源！)
+                  </h5>
+                  <p className="text-[11px] text-coffee-500 leading-relaxed">
+                    以下訂單的「實收金額(actualAmt)」與「商品金額 - 折扣 + 運費」計算結果不一致。
+                    營業淨額用計算結果，金流加總用實收金額，兩者之差就是對帳差額。
+                  </p>
+                  <div className="overflow-x-auto border border-amber-100 rounded-xl">
+                    <table className="min-w-full text-xs text-left text-coffee-600">
+                      <thead className="bg-amber-50 text-[10px] uppercase font-bold text-amber-500">
+                        <tr>
+                          <th className="px-4 py-2">日期</th>
+                          <th className="px-4 py-2">顧客</th>
+                          <th className="px-4 py-2">付款狀態</th>
+                          <th className="px-4 py-2 text-right">商品金額</th>
+                          <th className="px-4 py-2 text-right">折扣</th>
+                          <th className="px-4 py-2 text-right">運費</th>
+                          <th className="px-4 py-2 text-right">應收(計算值)</th>
+                          <th className="px-4 py-2 text-right">實收金額</th>
+                          <th className="px-4 py-2 text-right">差額</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {diagnostic.amountMismatchOrders.map((o: any) => (
+                          <tr key={o.id} className="border-t border-amber-50 bg-white">
+                            <td className="px-4 py-2 font-mono">{o.date}</td>
+                            <td className="px-4 py-2 font-bold">{o.buyer}</td>
+                            <td className="px-4 py-2"><span className="px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 font-bold">{o.status}</span></td>
+                            <td className="px-4 py-2 text-right font-mono">${fmt(o.prodAmt)}</td>
+                            <td className="px-4 py-2 text-right font-mono text-rose-500">-${fmt(o.discAmt)}</td>
+                            <td className="px-4 py-2 text-right font-mono">+${fmt(o.shipAmt)}</td>
+                            <td className="px-4 py-2 text-right font-mono font-bold">${fmt(o.expectedAmt)}</td>
+                            <td className="px-4 py-2 text-right font-mono font-bold text-amber-700">${fmt(o.actualAmt)}</td>
+                            <td className={`px-4 py-2 text-right font-mono font-bold ${o.diff > 0 ? 'text-mint-brand' : 'text-rose-brand'}`}>{o.diff > 0 ? '+' : ''}{fmt(o.diff)}</td>
                           </tr>
                         ))}
                       </tbody>
