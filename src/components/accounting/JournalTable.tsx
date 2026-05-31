@@ -491,7 +491,7 @@ export default function JournalTable({ entries, coa, selectedYear, shopId }: { e
       <div className="bg-coffee-50/40 border border-coffee-100/60 p-5 rounded-2xl shadow-sm">
         <div className="flex justify-between items-center mb-3">
           <span className="text-sm font-bold text-coffee-800 flex items-center gap-1.5">
-            <span>✨</span> 常用傳票快速通道
+            <span>✨</span> 常用傳票快速通道 <span className="text-xs text-rose-600 ml-2 font-normal">(⚠️ 凡涉及「支出與花費」請改至「支出總表」輸入，財報才會正確認列)</span>
           </span>
           <button 
             onClick={() => setIsManageOpen(true)}

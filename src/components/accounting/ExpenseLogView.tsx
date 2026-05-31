@@ -292,6 +292,11 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
           fundingSources={fundingSources} 
           expenseCategories={expenseCategories} 
           onClose={() => setIsModalOpen(false)} 
+          onSaveAndVoucher={(savedRecord) => {
+            setIsModalOpen(false);
+            setSelectedVoucherRecord(savedRecord);
+            setIsVoucherModalOpen(true);
+          }}
         />
       )}
       {isVoucherModalOpen && selectedVoucherRecord && (
@@ -327,9 +332,10 @@ export default function ExpenseLogView({ shopId, selectedYear, fundingSources, e
 }
 
 // ... existing components ...
-function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClose }: { shopId: string, record: ExpenseRecord, fundingSources: FundingSource[], expenseCategories: ExpenseCategory[], onClose: () => void }) {
+function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClose, onSaveAndVoucher }: { shopId: string, record: ExpenseRecord, fundingSources: FundingSource[], expenseCategories: ExpenseCategory[], onClose: () => void, onSaveAndVoucher?: (record: ExpenseRecord) => void }) {
 // ... (保留不變，在下面找個位置貼 PettyCashVoucherModal)
   const [data, setData] = useState<ExpenseRecord>(record);
+  const [autoVoucher, setAutoVoucher] = useState(true);
 
   const addLine = () => {
     setData({
@@ -371,7 +377,11 @@ function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClo
     };
 
     await setDoc(doc(db, 'shops', shopId, 'expenses', id), payload);
-    onClose();
+    if (autoVoucher && onSaveAndVoucher) {
+      onSaveAndVoucher(payload);
+    } else {
+      onClose();
+    }
   };
 
   return (
@@ -497,11 +507,22 @@ function ExpenseModal({ shopId, record, fundingSources, expenseCategories, onClo
           )}
         </div>
 
-        <div className="p-6 border-t border-gray-100 flex justify-end gap-3 bg-gray-50/50 rounded-b-3xl">
-          <button onClick={onClose} className="px-6 py-2.5 rounded-xl font-bold text-gray-500 hover:bg-gray-200 transition">取消</button>
-          <button onClick={handleSave} className="px-8 py-2.5 bg-coffee-800 text-white rounded-xl font-bold shadow-md hover:bg-coffee-900 transition flex items-center gap-2">
-            儲存紀錄
-          </button>
+        <div className="p-6 border-t border-gray-100 flex justify-between items-center bg-gray-50/50 rounded-b-3xl">
+          <label className="flex items-center gap-2 cursor-pointer text-sm font-bold text-coffee-700 hover:text-coffee-900 transition ml-2">
+            <input 
+              type="checkbox" 
+              checked={autoVoucher}
+              onChange={(e) => setAutoVoucher(e.target.checked)}
+              className="w-4 h-4 text-coffee-600 rounded border-gray-300 focus:ring-coffee-500 cursor-pointer"
+            />
+            儲存後立即預覽並產生傳票
+          </label>
+          <div className="flex gap-3">
+            <button onClick={onClose} className="px-6 py-2.5 rounded-xl font-bold text-gray-500 hover:bg-gray-200 transition">取消</button>
+            <button onClick={handleSave} className="px-8 py-2.5 bg-coffee-800 text-white rounded-xl font-bold shadow-md hover:bg-coffee-900 transition flex items-center gap-2">
+              {autoVoucher ? '儲存並產生傳票' : '僅儲存紀錄'}
+            </button>
+          </div>
         </div>
       </motion.div>
     </div>
