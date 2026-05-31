@@ -958,58 +958,84 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
   return (
     <div className="space-y-8">
-      {/* 財務對帳與差額診斷工具 */}
-      <div className="glass-panel p-6 bg-white border border-coffee-100 shadow-sm flex flex-col gap-4">
-        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-coffee-100 pb-3">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-rose-50 rounded-xl flex items-center justify-center text-rose-brand">
-              <Info className="w-5 h-5" />
-            </div>
-            <div>
-              <h3 className="text-lg font-bold text-coffee-800">
-                本月報表對帳與差額診斷
-              </h3>
-              <p className="text-xs text-coffee-500 mt-0.5">
-                比較「營業淨額」與「金流收款（現金 + 匯款 + 應收帳款）」之間的數學差額與原因分析
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={() => setShowDiagDetails(!showDiagDetails)}
-            className="px-4 py-2 bg-coffee-50 text-coffee-700 hover:bg-coffee-100 rounded-xl text-xs font-bold transition-all border border-coffee-200"
-          >
-            {showDiagDetails ? "隱藏詳細對帳明細" : "顯示對帳與差額明細"}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-          <div className="bg-coffee-50/30 p-3 rounded-xl border border-coffee-50 text-center">
-            <span className="text-[10px] text-coffee-400 font-bold block mb-1">A. 營業淨額</span>
-            <span className="text-lg font-mono font-bold text-coffee-800">${fmt(diagnostic.netRevenue)}</span>
-          </div>
-          <div className="flex items-center justify-center text-coffee-300 font-bold font-mono">─</div>
-          <div className="bg-coffee-50/30 p-3 rounded-xl border border-coffee-50 text-center">
-            <span className="text-[10px] text-coffee-400 font-bold block mb-1">B. 金流與付款加總 (現金+匯款+應收+儲值付款)</span>
-            <span className="text-lg font-mono font-bold text-coffee-800">${fmt(diagnostic.cashRemitArSum)}</span>
-          </div>
-          <div className="flex items-center justify-center text-coffee-300 font-bold font-mono">＝</div>
-          <div className="bg-rose-50/50 p-3 rounded-xl border border-rose-100 text-center col-span-1">
-            <span className="text-[10px] text-rose-500 font-bold block mb-1">對帳差額 (A ─ B)</span>
-            <span className={cn("text-lg font-mono font-bold", diagnostic.diff === 0 ? "text-mint-brand" : "text-rose-brand")}>
-              ${fmt(diagnostic.diff)}
-            </span>
-          </div>
-        </div>
+      {/* 財務對帳與差額診斷工具 - 折疊為圖示 */}
+      <div className="flex justify-end">
+        <button
+          onClick={() => setShowDiagDetails(!showDiagDetails)}
+          title="對帳與差額診斷"
+          className={cn(
+            "relative w-10 h-10 rounded-full flex items-center justify-center shadow-md transition-all border",
+            diagnostic.diff === 0
+              ? "bg-mint-50 border-mint-200 text-mint-brand hover:bg-mint-100"
+              : "bg-rose-50 border-rose-200 text-rose-brand hover:bg-rose-100"
+          )}
+        >
+          <Info className="w-5 h-5" />
+          {diagnostic.diff !== 0 && (
+            <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-rose-brand border-2 border-white" />
+          )}
+        </button>
+      </div>
 
         <AnimatePresence>
           {showDiagDetails && (
             <motion.div
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="space-y-4 pt-3 border-t border-coffee-50 overflow-hidden"
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
+              style={{ backgroundColor: 'rgba(0,0,0,0.4)' }}
+              onClick={() => setShowDiagDetails(false)}
             >
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                transition={{ duration: 0.2 }}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden"
+                onClick={e => e.stopPropagation()}
+              >
+                {/* Modal 標題列 */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-coffee-100">
+                  <div className="flex items-center gap-3">
+                    <div className="w-9 h-9 bg-rose-50 rounded-xl flex items-center justify-center text-rose-brand">
+                      <Info className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-coffee-800">對帳與差額診斷</h3>
+                      <p className="text-[11px] text-coffee-400">比較營業淨額與金流加總的數學差額</p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowDiagDetails(false)}
+                    className="w-8 h-8 rounded-full bg-coffee-50 hover:bg-coffee-100 flex items-center justify-center text-coffee-400 hover:text-coffee-700 transition-all font-bold text-lg"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {/* 差額摘要 */}
+                <div className="px-6 py-4 border-b border-coffee-50 grid grid-cols-3 gap-3">
+                  <div className="bg-coffee-50/50 p-3 rounded-xl text-center">
+                    <span className="text-[10px] text-coffee-400 font-bold block mb-1">A. 營業淨額</span>
+                    <span className="text-lg font-mono font-bold text-coffee-800">${fmt(diagnostic.netRevenue)}</span>
+                  </div>
+                  <div className="bg-coffee-50/50 p-3 rounded-xl text-center">
+                    <span className="text-[10px] text-coffee-400 font-bold block mb-1">B. 金流加總</span>
+                    <span className="text-lg font-mono font-bold text-coffee-800">${fmt(diagnostic.cashRemitArSum)}</span>
+                  </div>
+                  <div className={`p-3 rounded-xl text-center ${diagnostic.diff === 0 ? 'bg-mint-50' : 'bg-rose-50'}`}>
+                    <span className="text-[10px] text-coffee-400 font-bold block mb-1">差額 (A－B)</span>
+                    <span className={`text-lg font-mono font-bold ${diagnostic.diff === 0 ? 'text-mint-brand' : 'text-rose-brand'}`}>
+                      ${fmt(diagnostic.diff)}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 可捲動內容區 */}
+                <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+
               <div className="bg-[#faf7f2] p-4 rounded-xl border border-coffee-100 text-sm text-coffee-700 space-y-3 leading-relaxed">
                 <h4 className="font-bold text-coffee-800 text-sm">💡 為什麼會有這個差額？</h4>
                 <p>
@@ -1280,10 +1306,11 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                   </div>
                 </div>
               )}
+                </div>
+              </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
-      </div>
 
       {/* KPI Header */}
       <div className="flex flex-wrap md:flex-nowrap gap-2 items-stretch">
