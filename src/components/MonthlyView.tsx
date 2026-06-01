@@ -1406,6 +1406,12 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
           <span className="text-xl md:text-2xl font-mono font-bold text-rose-brand">${fmt(stats.totalFixedCost)}</span>
           <span className="text-xs font-bold text-coffee-400 mt-1">{stats.netRevenue > 0 ? ((stats.totalFixedCost / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
         </div>
+        <div className="flex items-center justify-center text-coffee-300 font-bold text-xl">-</div>
+        <div className="flex-1 min-w-[120px] kpi-card bg-white border border-coffee-50 shadow-sm flex flex-col justify-center items-center py-4 px-2">
+          <span className="text-coffee-400 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">其他營業雜支</span>
+          <span className="text-xl md:text-2xl font-mono font-bold text-rose-brand">${fmt(stats.otherExpenseTotal)}</span>
+          <span className="text-xs font-bold text-coffee-400 mt-1">{stats.netRevenue > 0 ? ((stats.otherExpenseTotal / stats.netRevenue) * 100).toFixed(1) : 0}%</span>
+        </div>
         <div className="flex items-center justify-center text-coffee-300 font-bold text-xl">=</div>
         <div className="flex-[1.2] min-w-[140px] kpi-card bg-[#faf7f2] border border-coffee-100 shadow-md flex flex-col justify-center items-center py-4 px-2 relative overflow-hidden">
           <span className="text-coffee-500 font-bold text-[10px] mb-1 uppercase tracking-wider text-center">本期淨利</span>
