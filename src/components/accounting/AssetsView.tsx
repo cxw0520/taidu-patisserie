@@ -133,12 +133,12 @@ export default function AssetsView({ shopId, selectedYear }: { shopId: string, s
     if (depLog[key]) return;
     
     // Note: window.confirm is blocked in iframe previews, performing action directly
-    const entryId = uid();
+    const voucherNo = `DEP-${selectedYear}${String(selectedMonth).padStart(2, '0')}`;
     const entry: JournalEntry = {
-      id: entryId,
+      id: voucherNo,
       date: new Date(selectedYear, selectedMonth, 0).toISOString().split('T')[0],
       year: selectedYear,
-      voucherNo: `DEP-${selectedYear}${String(selectedMonth).padStart(2, '0')}`,
+      voucherNo,
       description: `${selectedYear}/${selectedMonth} 固定資產折舊提列`,
       lines: [
         { id: uid(), type: 'debit', accountId: '6105', accountName: '折舊費用', amount: monthlyTotal, lineDescription: '本月資產折舊' },
@@ -148,7 +148,7 @@ export default function AssetsView({ shopId, selectedYear }: { shopId: string, s
       creditTotal: monthlyTotal
     };
 
-    await setDoc(doc(db, 'shops', shopId, 'entries', entryId), entry);
+    await setDoc(doc(db, 'shops', shopId, 'entries', voucherNo), entry);
     await setDoc(doc(db, 'shops', shopId, 'meta', 'depLog'), { ...depLog, [key]: true }, { merge: true });
     alert('提列成功！');
   };

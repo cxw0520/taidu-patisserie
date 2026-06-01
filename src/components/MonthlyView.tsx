@@ -829,12 +829,12 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
     if (!confirm(`確定要產生 ${stats.selYear}年${stats.selMon}月 的折舊傳票嗎？`)) return;
 
-    const entryId = uid();
+    const voucherNo = `DEP-${stats.selYear}${String(stats.selMon).padStart(2, '0')}`;
     const entry = {
-      id: entryId,
+      id: voucherNo,
+      voucherNo,
       date: new Date(stats.selYear, stats.selMon, 0).toISOString().split('T')[0],
       year: stats.selYear,
-      voucherNo: `DEP-${stats.selYear}${String(stats.selMon).padStart(2, '0')}`,
       description: `${stats.selYear}/${stats.selMon} 固定資產折舊提列`,
       lines: [
         { id: uid(), type: 'debit', accountId: '6105', accountName: '折舊費用', amount: stats.depreciationTotal, lineDescription: '本月資產折舊' },
@@ -845,7 +845,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     };
 
     try {
-      await setDoc(doc(db, 'shops', shopId, 'entries', entryId), entry);
+      await setDoc(doc(db, 'shops', shopId, 'entries', voucherNo), entry);
       await setDoc(doc(db, 'shops', shopId, 'meta', 'depLog'), { ...depLog, [key]: true }, { merge: true });
       alert('折舊傳票產生成功！');
     } catch (err) {
