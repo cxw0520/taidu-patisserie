@@ -166,16 +166,47 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
 
   useEffect(() => {
     if (selectedMonth === '2026-05' && monthData && monthData.length > 0) {
-      console.log('--- EXPORTING MAY DATA TO LOCAL SERVER ---');
-      fetch('http://localhost:3001/data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(monthData)
-      })
-      .then(() => console.log('--- EXPORT SUCCESSFUL ---'))
-      .catch(err => console.error('Failed to send data:', err));
+      console.log('--- EXPORTING ALL MAY DATA FOR DIAGNOSIS ---');
+      const exportData = async () => {
+        try {
+          const entriesSnap = await getDocs(query(collection(db, 'shops', shopId, 'entries'), where('year', '==', 2026)));
+          const entries = entriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+          const expensesSnap = await getDocs(query(collection(db, 'shops', shopId, 'expenses'), where('yearMonth', '==', '2026-05')));
+          const expenses = expensesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+          const purchasesSnap = await getDocs(query(collection(db, 'shops', shopId, 'purchases'), where('date', '>=', '2026-05-01'), where('date', '<=', '2026-05-31')));
+          const purchases = purchasesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+
+          const coaSnap = await getDoc(doc(db, 'shops', shopId, 'meta', 'coa'));
+          const coa = coaSnap.exists() ? coaSnap.data().list : [];
+
+          const monthlySnap = await getDoc(doc(db, 'shops', shopId, 'monthly', '2026-05'));
+          const monthly = monthlySnap.exists() ? monthlySnap.data() : {};
+
+          const payload = {
+            monthData,
+            entries,
+            expenses,
+            purchases,
+            coa,
+            monthly,
+            assets
+          };
+
+          await fetch('http://localhost:3001/data', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+          console.log('--- EXPORT COMPLETED SUCCESSFULLY ---');
+        } catch (err) {
+          console.error('Failed to export diagnostics data:', err);
+        }
+      };
+      exportData();
     }
-  }, [monthData, selectedMonth]);
+  }, [monthData, selectedMonth, shopId, assets]);
 
   // Cost calculation function
   const getRecipeCost = useMemo(() => {
