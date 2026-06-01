@@ -208,6 +208,42 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
     }
   }, [monthData, selectedMonth, shopId, assets]);
 
+  // Temporary fix for voucher 26050702
+  useEffect(() => {
+    if (!shopId) return;
+    const fixVoucher = async () => {
+      try {
+        const docRef = doc(db, 'shops', shopId, 'entries', '26050702');
+        const snap = await getDoc(docRef);
+        if (snap.exists()) {
+          const data = snap.data();
+          let needsUpdate = false;
+          const nextLines = (data.lines || []).map((line: any) => {
+            // 1. Change cockroach bait ($99) from 6201 (薪資支出) to 6108 (雜項支出)
+            if (line.lineDescription === '殺蟑餌劑8入' && line.accountId === '6201') {
+              needsUpdate = true;
+              return { ...line, accountId: '6108', accountName: '雜項支出' };
+            }
+            // 2. Change rubber band ($25) from 5103 (運費) to 6108 (雜項支出)
+            if (line.lineDescription === '橡皮筋' && line.accountId === '5103') {
+              needsUpdate = true;
+              return { ...line, accountId: '6108', accountName: '雜項支出' };
+            }
+            return line;
+          });
+          if (needsUpdate) {
+            console.log('✏️ Fixing voucher 26050702 in Firestore...');
+            await setDoc(docRef, { lines: nextLines }, { merge: true });
+            console.log('✅ Voucher 26050702 fixed successfully.');
+          }
+        }
+      } catch (err) {
+        console.error('Failed to fix voucher 26050702:', err);
+      }
+    };
+    fixVoucher();
+  }, [shopId]);
+
   // Cost calculation function
   const getRecipeCost = useMemo(() => {
     const memo: Record<string, number> = {};
@@ -786,9 +822,11 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
             materialPurchaseTotal += line.amount;
             const vendorName = e.vendor || '雜支零買';
             vendorMaterialPurchases[vendorName] = (vendorMaterialPurchases[vendorName] || 0) + line.amount;
-          } else if (cat.name.includes('包材') || cat.name.includes('包裝')) {
+          } else if (cat.name.includes('包材') || cat.name.includes('包裝') || cat.name.includes('貼紙') || cat.name.includes('名片')) {
             packagingPurchaseTotal += line.amount;
-          } else if (cat.isFixedCost) {
+          } else if (cat.name.includes('運費') || cat.name.includes('物流') || cat.name.includes('宅配')) {
+            logSpent += line.amount;
+          } else if (cat.isFixedCost || cat.name.includes('水電') || line.note?.includes('水費') || line.note?.includes('電費')) {
             totalFixedCostFromExpenses += line.amount;
             fixedExpenseCategories[cat.name] = (fixedExpenseCategories[cat.name] || 0) + line.amount;
           } else {

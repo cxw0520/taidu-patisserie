@@ -28215,10 +28215,10 @@
                     "amount": 198
                 },
                 {
-                    "accountId": "6201",
+                    "accountId": "6108",
                     "id": "id_s9iwl8379",
                     "type": "debit",
-                    "accountName": "薪資支出",
+                    "accountName": "雜項支出",
                     "lineDescription": "殺蟑餌劑8入",
                     "amount": 99
                 },
@@ -28256,10 +28256,10 @@
                 },
                 {
                     "type": "debit",
-                    "accountName": "運費",
+                    "accountName": "雜項支出",
                     "lineDescription": "橡皮筋",
                     "amount": 25,
-                    "accountId": "5103",
+                    "accountId": "6108",
                     "id": "id_yhqoazw2a"
                 },
                 {
