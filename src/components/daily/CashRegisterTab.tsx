@@ -190,6 +190,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   const [topupAmt, setTopupAmt] = useState('');
   const [topupMethod, setTopupMethod] = useState<'現結' | '匯款'>('現結');
   const [topupLoading, setTopupLoading] = useState(false);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [topupError, setTopupError] = useState<string | null>(null);
   const [topupSuccess, setTopupSuccess] = useState<{name: string, amt: number, balAfter: number} | null>(null);
   // Keypad state for checkout modal
@@ -377,103 +378,142 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
   };
 
   const handleCheckout = async () => {
-    const orderId = uid();
-    const orderItems: Record<string, number> = {};
-    cart.forEach(c => { orderItems[c.item.id] = c.qty; });
+    if (checkoutLoading) return;
+    setCheckoutLoading(true);
+    try {
+      const orderId = uid();
+      const orderItems: Record<string, number> = {};
+      cart.forEach(c => { orderItems[c.item.id] = c.qty; });
 
-    const newItemsAmt = totalNewItemsAmt - checkoutData.discAmt;
-    const grandTotal = Math.max(0, newItemsAmt) + totalLoadedUnpaid;
-    const isFuturePickup = !!checkoutData.pickupDate && checkoutData.pickupDate !== dailyData.date;
-    const isCreditPayment = checkoutData.paymentMethod === '儲值金扣款';
-    let creditBalanceAfter: number | undefined;
+      const newItemsAmt = totalNewItemsAmt - checkoutData.discAmt;
+      const grandTotal = Math.max(0, newItemsAmt) + totalLoadedUnpaid;
+      const isFuturePickup = !!checkoutData.pickupDate && checkoutData.pickupDate !== dailyData.date;
+      const isCreditPayment = checkoutData.paymentMethod === '儲值金扣款';
+      let creditBalanceAfter: number | undefined;
 
-    if (isCreditPayment) {
-      if (!selectedCust) {
-        alert('請先選取顧客再進行儲值金扣款結帳！');
-        return;
+      if (isCreditPayment) {
+        if (!selectedCust) {
+          alert('請先選取顧客再進行儲值金扣款結帳！');
+          return;
+        }
+        const currentBal = Number(selectedCust.creditBalance || 0);
+        if (currentBal < grandTotal) {
+          alert(`儲值金不足！目前餘額 $${currentBal}，需要 $${grandTotal}，請先至顧客資料加值，或更換付款方式。`);
+          return;
+        }
       }
-      const currentBal = Number(selectedCust.creditBalance || 0);
-      if (currentBal < grandTotal) {
-        alert(`儲值金不足！目前餘額 $${currentBal}，需要 $${grandTotal}，請先至顧客資料加值，或更換付款方式。`);
-        return;
-      }
-    }
 
-    // ── 1. Firestore Transaction for credit deduction ──────────────
-    if (isCreditPayment && selectedCust && shopId) {
-      try {
-        const custRef = doc(db, 'shops', shopId, 'customers', selectedCust.id);
-        await runTransaction(db, async (tx) => {
-          const snap = await tx.get(custRef);
-          if (!snap.exists()) throw new Error('顧客資料不存在');
-          const data = snap.data();
-          const currentBal = Number(data.creditBalance || 0);
-          if (currentBal < grandTotal) {
-            throw new Error(`儲值金不足！目前餘額 $${currentBal}，需要 $${grandTotal}`);
-          }
-          const newBal = currentBal - grandTotal;
-          const log: CreditLog = {
-            id: uid(),
-            timestamp: new Date().toISOString(),
-            type: 'consume',
-            amount: -grandTotal,
-            balanceAfter: newBal,
-            orderId,
-            note: 'POS 儲值金結帳扣款'
-          };
-          tx.update(custRef, {
-            creditBalance: newBal,
-            creditLogs: [...(data.creditLogs || []), log],
-            updatedAt: new Date().toISOString()
+      // ── 1. Firestore Transaction for credit deduction ──────────────
+      if (isCreditPayment && selectedCust && shopId) {
+        try {
+          const custRef = doc(db, 'shops', shopId, 'customers', selectedCust.id);
+          await runTransaction(db, async (tx) => {
+            const snap = await tx.get(custRef);
+            if (!snap.exists()) throw new Error('顧客資料不存在');
+            const data = snap.data();
+            const currentBal = Number(data.creditBalance || 0);
+            if (currentBal < grandTotal) {
+              throw new Error(`儲值金不足！目前餘額 $${currentBal}，需要 $${grandTotal}`);
+            }
+            const newBal = currentBal - grandTotal;
+            const log: CreditLog = {
+              id: uid(),
+              timestamp: new Date().toISOString(),
+              type: 'consume',
+              amount: -grandTotal,
+              balanceAfter: newBal,
+              orderId,
+              note: 'POS 儲值金結帳扣款'
+            };
+            tx.update(custRef, {
+              creditBalance: newBal,
+              creditLogs: [...(data.creditLogs || []), log],
+              updatedAt: new Date().toISOString()
+            });
+            creditBalanceAfter = newBal;
           });
-          creditBalanceAfter = newBal;
-        });
-      } catch (err: any) {
-        setCreditError(err.message || '儲值金扣款失敗');
-        return;
+        } catch (err: any) {
+          setCreditError(err.message || '儲值金扣款失敗');
+          return;
+        }
       }
-    }
 
-    const totalDiscAmt = effectivePromoDiscount + checkoutData.discAmt;
-    const finalActualAmt = Math.max(0, cartPricing.cartSubtotal - totalDiscAmt);
-    const promoNotes = cartPricing.appliedPromos.map(ap => `${ap.ruleName} × ${ap.count}`).join(', ');
+      const totalDiscAmt = effectivePromoDiscount + checkoutData.discAmt;
+      const finalActualAmt = Math.max(0, cartPricing.cartSubtotal - totalDiscAmt);
+      const promoNotes = cartPricing.appliedPromos.map(ap => `${ap.ruleName} × ${ap.count}`).join(', ');
 
-    // ── 2 & 3. Atomically update orders based on the freshest prev state ─────
-    const newNormalOrder: Order | null = (cart.length > 0 && !isFuturePickup) ? {
-      id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
-      address: '', items: orderItems, prodAmt: cartPricing.cartSubtotal, shipAmt: 0,
-      discAmt: totalDiscAmt, actualAmt: finalActualAmt,
-      status: checkoutData.paymentMethod,
-      note: `收銀機交易 - ${checkoutData.paymentMethod}${promoNotes ? ` (套用優惠: ${promoNotes})` : ''}`,
-      source: 'pos', orderType: 'normal', pickupDate: dailyData.date || checkoutData.pickupDate,
-      customerId: selectedCust?.id || null,
-      deliveryMethod: '現場',
-      isPickedUp: true,
-      createdAt: new Date().toISOString()
-    } : null;
+      // ── 2 & 3. Atomically update orders based on the freshest prev state ─────
+      const newNormalOrder: Order | null = (cart.length > 0 && !isFuturePickup) ? {
+        id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
+        address: '', items: orderItems, prodAmt: cartPricing.cartSubtotal, shipAmt: 0,
+        discAmt: totalDiscAmt, actualAmt: finalActualAmt,
+        status: checkoutData.paymentMethod,
+        note: `收銀機交易 - ${checkoutData.paymentMethod}${promoNotes ? ` (套用優惠: ${promoNotes})` : ''}`,
+        source: 'pos', orderType: 'normal', pickupDate: dailyData.date || checkoutData.pickupDate,
+        customerId: selectedCust?.id || null,
+        deliveryMethod: '現場',
+        isPickedUp: true,
+        createdAt: new Date().toISOString()
+      } : null;
 
-    const newPrepayOrder: Order | null = (cart.length > 0 && isFuturePickup) ? {
-      id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
-      address: '', items: {}, prodAmt: 0, shipAmt: 0, discAmt: 0,
-      actualAmt: finalActualAmt,
-      status: checkoutData.paymentMethod,
-      note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨${promoNotes ? ` (套用優惠: ${promoNotes})` : ''}`,
-      source: 'pos', orderType: 'prepayment', pickupDate: checkoutData.pickupDate,
-      customerId: selectedCust?.id || null,
-      createdAt: new Date().toISOString()
-    } : null;
+      const newPrepayOrder: Order | null = (cart.length > 0 && isFuturePickup) ? {
+        id: orderId, buyer: checkoutData.buyer, phone: checkoutData.phone,
+        address: '', items: {}, prodAmt: 0, shipAmt: 0, discAmt: 0,
+        actualAmt: finalActualAmt,
+        status: checkoutData.paymentMethod,
+        note: `收銀機交易 (預購單) - 將於 ${checkoutData.pickupDate} 取貨${promoNotes ? ` (套用優惠: ${promoNotes})` : ''}`,
+        source: 'pos', orderType: 'prepayment', pickupDate: checkoutData.pickupDate,
+        customerId: selectedCust?.id || null,
+        createdAt: new Date().toISOString()
+      } : null;
 
-    if (onPosCheckout) {
-      // Atomic: update state + write Firestore immediately, no race condition
-      const ordersToProcess: Order[] = [];
-      if (newNormalOrder) ordersToProcess.push(newNormalOrder);
-      if (newPrepayOrder) ordersToProcess.push(newPrepayOrder);
+      if (onPosCheckout) {
+        // Atomic: update state + write Firestore immediately, no race condition
+        const ordersToProcess: Order[] = [];
+        if (newNormalOrder) ordersToProcess.push(newNormalOrder);
+        if (newPrepayOrder) ordersToProcess.push(newPrepayOrder);
 
-      await onPosCheckout(
-        (prev) => {
+        await onPosCheckout(
+          (prev) => {
+            let nextOrders = [...(prev.orders || [])];
+
+            // Mark loaded orders as picked up
+            if (loadedOrders.length > 0) {
+              nextOrders = nextOrders.map(o => {
+                const lo = loadedOrders.find(l => l.order.id === o.id);
+                if (!lo) return o;
+                return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
+              });
+            }
+
+            // Append new orders (dedup by id)
+            if (newNormalOrder && !nextOrders.some(o => o.id === newNormalOrder.id)) {
+              nextOrders.push(newNormalOrder);
+            }
+
+            if (newPrepayOrder && !nextOrders.some(o => o.id === newPrepayOrder.id)) {
+              nextOrders.push(newPrepayOrder);
+            }
+
+            return { ...prev, orders: nextOrders };
+          },
+          ordersToProcess
+        );
+
+        if (newPrepayOrder && onAddFutureOrder) {
+          onAddFutureOrder(checkoutData.pickupDate, {
+            id: uid(), buyer: checkoutData.buyer, phone: checkoutData.phone,
+            address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
+            discAmt: checkoutData.discAmt, actualAmt: 0, status: '已收帳款',
+            note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳`,
+            source: 'pos', orderType: 'pickup', pendingPickup: true,
+            pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id || null
+          });
+        }
+      } else {
+        // Fallback: legacy path
+        updateDaily(prev => {
           let nextOrders = [...(prev.orders || [])];
-
-          // Mark loaded orders as picked up
           if (loadedOrders.length > 0) {
             nextOrders = nextOrders.map(o => {
               const lo = loadedOrders.find(l => l.order.id === o.id);
@@ -481,76 +521,46 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
             });
           }
-
-          // Append new orders (dedup by id)
-          if (newNormalOrder && !nextOrders.some(o => o.id === newNormalOrder.id)) {
-            nextOrders.push(newNormalOrder);
-          }
-
-          if (newPrepayOrder && !nextOrders.some(o => o.id === newPrepayOrder.id)) {
-            nextOrders.push(newPrepayOrder);
-          }
-
-          return { ...prev, orders: nextOrders };
-        },
-        ordersToProcess
-      );
-
-      if (newPrepayOrder && onAddFutureOrder) {
-        onAddFutureOrder(checkoutData.pickupDate, {
-          id: uid(), buyer: checkoutData.buyer, phone: checkoutData.phone,
-          address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
-          discAmt: checkoutData.discAmt, actualAmt: 0, status: '已收帳款',
-          note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳`,
-          source: 'pos', orderType: 'pickup', pendingPickup: true,
-          pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id || null
+          if (newNormalOrder && !nextOrders.some(o => o.id === newNormalOrder.id)) nextOrders.push(newNormalOrder);
+          if (newPrepayOrder && !nextOrders.some(o => o.id === newPrepayOrder.id)) nextOrders.push(newPrepayOrder);
+          return { orders: nextOrders };
         });
-      }
-    } else {
-      // Fallback: legacy path
-      updateDaily(prev => {
-        let nextOrders = [...(prev.orders || [])];
-        if (loadedOrders.length > 0) {
-          nextOrders = nextOrders.map(o => {
-            const lo = loadedOrders.find(l => l.order.id === o.id);
-            if (!lo) return o;
-            return { ...o, isPickedUp: true, status: lo.collectAmt === 0 ? o.status : checkoutData.paymentMethod };
-          });
+        if (newNormalOrder) onAddOrder(newNormalOrder);
+        if (newPrepayOrder) {
+          onAddOrder(newPrepayOrder);
+          if (onAddFutureOrder) {
+            onAddFutureOrder(checkoutData.pickupDate, {
+              id: uid(), buyer: checkoutData.buyer, phone: checkoutData.phone,
+              address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
+              discAmt: checkoutData.discAmt, actualAmt: 0, status: '已收帳款',
+              note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳`,
+              source: 'pos', orderType: 'pickup', pendingPickup: true,
+              pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id
+            });
+          }
         }
-        if (newNormalOrder && !nextOrders.some(o => o.id === newNormalOrder.id)) nextOrders.push(newNormalOrder);
-        if (newPrepayOrder && !nextOrders.some(o => o.id === newPrepayOrder.id)) nextOrders.push(newPrepayOrder);
-        return { orders: nextOrders };
+      }
+
+      setFinalCheckModal({
+        order: { id: orderId, actualAmt: grandTotal, status: checkoutData.paymentMethod } as Order,
+        received: checkoutData.receivedAmt,
+        change: checkoutData.paymentMethod === '現結' ? checkoutData.receivedAmt - grandTotal : 0,
+        creditBalanceAfter
       });
-      if (newNormalOrder) onAddOrder(newNormalOrder);
-      if (newPrepayOrder) {
-        onAddOrder(newPrepayOrder);
-        if (onAddFutureOrder) {
-          onAddFutureOrder(checkoutData.pickupDate, {
-            id: uid(), buyer: checkoutData.buyer, phone: checkoutData.phone,
-            address: '', items: orderItems, prodAmt: totalNewItemsAmt, shipAmt: 0,
-            discAmt: checkoutData.discAmt, actualAmt: 0, status: '已收帳款',
-            note: `收銀機交易 (取貨單) - 於 ${dailyData.date} 結帳`,
-            source: 'pos', orderType: 'pickup', pendingPickup: true,
-            pickupDate: checkoutData.pickupDate, customerId: selectedCust?.id
-          });
-        }
-      }
+
+      setCart([]);
+      setLoadedOrders([]);
+      setCheckoutModal(false);
+      setReceivedInput('');
+      setSelectedCust(null);
+      setCreditError(null);
+      setCheckoutData({ buyer: '現客', phone: '', discAmt: 0, paymentMethod: '現結', receivedAmt: 0, pickupDate: dailyData.date });
+    } catch (err: any) {
+      console.error(err);
+      alert('結帳失敗，請重試！');
+    } finally {
+      setCheckoutLoading(false);
     }
-
-    setFinalCheckModal({
-      order: { id: orderId, actualAmt: grandTotal, status: checkoutData.paymentMethod } as Order,
-      received: checkoutData.receivedAmt,
-      change: checkoutData.paymentMethod === '現結' ? checkoutData.receivedAmt - grandTotal : 0,
-      creditBalanceAfter
-    });
-
-    setCart([]);
-    setLoadedOrders([]);
-    setCheckoutModal(false);
-    setReceivedInput('');
-    setSelectedCust(null);
-    setCreditError(null);
-    setCheckoutData({ buyer: '現客', phone: '', discAmt: 0, paymentMethod: '現結', receivedAmt: 0, pickupDate: dailyData.date });
   };
 
   const handleCloseShift = () => {
@@ -1790,9 +1800,10 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
               <div className="px-8 pb-8 pt-4 border-t border-coffee-50">
                 <button
                   onClick={handleCheckout}
-                  className="w-full py-4 bg-coffee-800 text-white rounded-2xl font-bold shadow-xl hover:bg-coffee-900 transition-all active:scale-95 flex items-center justify-center gap-2"
+                  disabled={checkoutLoading}
+                  className="w-full py-4 bg-coffee-800 text-white rounded-2xl font-bold shadow-xl hover:bg-coffee-900 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                 >
-                  確認結帳與列入銷售明細 <CheckCircle2 className="w-5 h-5" />
+                  {checkoutLoading ? '正在結帳中...' : '確認結帳與列入銷售明細'} <CheckCircle2 className="w-5 h-5" />
                 </button>
               </div>
             </motion.div>
