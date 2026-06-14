@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import ProductAnalyticsTab from './ProductAnalyticsTab';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
 import { fmt, parseNum, monthISO, uid, normalizeFlavorName } from '../lib/utils';
@@ -412,7 +413,12 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
       )}
       
       {activeTab === 'product' && (
-        <ProductTab monthData={monthData} settings={settings} />
+        <ProductAnalyticsTab
+          monthData={monthData}
+          settings={settings}
+          shopId={shopId}
+          selectedMonth={selectedMonth}
+        />
       )}
     </div>
   );
@@ -1855,7 +1861,8 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
   );
 }
 
-function ProductTab({ monthData, settings }: any) {
+// ProductTab replaced by ProductAnalyticsTab (see ProductAnalyticsTab.tsx)
+function _ProductTab_UNUSED({ monthData, settings }: any) {
   const productStats = useMemo(() => {
     const stats: Record<string, { qty: number, rev: number, category: string }> = {};
 
