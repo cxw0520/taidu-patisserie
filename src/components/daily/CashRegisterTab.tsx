@@ -50,9 +50,10 @@ export function calculateCartPricing(
       expanded.push({ ...item });
 
       // 如果是禮盒商品，同時將配方中拆解出來的單顆商品也加入 itemsPool 參與組合優惠配對
-      if (item.category === 'gift' && item.recipe) {
+      const isGift = item.category === 'gift' || (item.recipe && Object.keys(item.recipe).length > 0);
+      if (isGift && item.recipe) {
         Object.entries(item.recipe).forEach(([name, count]) => {
-          const matchSingle = allItems.find(single => single.name === name && single.category !== 'gift');
+          const matchSingle = allItems.find(single => single.name === name && single.category !== 'gift' && !single.recipe);
           if (matchSingle) {
             for (let c = 0; c < count; c++) {
               expanded.push({ ...matchSingle });

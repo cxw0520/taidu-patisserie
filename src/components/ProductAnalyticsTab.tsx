@@ -83,6 +83,7 @@ export default function ProductAnalyticsTab({ monthData, settings, shopId, selec
   const [multiMonthData, setMultiMonthData] = useState<Record<string, DailyReport[]>>({});
   const [loadingTrend, setLoadingTrend] = useState(false);
   const [hiddenLines, setHiddenLines] = useState<Record<string, boolean>>({});
+  const [compareWeekday, setCompareWeekday] = useState<number>(2); // 0=Mon, 1=Tue, 2=Wed, 3=Thu, 4=Fri, 5=Sat, 6=Sun (default 2 = Wednesday)
 
   const allItems: Item[] = useMemo(() => [
     ...(settings.giftItems || []),
@@ -232,22 +233,182 @@ export default function ProductAnalyticsTab({ monthData, settings, shopId, selec
     });
   }, [monthData, activeItems]);
 
-  // ⑥ Week breakdown data (Week 1: days 1-7, Week 2: 8-14, Week 3: 15-21, Week 4: 22+)
-  const weekNumData = useMemo(() => {
-    const weeks: Record<number, Record<string, number>> = { 1: {}, 2: {}, 3: {}, 4: {} };
+  // ⑥ Week breakdown data (calendar weeks: Mon–Sun, merging 5th/6th weeks if present)
+  const { weekNumData, weekNotes } = useMemo(() => {
+    const [y, m] = selectedMonth.split('-').map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+
+    // 1. Identify all raw calendar weeks (Mon–Sun)
+    const rawWeeks: { start: number; end: number }[] = [];
+    let currentStart = 1;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const jsDay = new Date(y, m - 1, d).getDay(); // 0=Sun, 1=Mon ... 6=Sat
+      if (jsDay === 0 || d === daysInMonth) {
+        rawWeeks.push({ start: currentStart, end: d });
+        currentStart = d + 1;
+      }
+    }
+
+    const finalWeeks: { start: number; end: number; mergedLabel?: string }[] = [];
+    const notes: string[] = [];
+
+    if (rawWeeks.length === 4) {
+      finalWeeks.push({ start: rawWeeks[0].start, end: rawWeeks[0].end });
+      finalWeeks.push({ start: rawWeeks[1].start, end: rawWeeks[1].end });
+      finalWeeks.push({ start: rawWeeks[2].start, end: rawWeeks[2].end });
+      finalWeeks.push({ start: rawWeeks[3].start, end: rawWeeks[3].end });
+    } else if (rawWeeks.length === 5) {
+      const firstWeekLen = rawWeeks[0].end - rawWeeks[0].start + 1;
+      if (firstWeekLen < 4) {
+        // Merge first week into second week (becomes new Week 1)
+        finalWeeks.push({ start: rawWeeks[0].start, end: rawWeeks[1].end, mergedLabel: '★' });
+        finalWeeks.push({ start: rawWeeks[2].start, end: rawWeeks[2].end });
+        finalWeeks.push({ start: rawWeeks[3].start, end: rawWeeks[3].end });
+        finalWeeks.push({ start: rawWeeks[4].start, end: rawWeeks[4].end });
+        notes.push(`★ 因首週 (${rawWeeks[0].start}-${rawWeeks[0].end}日) 未滿 4 天已併入第 1 週合併計算`);
+      } else {
+        // Merge fifth week into fourth week (becomes new Week 4)
+        finalWeeks.push({ start: rawWeeks[0].start, end: rawWeeks[0].end });
+        finalWeeks.push({ start: rawWeeks[1].start, end: rawWeeks[1].end });
+        finalWeeks.push({ start: rawWeeks[2].start, end: rawWeeks[2].end });
+        finalWeeks.push({ start: rawWeeks[3].start, end: rawWeeks[4].end, mergedLabel: '★' });
+        notes.push(`★ 因當月有第 5 週 (${rawWeeks[4].start}-${rawWeeks[4].end}日) 已併入第 4 週合併計算`);
+      }
+    } else if (rawWeeks.length >= 6) {
+      // Merge first week into second week, and fifth/sixth weeks into fourth week
+      finalWeeks.push({ start: rawWeeks[0].start, end: rawWeeks[1].end, mergedLabel: '★' });
+      finalWeeks.push({ start: rawWeeks[2].start, end: rawWeeks[2].end });
+      finalWeeks.push({ start: rawWeeks[3].start, end: rawWeeks[3].end });
+      finalWeeks.push({ start: rawWeeks[4].start, end: rawWeeks[rawWeeks.length - 1].end, mergedLabel: '★' });
+      notes.push(`★ 因首週 (${rawWeeks[0].start}-${rawWeeks[0].end}日) 未滿 4 天已併入第 1 週，且當月有第 5/6 週 (${rawWeeks[4].start}-${rawWeeks[rawWeeks.length - 1].end}日) 已併入第 4 週合併計算`);
+    }
+
+    // Initialize sales totals for the 4 final weeks
+    const weeksSales: Record<number, Record<string, number>> = { 1: {}, 2: {}, 3: {}, 4: {} };
     monthData.forEach((d) => {
       const dayNum = parseInt(normalizeDate(d.date).split('-')[2]);
-      const weekNum = Math.min(4, Math.ceil(dayNum / 7));
+      let wn = 4;
+      for (let i = 0; i < 4; i++) {
+        if (dayNum >= finalWeeks[i]?.start && dayNum <= finalWeeks[i]?.end) {
+          wn = i + 1;
+          break;
+        }
+      }
       Object.entries(getOrderQtys(d.orders)).forEach(([id, qty]) => {
-        weeks[weekNum][id] = (weeks[weekNum][id] || 0) + qty;
+        weeksSales[wn][id] = (weeksSales[wn][id] || 0) + qty;
       });
     });
-    return [1, 2, 3, 4].map((w) => {
-      const row: Record<string, any> = { week: `第${w}週` };
-      activeItems.forEach((item) => { row[item.id] = weeks[w][item.id] || 0; });
+
+    const data = [1, 2, 3, 4].map((w) => {
+      const info = finalWeeks[w - 1];
+      const star = info?.mergedLabel || '';
+      const row: Record<string, any> = {
+        week: `第${w}週 (${info?.start}-${info?.end})${star}`,
+      };
+      activeItems.forEach((item) => {
+        row[item.id] = weeksSales[w][item.id] || 0;
+      });
       return row;
     });
-  }, [monthData, activeItems]);
+
+    return { weekNumData: data, weekNotes: notes };
+  }, [monthData, activeItems, selectedMonth]);
+
+  // ⑦ Specific weekday cross-week comparison data
+  const weekdayCompareData = useMemo(() => {
+    const [y, m] = selectedMonth.split('-').map(Number);
+    const daysInMonth = new Date(y, m, 0).getDate();
+
+    const rawWeeks: { start: number; end: number }[] = [];
+    let currentStart = 1;
+    for (let d = 1; d <= daysInMonth; d++) {
+      const jsDay = new Date(y, m - 1, d).getDay();
+      if (jsDay === 0 || d === daysInMonth) {
+        rawWeeks.push({ start: currentStart, end: d });
+        currentStart = d + 1;
+      }
+    }
+
+    const finalWeeks: { start: number; end: number }[] = [];
+    if (rawWeeks.length === 4) {
+      finalWeeks.push(...rawWeeks);
+    } else if (rawWeeks.length === 5) {
+      const firstWeekLen = rawWeeks[0].end - rawWeeks[0].start + 1;
+      if (firstWeekLen < 4) {
+        finalWeeks.push({ start: rawWeeks[0].start, end: rawWeeks[1].end });
+        finalWeeks.push(rawWeeks[2], rawWeeks[3], rawWeeks[4]);
+      } else {
+        finalWeeks.push(rawWeeks[0], rawWeeks[1], rawWeeks[2]);
+        finalWeeks.push({ start: rawWeeks[3].start, end: rawWeeks[4].end });
+      }
+    } else if (rawWeeks.length >= 6) {
+      finalWeeks.push({ start: rawWeeks[0].start, end: rawWeeks[1].end });
+      finalWeeks.push(rawWeeks[2], rawWeeks[3]);
+      finalWeeks.push({ start: rawWeeks[4].start, end: rawWeeks[rawWeeks.length - 1].end });
+    }
+
+    const getWeekIndex = (dayNum: number): number => {
+      for (let i = 0; i < 4; i++) {
+        if (dayNum >= finalWeeks[i]?.start && dayNum <= finalWeeks[i]?.end) {
+          return i + 1;
+        }
+      }
+      return 4;
+    };
+
+    const matchingDays: { dateStr: string; dayNum: number; weekNum: number; sales: Record<string, number> }[] = [];
+
+    const salesMap: Record<string, Record<string, number>> = {};
+    monthData.forEach((d) => {
+      const dateStr = normalizeDate(d.date);
+      salesMap[dateStr] = getOrderQtys(d.orders);
+    });
+
+    for (let d = 1; d <= daysInMonth; d++) {
+      const dateStr = `${selectedMonth}-${String(d).padStart(2, '0')}`;
+      const jsDay = new Date(`${dateStr}T12:00:00`).getDay();
+      const idx = jsDay === 0 ? 6 : jsDay - 1; // Mon=0 ... Sun=6
+      if (idx === compareWeekday) {
+        const sales = salesMap[dateStr] || {};
+        matchingDays.push({
+          dateStr,
+          dayNum: d,
+          weekNum: getWeekIndex(d),
+          sales,
+        });
+      }
+    }
+
+    const rows: Record<string, any>[] = matchingDays.map((day) => {
+      const row: Record<string, any> = {
+        name: `${day.dayNum}日 (第${day.weekNum}週)`,
+        isAverage: false,
+      };
+      activeItems.forEach((item) => {
+        row[item.id] = day.sales[item.id] || 0;
+      });
+      return row;
+    });
+
+    const avgRow: Record<string, any> = {
+      name: '當月平均值',
+      isAverage: true,
+    };
+    activeItems.forEach((item) => {
+      let sum = 0;
+      let count = 0;
+      matchingDays.forEach((day) => {
+        if (salesMap[day.dateStr]) {
+          sum += day.sales[item.id] || 0;
+          count++;
+        }
+      });
+      avgRow[item.id] = count > 0 ? parseFloat((sum / count).toFixed(1)) : 0;
+    });
+    rows.push(avgRow);
+
+    return rows;
+  }, [monthData, activeItems, selectedMonth, compareWeekday]);
 
   if (activeItems.length === 0) {
     return (
@@ -515,14 +676,19 @@ export default function ProductAnalyticsTab({ monthData, settings, shopId, selec
               <span className="w-6 h-6 bg-coffee-800 text-white rounded-md flex items-center justify-center text-xs font-bold flex-shrink-0">⑥</span>
               各週銷售量
             </h4>
-            <p className="text-xs text-coffee-400 mt-1 ml-8">第1週(1-7日)、第2週(8-14日)、第3週(15-21日)、第4週(22日後)</p>
+            <p className="text-xs text-coffee-400 mt-1 ml-8">以星期一至星期日為一週單位，括號為當月實際日期範圍</p>
+            {weekNotes.map((note, idx) => (
+              <p key={idx} className="text-xs text-amber-600 mt-1 ml-8 font-bold animate-pulse">
+                {note}
+              </p>
+            ))}
           </div>
           <ResponsiveContainer width="100%" height={280}>
             <BarChart data={weekNumData} margin={{ top: 0, right: 8, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
               <XAxis
                 dataKey="week"
-                tick={{ fontSize: 12, fill: '#9c7e65' }}
+                tick={{ fontSize: 10, fill: '#9c7e65' }}
                 axisLine={false}
                 tickLine={false}
               />
@@ -541,6 +707,113 @@ export default function ProductAnalyticsTab({ monthData, settings, shopId, selec
               ))}
             </BarChart>
           </ResponsiveContainer>
+        </div>
+      </div>
+
+      {/* ─── ⑦ Weekday cross-week comparison and stock reference ─── */}
+      <div className={PANEL}>
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-5 border-b border-coffee-100 pb-4">
+          <div>
+            <h4 className="font-bold text-coffee-800 text-base flex items-center gap-2">
+              <span className="w-6 h-6 bg-coffee-800 text-white rounded-md flex items-center justify-center text-xs font-bold flex-shrink-0">⑦</span>
+              特定星期跨週銷售對比與備貨參考
+            </h4>
+            <p className="text-xs text-coffee-400 mt-1 ml-8">
+              選擇特定星期幾，對比當月各週該日的銷售量與當月平均，作為下月首週備貨依據
+            </p>
+          </div>
+          {/* Weekday Selector Button Group */}
+          <div className="flex flex-wrap gap-1 bg-coffee-50 p-1 rounded-lg self-start md:self-auto">
+            {WEEKDAYS.map((label, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => setCompareWeekday(idx)}
+                className={`px-3 py-1 text-xs font-bold rounded-md transition-all ${
+                  compareWeekday === idx
+                    ? 'bg-coffee-800 text-white shadow-sm'
+                    : 'text-coffee-600 hover:bg-coffee-100/60'
+                }`}
+              >
+                {label.slice(1)}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 items-stretch">
+          {/* Left Column: Stacked Bar Chart */}
+          <div className="lg:col-span-2">
+            <ResponsiveContainer width="100%" height={260}>
+              <BarChart data={weekdayCompareData} margin={{ top: 10, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f0ede8" vertical={false} />
+                <XAxis
+                  dataKey="name"
+                  tick={{ fontSize: 10, fill: '#9c7e65', fontWeight: 600 }}
+                  axisLine={false}
+                  tickLine={false}
+                />
+                <YAxis tick={{ fontSize: 10, fill: '#9c7e65' }} axisLine={false} tickLine={false} />
+                <Tooltip content={<CustomTooltip />} cursor={{ fill: '#faf7f2' }} />
+                {activeItems.map((item, i) => (
+                  <Bar
+                    key={item.id}
+                    dataKey={item.id}
+                    name={item.name}
+                    stackId="s"
+                    fill={PALETTE[i % PALETTE.length]}
+                    maxBarSize={48}
+                    radius={i === activeItems.length - 1 ? [4, 4, 0, 0] : [0, 0, 0, 0]}
+                  />
+                ))}
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+
+          {/* Right Column: Key Takeaway / Reference Data for Stocking */}
+          <div className="bg-[#faf7f2] border border-coffee-100 rounded-xl p-4 flex flex-col justify-between">
+            <div>
+              <div className="border-b border-coffee-200 pb-2 mb-3">
+                <h5 className="font-bold text-coffee-800 text-sm flex items-center gap-1.5">
+                  <span className="w-1.5 h-3 bg-amber-500 rounded-full" />
+                  下月首週 {WEEKDAYS[compareWeekday]} 備貨建議
+                </h5>
+              </div>
+              <p className="text-xs text-coffee-600 leading-relaxed mb-3">
+                欲預估下個月第 1 週的 {WEEKDAYS[compareWeekday]} 銷量，請優先參考以下數據對比：
+              </p>
+              <div className="space-y-2">
+                {(() => {
+                  const week1Row = weekdayCompareData.find(row => row.name.includes('第1週'));
+                  const avgRow = weekdayCompareData.find(row => row.isAverage);
+                  
+                  if (!week1Row || !avgRow) return null;
+                  
+                  const week1Total = activeItems.reduce((sum, item) => sum + (week1Row[item.id] || 0), 0);
+                  const avgTotal = activeItems.reduce((sum, item) => sum + (avgRow[item.id] || 0), 0);
+
+                  return (
+                    <>
+                      <div className="flex justify-between items-center text-xs p-2 bg-white rounded-lg border border-coffee-50 shadow-sm">
+                        <span className="text-coffee-600 font-semibold">本月第1週 {WEEKDAYS[compareWeekday]} 總銷量</span>
+                        <span className="font-mono font-bold text-coffee-800 text-sm">{week1Total} 個</span>
+                      </div>
+                      <div className="flex justify-between items-center text-xs p-2 bg-white rounded-lg border border-coffee-50 shadow-sm">
+                        <span className="text-coffee-600 font-semibold">當月 {WEEKDAYS[compareWeekday]} 平均總銷量</span>
+                        <span className="font-mono font-bold text-coffee-800 text-sm">{avgTotal.toFixed(1)} 個</span>
+                      </div>
+                      <div className="p-3 bg-amber-50 border border-amber-100/50 rounded-lg mt-2">
+                        <span className="text-[11px] font-bold text-amber-800 block mb-1">💡 備貨提醒</span>
+                        <p className="text-[11px] text-amber-700 leading-relaxed">
+                          第 1 週通常受月初效應影響，銷量可能與月平均有偏差。建議以前期首週（{week1Total} 個）為基準，搭配當月平均（{avgTotal.toFixed(1)} 個）進行備貨。
+                        </p>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 

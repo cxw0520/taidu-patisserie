@@ -1936,18 +1936,21 @@ function _ProductTab_UNUSED({ monthData, settings }: any) {
               </tr>
             </thead>
             <tbody className="divide-y divide-[#f0ede8]">
-              {sortedItems.map(item => (
-                <tr key={item.id} className="hover:bg-coffee-50/30 transition">
-                  <td className="px-4 py-3 font-bold text-coffee-800">{item.name}</td>
-                  <td className="px-4 py-3 text-coffee-500 text-xs">
-                    <span className={cn("px-2 py-1 rounded-md font-bold", item.category === 'gift' ? "bg-rose-100 text-rose-700" : "bg-coffee-100 text-coffee-700")}>
-                      {item.category === 'gift' ? '禮盒' : '單顆'}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-right font-mono font-bold text-coffee-700">{item.qty}</td>
-                  <td className="px-4 py-3 text-right font-mono font-bold text-coffee-600">${fmt(item.rev)}</td>
-                </tr>
-              ))}
+              {sortedItems.map(item => {
+                const isGift = item.category === 'gift' || settings.giftItems?.some((g: any) => g.id === item.id);
+                return (
+                  <tr key={item.id} className="hover:bg-coffee-50/30 transition">
+                    <td className="px-4 py-3 font-bold text-coffee-800">{item.name}</td>
+                    <td className="px-4 py-3 text-coffee-500 text-xs">
+                      <span className={cn("px-2 py-1 rounded-md font-bold", isGift ? "bg-rose-100 text-rose-700" : "bg-coffee-100 text-coffee-700")}>
+                        {isGift ? '禮盒' : '單顆'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-right font-mono font-bold text-coffee-700">{item.qty}</td>
+                    <td className="px-4 py-3 text-right font-mono font-bold text-coffee-600">${fmt(item.rev)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>

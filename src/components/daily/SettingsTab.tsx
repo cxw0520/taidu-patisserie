@@ -62,7 +62,8 @@ export default function SettingsTab({
   };
 
   const handleAdd = (type: 'giftItems' | 'singleItems' | 'packagingItems') => {
-    const newItems = [...settings[type], { id: uid(), name: '新品項', price: 0, active: true }];
+    const category = type === 'giftItems' ? 'gift' : type === 'singleItems' ? 'single' : undefined;
+    const newItems = [...settings[type], { id: uid(), name: '新品項', price: 0, active: true, ...(category ? { category } : {}) }];
     updateSettings({ ...settings, [type]: newItems });
   };
 
