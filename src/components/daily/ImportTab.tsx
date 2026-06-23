@@ -97,10 +97,6 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
       const idxEmail = getIdx(['電子郵件', '信箱', 'Email', 'email', 'e-mail']);
 
       const itemMap: { item: any; colIdx: number }[] = [];
-      const allPossibleItems = [
-        ...(settings.giftItems || []),
-        ...(settings.singleItems || []),
-      ];
 
       headers.forEach((h, colIdx) => {
         if (!h || typeof h !== 'string') return;
@@ -117,13 +113,27 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
         let bestMatch = null;
         let searchPool: any[] = [];
 
+        const customGifts = (settings.customCategories || [])
+          .filter(c => c.name.includes('禮盒') || c.name.includes('盒'))
+          .flatMap(c => c.items || []);
+        
+        const customSingles = (settings.customCategories || [])
+          .filter(c => !c.name.includes('禮盒') && !c.name.includes('盒'))
+          .flatMap(c => c.items || []);
+
+        const allCustomItems = (settings.customCategories || []).flatMap(c => c.items || []);
+
         if (isGBHeader) {
-          searchPool = settings.giftItems || [];
+          searchPool = [...(settings.giftItems || []), ...customGifts];
         } else if (isSGHeader) {
-          searchPool = settings.singleItems || [];
+          searchPool = [...(settings.singleItems || []), ...customSingles];
         } else {
           // 都沒有關鍵字，兩邊都找
-          searchPool = [...(settings.giftItems || []), ...(settings.singleItems || [])];
+          searchPool = [
+            ...(settings.giftItems || []),
+            ...(settings.singleItems || []),
+            ...allCustomItems
+          ];
         }
 
         // 2. 進行消除干擾後的雙向模糊比對
