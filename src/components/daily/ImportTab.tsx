@@ -106,8 +106,11 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
         const isGBHeader = cleanH.includes('禮盒') || cleanH.includes('盒');
         const isSGHeader = cleanH.includes('單顆') || cleanH.includes('個') || cleanH.includes('單');
 
-        // 建立正規化函式：過濾掉所有的全半形括號與空白
-        const normalize = (s: string) => s.replace(/[\s\(\)（）]/g, '');
+        // 建立正規化函式：過濾掉所有的全半形括號與空白，並將全形英數轉半形且轉小寫
+        const normalize = (s: string) => s
+          .replace(/[\s\(\)（）]/g, '')
+          .replace(/[\uFF01-\uFF5E]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+          .toLowerCase();
         const normH = normalize(cleanH);
 
         let bestMatch = null;
