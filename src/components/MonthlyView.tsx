@@ -185,9 +185,6 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
           const monthlySnap = await getDoc(doc(db, 'shops', shopId, 'monthly', '2026-05'));
           const monthly = monthlySnap.exists() ? monthlySnap.data() : {};
 
-          const materialsSnap = await getDocs(collection(db, 'shops', shopId, 'materials'));
-          const materials = materialsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
           const payload = {
             monthData,
             entries,
@@ -195,8 +192,7 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
             purchases,
             coa,
             monthly,
-            assets,
-            materials
+            assets
           };
 
           await fetch('http://localhost:3001/data', {
