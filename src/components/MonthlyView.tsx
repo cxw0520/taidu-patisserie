@@ -166,7 +166,7 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   }, [selectedMonth, shopId]);
 
   useEffect(() => {
-    if (monthData && monthData.length > 0) {
+    if (shopId) {
       console.log('--- EXPORTING ALL DATA FOR DIAGNOSIS ---');
       const exportData = async () => {
         try {
