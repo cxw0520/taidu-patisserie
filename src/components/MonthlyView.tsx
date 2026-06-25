@@ -199,7 +199,7 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
             materials
           };
 
-          await fetch('http://localhost:3001/data', {
+          await fetch(`http://${window.location.hostname}:3001/data`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
