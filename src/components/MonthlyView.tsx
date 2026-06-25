@@ -49,20 +49,6 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   // AR Modal State
   const [showARModal, setShowARModal] = useState(false);
   const [selectedBuyer, setSelectedBuyer] = useState<string | null>(null);
-  const [exportStatus, setExportStatus] = useState<string>('準備中...');
-  const [exportedPayload, setExportedPayload] = useState<any>(null);
-  const downloadJSON = () => {
-    if (!exportedPayload) return;
-    const blob = new Blob([JSON.stringify(exportedPayload, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'may_data.json';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-  };
 
   useEffect(() => {
     const qDaily = query(
@@ -180,11 +166,10 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   }, [selectedMonth, shopId]);
 
   useEffect(() => {
-    if (shopId) {
-      console.log('--- EXPORTING ALL DATA FOR DIAGNOSIS ---');
+    if (selectedMonth === '2026-05' && monthData && monthData.length > 0) {
+      console.log('--- EXPORTING ALL MAY DATA FOR DIAGNOSIS ---');
       const exportData = async () => {
         try {
-          setExportStatus('正在從 Firestore 讀取所有資料（包含庫存食材）...');
           const entriesSnap = await getDocs(query(collection(db, 'shops', shopId, 'entries'), where('year', '==', 2026)));
           const entries = entriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
@@ -200,9 +185,6 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
           const monthlySnap = await getDoc(doc(db, 'shops', shopId, 'monthly', '2026-05'));
           const monthly = monthlySnap.exists() ? monthlySnap.data() : {};
 
-          const materialsSnap = await getDocs(collection(db, 'shops', shopId, 'materials'));
-          const materials = materialsSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-
           const payload = {
             monthData,
             entries,
@@ -210,22 +192,16 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
             purchases,
             coa,
             monthly,
-            assets,
-            materials
+            assets
           };
 
-          setExportedPayload(payload);
-
-          setExportStatus(`已取得資料（庫存食材共 ${materials.length} 筆），正在上傳到本機伺服器...`);
-          await fetch(`http://${window.location.hostname}:3001/data`, {
+          await fetch('http://localhost:3001/data', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
-          setExportStatus(`✅ 匯出完成！庫存食材共 ${materials.length} 筆，已成功寫入 may_data.json。`);
           console.log('--- EXPORT COMPLETED SUCCESSFULLY ---');
-        } catch (err: any) {
-          setExportStatus(`❌ 伺服器傳輸失敗：${err?.message || err}。但資料已成功從資料庫載入！請點選下方按鈕下載 may_data.json。`);
+        } catch (err) {
           console.error('Failed to export diagnostics data:', err);
         }
       };
@@ -341,23 +317,6 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   // Rest of the UI calculation logic...
   return (
     <div className="space-y-6 animate-in fade-in duration-500 h-full font-sans">
-      {/* Diagnostic Banner */}
-      <div className="bg-rose-50 border-2 border-rose-200 rounded-2xl p-4 text-center space-y-3">
-        <h3 className="text-rose-800 font-bold text-lg mb-1">🔍 系統資料匯出診斷</h3>
-        <p className="text-rose-700 text-sm font-medium">{exportStatus}</p>
-        {exportedPayload && (
-          <div className="flex flex-col items-center gap-2">
-            <button
-              onClick={downloadJSON}
-              className="bg-rose-600 hover:bg-rose-700 text-white font-bold py-2 px-4 rounded-xl shadow transition-colors text-sm"
-            >
-              下載資料 JSON (may_data.json)
-            </button>
-            <p className="text-xs text-rose-500 font-normal">下載後請將該檔案放置於您的專案根目錄下，覆蓋現有的 `may_data.json` 即可。</p>
-          </div>
-        )}
-      </div>
-
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         
         {/* Sub-tabs hidden as they are managed by drawer */}

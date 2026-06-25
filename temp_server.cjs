@@ -24,6 +24,6 @@ app.post('/data', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.listen(3001, '0.0.0.0', () => {
-  console.log('Temp server listening on port 3001 on 0.0.0.0');
+app.listen(3001, () => {
+  console.log('Temp server listening on port 3001');
 });
