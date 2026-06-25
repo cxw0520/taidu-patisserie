@@ -166,8 +166,8 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   }, [selectedMonth, shopId]);
 
   useEffect(() => {
-    if (selectedMonth === '2026-05' && monthData && monthData.length > 0) {
-      console.log('--- EXPORTING ALL MAY DATA FOR DIAGNOSIS ---');
+    if (monthData && monthData.length > 0) {
+      console.log('--- EXPORTING ALL DATA FOR DIAGNOSIS ---');
       const exportData = async () => {
         try {
           const entriesSnap = await getDocs(query(collection(db, 'shops', shopId, 'entries'), where('year', '==', 2026)));
