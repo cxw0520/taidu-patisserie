@@ -82,7 +82,7 @@ const NavMenuItem = ({ label, icon, onClick, active }: { key?: string | number, 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers' | 'pos' | 'settings' | 'hr'>(() => {
-    return (localStorage.getItem('app_active_tab') as any) || 'journal';
+    return 'monthly';
   });
   const [globalSubTabs, setGlobalSubTabs] = useState<Record<string, string>>(() => {
     return JSON.parse(localStorage.getItem('app_global_subtabs') || '{}');

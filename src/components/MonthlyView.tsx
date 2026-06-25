@@ -49,6 +49,7 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   // AR Modal State
   const [showARModal, setShowARModal] = useState(false);
   const [selectedBuyer, setSelectedBuyer] = useState<string | null>(null);
+  const [exportStatus, setExportStatus] = useState<string>('準備中...');
 
   useEffect(() => {
     const qDaily = query(
@@ -170,6 +171,7 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
       console.log('--- EXPORTING ALL DATA FOR DIAGNOSIS ---');
       const exportData = async () => {
         try {
+          setExportStatus('正在從 Firestore 讀取所有資料（包含庫存食材）...');
           const entriesSnap = await getDocs(query(collection(db, 'shops', shopId, 'entries'), where('year', '==', 2026)));
           const entries = entriesSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
@@ -199,13 +201,16 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
             materials
           };
 
+          setExportStatus(`已取得資料（庫存食材共 ${materials.length} 筆），正在上傳到本機伺服器...`);
           await fetch(`http://${window.location.hostname}:3001/data`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
           });
+          setExportStatus(`✅ 匯出完成！庫存食材共 ${materials.length} 筆，已成功寫入 may_data.json。`);
           console.log('--- EXPORT COMPLETED SUCCESSFULLY ---');
-        } catch (err) {
+        } catch (err: any) {
+          setExportStatus(`❌ 匯出失敗：${err?.message || err}`);
           console.error('Failed to export diagnostics data:', err);
         }
       };
@@ -321,6 +326,12 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   // Rest of the UI calculation logic...
   return (
     <div className="space-y-6 animate-in fade-in duration-500 h-full font-sans">
+      {/* Diagnostic Banner */}
+      <div className="bg-rose-50 border-2 border-rose-200 rounded-2xl p-4 text-center">
+        <h3 className="text-rose-800 font-bold text-lg mb-1">🔍 系統資料匯出診斷</h3>
+        <p className="text-rose-700 text-sm font-medium">{exportStatus}</p>
+      </div>
+
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         
         {/* Sub-tabs hidden as they are managed by drawer */}
