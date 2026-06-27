@@ -888,6 +888,7 @@ function CreditAdjustModal({ shopId, customer, onClose }: {
   onClose: () => void;
 }) {
   const [mode, setMode] = useState<'topup' | 'consume' | 'repay_unpaid' | 'manual_adjust'>('topup');
+  const [repayMethod, setRepayMethod] = useState<'現金' | '匯款'>('現金');
   const [amountStr, setAmountStr] = useState('');
   const [note, setNote] = useState('');
   const [saving, setSaving] = useState(false);
@@ -905,6 +906,7 @@ function CreditAdjustModal({ shopId, customer, onClose }: {
       let newUnpaid = Number(customer.unpaidBalance || 0);
       let logAmt = amt;
       let logType: 'topup' | 'consume' | 'refund' | 'manual_adjust' = 'topup';
+      const updatedPurchases = [...(customer.purchases || [])];
 
       if (mode === 'topup') {
         newCredit += amt;
@@ -923,6 +925,58 @@ function CreditAdjustModal({ shopId, customer, onClose }: {
         newUnpaid = Math.max(0, newUnpaid - amt);
         logType = 'manual_adjust';
         logAmt = -amt;
+
+        // Distribute payment to matching orders in Firestore daily reports
+        let remainingPayment = amt;
+        const unpaidPurchases = updatedPurchases
+          .filter(p => p.status === '未結帳款')
+          .sort((a, b) => a.date.localeCompare(b.date));
+
+        for (const p of unpaidPurchases) {
+          if (remainingPayment <= 0) break;
+
+          let dailyRef = doc(db, 'shops', shopId, 'daily', p.date);
+          let dailySnap = await getDoc(dailyRef);
+          if (!dailySnap.exists()) {
+            // Try legacy path
+            const legacy = p.date.replace(/^(\d{4})-0?(\d{1,2})-0?(\d{1,2})$/, (_, y, m, d) => `${y}-${Number(m)}-${Number(d)}`);
+            dailyRef = doc(db, 'shops', shopId, 'daily', legacy);
+            dailySnap = await getDoc(dailyRef);
+          }
+
+          if (dailySnap.exists()) {
+            const dailyData = dailySnap.data();
+            const orders = dailyData.orders || [];
+            const orderIdx = orders.findIndex((o: any) => o.id === p.orderId);
+
+            if (orderIdx !== -1) {
+              const order = orders[orderIdx];
+              const collected = Number(order.arCollectedCash || 0) + Number(order.arCollectedRemit || 0);
+              const remainingUnpaid = Math.max(0, Number(order.actualAmt || 0) - collected);
+
+              if (remainingUnpaid > 0) {
+                const allocated = Math.min(remainingPayment, remainingUnpaid);
+                if (repayMethod === '現金') {
+                  order.arCollectedCash = Number(order.arCollectedCash || 0) + allocated;
+                } else {
+                  order.arCollectedRemit = Number(order.arCollectedRemit || 0) + allocated;
+                }
+
+                if (Number(order.arCollectedCash || 0) + Number(order.arCollectedRemit || 0) >= Number(order.actualAmt || 0)) {
+                  order.status = '已收帳款';
+                  const pIdx = updatedPurchases.findIndex(x => x.orderId === p.orderId);
+                  if (pIdx !== -1) updatedPurchases[pIdx].status = '已收帳款';
+                }
+
+                await setDoc(dailyRef, { ...dailyData, orders }, { merge: true });
+                remainingPayment -= allocated;
+              } else {
+                const pIdx = updatedPurchases.findIndex(x => x.orderId === p.orderId);
+                if (pIdx !== -1) updatedPurchases[pIdx].status = '已收帳款';
+              }
+            }
+          }
+        }
       } else if (mode === 'manual_adjust') {
         const diff = amt - newCredit;
         newCredit = amt;
@@ -936,13 +990,14 @@ function CreditAdjustModal({ shopId, customer, onClose }: {
         type: logType,
         amount: logAmt,
         balanceAfter: mode === 'repay_unpaid' ? newUnpaid : newCredit,
-        note: note.trim() || (mode === 'repay_unpaid' ? '收回先取貨未結帳款' : mode === 'manual_adjust' ? '人工校正餘額' : '')
+        note: note.trim() || (mode === 'repay_unpaid' ? `收回先取貨未結帳款 (${repayMethod})` : mode === 'manual_adjust' ? '人工校正餘額' : '')
       };
 
       const updated: Customer = {
         ...customer,
         creditBalance: newCredit,
         unpaidBalance: newUnpaid,
+        purchases: updatedPurchases,
         creditLogs: [...(customer.creditLogs || []), newLog],
         updatedAt: new Date().toISOString()
       };
@@ -996,6 +1051,7 @@ function CreditAdjustModal({ shopId, customer, onClose }: {
               ].map(item => (
                 <button
                   key={item.id}
+                  type="button"
                   onClick={() => setMode(item.id as any)}
                   className={cn("py-2.5 px-3 rounded-xl text-xs font-bold border text-left transition-all", mode === item.id ? "bg-emerald-600 border-emerald-600 text-white shadow-sm" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50")}
                 >
@@ -1004,6 +1060,29 @@ function CreditAdjustModal({ shopId, customer, onClose }: {
               ))}
             </div>
           </div>
+
+          {/* 收款管道 (僅在收取未付帳款時顯示) */}
+          {mode === 'repay_unpaid' && (
+            <div>
+              <label className="text-xs font-bold text-coffee-400 mb-2 block">收款方式</label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setRepayMethod('現金')}
+                  className={cn("py-2.5 px-3 rounded-xl text-xs font-bold border text-center transition-all", repayMethod === '現金' ? "bg-emerald-600 border-emerald-600 text-white shadow-sm" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50")}
+                >
+                  💵 現金收回
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRepayMethod('匯款')}
+                  className={cn("py-2.5 px-3 rounded-xl text-xs font-bold border text-center transition-all", repayMethod === '匯款' ? "bg-emerald-600 border-emerald-600 text-white shadow-sm" : "bg-white border-gray-200 text-gray-600 hover:bg-gray-50")}
+                >
+                  🏦 匯款收回
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* 輸入金額 */}
           <div>
