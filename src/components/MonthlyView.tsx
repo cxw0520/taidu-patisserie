@@ -448,7 +448,7 @@ function ARReconciliationModal({ monthData, settings, shopId, onClose, selectedB
     const groups: Record<string, { total: number, orders: (Order & { date: string; sourceDocId: string })[] }> = {};
     monthData.forEach((d: DailyReport) => {
       d.orders.forEach(o => {
-        if (o.status === '未結帳款' || o.status === '已收帳款') {
+        if ((o.status === '未結帳款' || o.status === '已收帳款') && o.orderType !== 'pickup') {
           const name = o.buyer || '未知買家';
           if (!groups[name]) groups[name] = { total: 0, orders: [] };
           const remain = getRemaining(o);
