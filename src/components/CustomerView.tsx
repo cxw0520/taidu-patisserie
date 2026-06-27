@@ -7,7 +7,7 @@ import { uid, fmt, cn, parseNum } from '../lib/utils';
 import { Customer, CustomerPurchase, Settings, CreditLog } from '../types';
 import {
   Users, Plus, Search, Trash2, ChevronDown, ChevronRight,
-  Phone, Mail, StickyNote, ShoppingBag, X, Edit2, Check, Star, User, Database, MessageCircle, Cake, Tag, AlertTriangle, CreditCard, DollarSign, History, Wrench
+  Phone, Mail, StickyNote, ShoppingBag, X, Edit2, Check, Star, User, Database, MessageCircle, Cake, Tag, AlertTriangle, AlertCircle, CreditCard, DollarSign, History, Wrench, ArrowRightLeft
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -228,6 +228,9 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
   const [migrating, setMigrating] = useState(false);
   const [fixing, setFixing] = useState(false);
   const [displayCount, setDisplayCount] = useState(50);
+  const [mergeMode, setMergeMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [mergeConfirmModal, setMergeConfirmModal] = useState(false);
 
   useEffect(() => {
     setDisplayCount(50);
@@ -514,6 +517,25 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
             <span className="hidden sm:inline">{migrating ? '轉移中...' : '匯入歷史紀錄'}</span>
           </button>
           <button
+            onClick={() => {
+              if (mergeMode) {
+                setMergeMode(false);
+                setSelectedIds([]);
+              } else {
+                setMergeMode(true);
+              }
+            }}
+            className={cn(
+              "px-4 py-2 rounded-xl font-bold flex items-center gap-2 transition shadow-sm border",
+              mergeMode 
+                ? "bg-rose-50 border-rose-200 text-rose-700 hover:bg-rose-100" 
+                : "bg-white border-coffee-200 text-coffee-600 hover:bg-coffee-50"
+            )}
+          >
+            <ArrowRightLeft className="w-4 h-4" />
+            <span className="hidden sm:inline">{mergeMode ? '取消合併' : '合併顧客'}</span>
+          </button>
+          <button
             onClick={() => setAddModal(true)}
             className="bg-coffee-700 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-2 hover:bg-coffee-800 transition shadow-md"
           >
@@ -540,6 +562,31 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
 
       {/* Main View Area */}
       <div className="space-y-4">
+        {mergeMode && (
+          <div className="bg-rose-50 border border-rose-100 p-4 rounded-2xl flex items-center justify-between shadow-sm">
+            <span className="text-sm font-bold text-rose-800">
+              已選擇 {selectedIds.length} 位顧客，請選擇一個主要帳號進行合併。
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setMergeConfirmModal(true)}
+                disabled={selectedIds.length < 2}
+                className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-xl font-bold text-xs shadow-sm disabled:opacity-50 transition"
+              >
+                執行合併
+              </button>
+              <button
+                onClick={() => {
+                  setMergeMode(false);
+                  setSelectedIds([]);
+                }}
+                className="bg-white border border-rose-200 text-rose-700 px-4 py-2 rounded-xl font-bold text-xs hover:bg-rose-50 transition"
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        )}
         {subTab === 'credit' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
             <div className="bg-gradient-to-br from-emerald-50 to-emerald-100/50 border border-emerald-200 p-6 rounded-3xl shadow-sm flex items-center justify-between">
@@ -582,10 +629,25 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
             <div key={c.id} className="glass-panel overflow-hidden shadow-sm hover:-translate-y-0.5 transition-transform duration-200">
               {/* Summary row */}
               <div className="flex items-center gap-4 px-6 py-4">
-                {/* Avatar */}
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-brand/20 to-coffee-200 flex items-center justify-center font-bold text-coffee-700 text-sm flex-shrink-0">
-                  {c.name.charAt(0)}
-                </div>
+                {mergeMode ? (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(c.id)}
+                    onChange={() => {
+                      if (selectedIds.includes(c.id)) {
+                        setSelectedIds(selectedIds.filter(id => id !== c.id));
+                      } else {
+                        setSelectedIds([...selectedIds, c.id]);
+                      }
+                    }}
+                    className="w-5 h-5 text-rose-600 border-gray-300 rounded focus:ring-rose-500 cursor-pointer flex-shrink-0 accent-rose-500"
+                  />
+                ) : (
+                  /* Avatar */
+                  <div className="w-10 h-10 rounded-full bg-gradient-to-br from-rose-brand/20 to-coffee-200 flex items-center justify-center font-bold text-coffee-700 text-sm flex-shrink-0">
+                    {c.name.charAt(0)}
+                  </div>
+                )}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-bold text-coffee-800 flex items-center gap-2">
@@ -796,6 +858,22 @@ export default function CustomerView({ shopId, settings }: { shopId: string; set
             shopId={shopId}
             customer={creditAdjustModal}
             onClose={() => setCreditAdjustModal(null)}
+          />
+        )}
+      </AnimatePresence>
+
+      {/* 合併顧客 Modal */}
+      <AnimatePresence>
+        {mergeConfirmModal && (
+          <MergeConfirmModal
+            shopId={shopId}
+            selectedCustomers={customers.filter(c => selectedIds.includes(c.id))}
+            onClose={() => setMergeConfirmModal(false)}
+            onFinish={() => {
+              setMergeConfirmModal(false);
+              setMergeMode(false);
+              setSelectedIds([]);
+            }}
           />
         )}
       </AnimatePresence>
@@ -1169,6 +1247,236 @@ export function MergeConflictModal({ candidates, onDecide }: {
         <div className="px-8 pb-8 flex gap-3">
           <button onClick={() => onDecide('new')} className="flex-1 py-3 border-2 border-coffee-200 rounded-2xl font-bold text-coffee-600 hover:bg-coffee-50 transition">建立新顧客</button>
           <button onClick={() => onDecide('merge', selected)} className="flex-1 py-3 bg-coffee-800 text-white rounded-2xl font-bold hover:bg-coffee-900 transition">合併到此顧客</button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
+// ── Merge Confirm Modal ───────────────────────────────────────────────────────
+function MergeConfirmModal({ shopId, selectedCustomers, onClose, onFinish }: {
+  shopId: string;
+  selectedCustomers: Customer[];
+  onClose: () => void;
+  onFinish: () => void;
+}) {
+  const [primaryId, setPrimaryId] = useState<string>(selectedCustomers[0]?.id || '');
+  const [merging, setMerging] = useState(false);
+
+  const handleMerge = async () => {
+    if (!primaryId) return;
+    const primary = selectedCustomers.find(c => c.id === primaryId);
+    if (!primary) return;
+
+    if (!confirm(`確定要將選取的 ${selectedCustomers.length - 1} 位顧客合併到「${primary.name}」嗎？此作業無法復原！`)) return;
+
+    setMerging(true);
+    try {
+      const secondaries = selectedCustomers.filter(c => c.id !== primaryId);
+      const secondaryIds = secondaries.map(c => c.id);
+      
+      // Collect all order IDs from secondary customers
+      const secondaryOrderIds = secondaries.flatMap(c => (c.purchases || []).map(p => p.orderId)).filter(Boolean) as string[];
+
+      // Merge fields
+      let mergedCredit = Number(primary.creditBalance || 0);
+      let mergedUnpaid = Number(primary.unpaidBalance || 0);
+      let mergedPurchases = [...(primary.purchases || [])];
+      let mergedCreditLogs = [...(primary.creditLogs || [])];
+      let mergedTags = [...(primary.tags || [])];
+      let mergedNotes = primary.note ? [primary.note] : [];
+
+      secondaries.forEach(c => {
+        mergedCredit += Number(c.creditBalance || 0);
+        mergedUnpaid += Number(c.unpaidBalance || 0);
+        
+        // Append purchases, avoiding duplicate orderIds
+        (c.purchases || []).forEach(p => {
+          if (!mergedPurchases.some(mp => mp.orderId === p.orderId)) {
+            mergedPurchases.push(p);
+          }
+        });
+
+        // Append creditLogs
+        (c.creditLogs || []).forEach(cl => {
+          mergedCreditLogs.push(cl);
+        });
+
+        // Append tags
+        (c.tags || []).forEach(t => {
+          if (!mergedTags.includes(t)) {
+            mergedTags.push(t);
+          }
+        });
+
+        // Concat notes
+        if (c.note) mergedNotes.push(c.note);
+      });
+
+      // Sort credit logs by timestamp
+      mergedCreditLogs.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+
+      // Re-calculate totals
+      const validPurchases = mergedPurchases.filter(p => p.status !== '已取消' && p.status !== '已刪除');
+      const totalPurchaseCount = validPurchases.length;
+      const totalPurchaseAmt = validPurchases.reduce((s, p) => s + Number(p.actualAmt || 0), 0);
+
+      // Find first non-empty phone, email, lineId, birthday, gender from secondaries if primary lacks them
+      let phone = primary.phone;
+      if (!phone) {
+        const found = secondaries.find(c => c.phone);
+        if (found) phone = found.phone;
+      }
+
+      let email = primary.email;
+      if (!email) {
+        const found = secondaries.find(c => c.email);
+        if (found) email = found.email;
+      }
+
+      let lineId = primary.lineId;
+      if (!lineId) {
+        const found = secondaries.find(c => c.lineId);
+        if (found) lineId = found.lineId;
+      }
+
+      let birthday = primary.birthday;
+      if (!birthday) {
+        const found = secondaries.find(c => c.birthday);
+        if (found) birthday = found.birthday;
+      }
+
+      let gender = primary.gender;
+      if (!gender || gender === '不選擇') {
+        const found = secondaries.find(c => c.gender && c.gender !== '不選擇');
+        if (found) gender = found.gender;
+      }
+
+      // Update primary Customer document
+      const updatedPrimary: Customer = {
+        ...primary,
+        phone,
+        email,
+        lineId,
+        birthday,
+        gender,
+        creditBalance: mergedCredit,
+        unpaidBalance: mergedUnpaid,
+        purchases: mergedPurchases,
+        creditLogs: mergedCreditLogs,
+        tags: mergedTags,
+        note: mergedNotes.join(' \n'),
+        totalPurchaseCount,
+        totalPurchaseAmt,
+        updatedAt: new Date().toISOString()
+      };
+
+      // 1. Write updated primary
+      await setDoc(doc(db, 'shops', shopId, 'customers', primary.id), updatedPrimary);
+
+      // 2. Delete secondaries
+      for (const sId of secondaryIds) {
+        await deleteDoc(doc(db, 'shops', shopId, 'customers', sId));
+      }
+
+      // 3. Re-link orders in Firestore daily reports
+      const dailySnap = await getDocs(collection(db, 'shops', shopId, 'daily'));
+      const updatePromises = dailySnap.docs.map(async (docSnap) => {
+        const data = docSnap.data();
+        let orders = data.orders || [];
+        let hasChanges = false;
+        
+        orders = orders.map((o: any) => {
+          const isMatch = (o.customerId && secondaryIds.includes(o.customerId)) || (o.id && secondaryOrderIds.includes(o.id));
+          if (o && isMatch) {
+            hasChanges = true;
+            return {
+              ...o,
+              customerId: primary.id,
+              buyer: primary.name,
+              phone: primary.phone || o.phone
+            };
+          }
+          return o;
+        });
+
+        if (hasChanges) {
+          await setDoc(doc(db, 'shops', shopId, 'daily', docSnap.id), { ...data, orders }, { merge: true });
+        }
+      });
+
+      await Promise.all(updatePromises);
+
+      alert(`🎉 合併成功！已將 ${selectedCustomers.length} 位顧客資料與其歷史訂單，成功歸併至「${primary.name}」名下。`);
+      onFinish();
+    } catch (e: any) {
+      console.error(e);
+      alert('合併失敗：' + e.message);
+    } finally {
+      setMerging(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={onClose} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative z-10 bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden border border-rose-100">
+        <div className="flex justify-between items-center px-8 pt-7 pb-5 bg-rose-50/50 border-b border-rose-100">
+          <div>
+            <h3 className="text-lg font-bold text-rose-900 flex items-center gap-2">
+              <Users className="w-5 h-5 text-rose-600" /> 合併顧客資料
+            </h3>
+            <p className="text-xs text-rose-700 font-bold mt-0.5">請選取一位作為「主存顧客」主體</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-rose-100 rounded-full text-rose-700"><X className="w-4 h-4" /></button>
+        </div>
+
+        <div className="p-8 space-y-5">
+          <p className="text-xs text-rose-700 bg-rose-50 border border-rose-100 p-3 rounded-xl font-bold flex items-start gap-1.5">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+            合併後，其他被合併顧客的儲值金、未付款及所有訂單歷史，將自動轉移至主存顧客，其餘顧客帳號將永久刪除且無法復原！
+          </p>
+
+          <div className="space-y-2.5 max-h-60 overflow-y-auto pr-1">
+            {selectedCustomers.map(c => (
+              <label key={c.id} className={cn(
+                "flex items-center gap-3 p-3.5 border rounded-2xl cursor-pointer transition-all hover:bg-coffee-50/50",
+                primaryId === c.id ? "bg-rose-50/30 border-rose-300" : "bg-white border-gray-200"
+              )}>
+                <input
+                  type="radio"
+                  name="primary_customer"
+                  value={c.id}
+                  checked={primaryId === c.id}
+                  onChange={() => setPrimaryId(c.id)}
+                  className="accent-rose-500 w-4 h-4 cursor-pointer"
+                />
+                <div className="flex-1 min-w-0">
+                  <div className="font-bold text-sm text-coffee-800 flex items-center gap-1.5 justify-between">
+                    <span>{c.name}</span>
+                    <span className="text-xs text-coffee-400 font-normal">購買 {c.purchases?.length || 0} 次</span>
+                  </div>
+                  <div className="text-[10px] text-coffee-400 font-bold mt-0.5 flex items-center gap-3">
+                    {c.phone && <span>📞 {c.phone}</span>}
+                    {Number(c.creditBalance || 0) > 0 && <span className="text-emerald-600 font-mono">💳 ${c.creditBalance}</span>}
+                    {Number(c.unpaidBalance || 0) > 0 && <span className="text-rose-600 font-mono">⚠️ ${c.unpaidBalance}</span>}
+                  </div>
+                </div>
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="px-8 pb-8 pt-2 flex gap-3">
+          <button onClick={onClose} disabled={merging} className="flex-1 py-3 border border-coffee-100 rounded-2xl font-bold text-coffee-600 hover:bg-coffee-50 transition">取消</button>
+          <button
+            onClick={handleMerge}
+            disabled={merging || !primaryId}
+            className="flex-1 py-3 bg-rose-600 hover:bg-rose-700 text-white font-bold rounded-2xl shadow-md transition flex items-center justify-center gap-2 disabled:opacity-50"
+          >
+            {merging ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : <Check className="w-4 h-4" />}
+            <span>{merging ? '合併中...' : '確認合併'}</span>
+          </button>
         </div>
       </motion.div>
     </div>
