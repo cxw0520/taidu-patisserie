@@ -904,11 +904,39 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
     if (!confirm(`確定要產生 ${stats.selYear}年${stats.selMon}月 的折舊傳票嗎？`)) return;
 
-    const voucherNo = `DEP-${stats.selYear}${String(stats.selMon).padStart(2, '0')}`;
+    const lastDay = new Date(stats.selYear, stats.selMon, 0);
+    const dateStr = lastDay.toISOString().split('T')[0];
+    const yy = String(stats.selYear).slice(-2);
+    const mm = String(stats.selMon).padStart(2, '0');
+    const dd = String(lastDay.getDate()).padStart(2, '0');
+    const datePrefix = `${yy}${mm}${dd}`;
+
+    let voucherNo = '';
+    try {
+      const q = query(
+        collection(db, 'shops', shopId, 'entries'),
+        where('date', '==', dateStr)
+      );
+      const snap = await getDocs(q);
+      const todayVouchers = snap.docs
+        .map(doc => doc.data().voucherNo || doc.id)
+        .filter(id => id && id.startsWith(datePrefix));
+
+      let nextSeq = 1;
+      if (todayVouchers.length > 0) {
+        const seqs = todayVouchers.map(id => parseInt(id.slice(-2), 10) || 0);
+        nextSeq = Math.max(...seqs) + 1;
+      }
+      voucherNo = `${datePrefix}${String(nextSeq).padStart(2, '0')}`;
+    } catch (err) {
+      console.error('Failed to generate sequential voucher number:', err);
+      voucherNo = `${datePrefix}01`;
+    }
+
     const entry = {
       id: voucherNo,
       voucherNo,
-      date: new Date(stats.selYear, stats.selMon, 0).toISOString().split('T')[0],
+      date: dateStr,
       year: stats.selYear,
       description: `${stats.selYear}/${stats.selMon} 固定資產折舊提列`,
       lines: [

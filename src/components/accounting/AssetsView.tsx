@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { db } from '../../lib/firebase';
-import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy } from 'firebase/firestore';
+import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDocs, where } from 'firebase/firestore';
 import { FixedAsset, JournalEntry } from '../../types';
 import { fmt, uid } from '../../lib/utils';
 import { Plus, Trash2, Edit2, Info, CheckCircle2, AlertCircle } from 'lucide-react';
@@ -130,13 +130,34 @@ export default function AssetsView({ shopId, selectedYear }: { shopId: string, s
 
   const recordDepreciation = async () => {
     const key = `${selectedYear}-${selectedMonth}`;
-    if (depLog[key]) return;
+    if (depLog[key] || monthlyTotal === 0) return;
     
-    // Note: window.confirm is blocked in iframe previews, performing action directly
-    const voucherNo = `DEP-${selectedYear}${String(selectedMonth).padStart(2, '0')}`;
+    const lastDay = new Date(selectedYear, selectedMonth, 0);
+    const dateStr = lastDay.toISOString().split('T')[0];
+    const yy = String(selectedYear).slice(-2);
+    const mm = String(selectedMonth).padStart(2, '0');
+    const dd = String(lastDay.getDate()).padStart(2, '0');
+    const datePrefix = `${yy}${mm}${dd}`;
+
+    const q = query(
+      collection(db, 'shops', shopId, 'entries'),
+      where('date', '==', dateStr)
+    );
+    const snap = await getDocs(q);
+    const todayVouchers = snap.docs
+      .map(doc => doc.data().voucherNo || doc.id)
+      .filter(id => id && id.startsWith(datePrefix));
+
+    let nextSeq = 1;
+    if (todayVouchers.length > 0) {
+      const seqs = todayVouchers.map(id => parseInt(id.slice(-2), 10) || 0);
+      nextSeq = Math.max(...seqs) + 1;
+    }
+    const voucherNo = `${datePrefix}${String(nextSeq).padStart(2, '0')}`;
+
     const entry: JournalEntry = {
       id: voucherNo,
-      date: new Date(selectedYear, selectedMonth, 0).toISOString().split('T')[0],
+      date: dateStr,
       year: selectedYear,
       voucherNo,
       description: `${selectedYear}/${selectedMonth} 固定資產折舊提列`,
