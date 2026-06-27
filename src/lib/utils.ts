@@ -1,6 +1,7 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import React from 'react';
+import { FixedAsset } from '../types';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -55,4 +56,55 @@ export function getDaysInMonth(year: number, month: number) {
 
 export function fmtYM(year: number, month: number) {
   return `${year}-${String(month).padStart(2, '0')}`;
+}
+
+export function calculateAssetDepreciation(asset: FixedAsset, year: number, month: number) {
+  const purchaseDate = new Date(asset.purchaseDate);
+  const totalMonths = asset.usefulLife * 12;
+  const monthlyDep = totalMonths > 0 ? (asset.totalCost - asset.residualValue) / totalMonths : 0;
+  const unitMonthlyDep = asset.quantity > 0 ? monthlyDep / asset.quantity : 0;
+
+  // Compute difference in months from the month AFTER purchase date
+  // e.g. purchaseDate is 2026-05-15 (May 2026). Month AFTER purchase is June 2026.
+  // If target month is June 2026, diffMonths = 0.
+  const diffMonths = (year - purchaseDate.getFullYear()) * 12 + (month - (purchaseDate.getMonth() + 1)) - 1;
+
+  let status = '折舊中';
+  let monthsUsed = 0;
+  let currentDep = 0;
+
+  if (asset.status === '已售出') {
+    status = '停止折舊';
+    const originalCompletedMonths = (year - purchaseDate.getFullYear()) * 12 + (month - purchaseDate.getMonth());
+    monthsUsed = Math.min(totalMonths, Math.max(0, originalCompletedMonths));
+    currentDep = 0;
+  } else if (diffMonths < 0) {
+    status = '尚未開始';
+    monthsUsed = 0;
+    currentDep = 0;
+  } else if (diffMonths >= totalMonths) {
+    status = '折舊結束';
+    monthsUsed = totalMonths;
+    currentDep = 0;
+  } else {
+    status = '折舊中';
+    monthsUsed = diffMonths + 1;
+    currentDep = monthlyDep;
+  }
+
+  const accumulated = Math.min(asset.totalCost - asset.residualValue, monthlyDep * monthsUsed);
+  const unitAccumulated = asset.quantity > 0 ? accumulated / asset.quantity : 0;
+  const bookValue = asset.totalCost - accumulated;
+  const endDate = new Date(purchaseDate);
+  endDate.setFullYear(purchaseDate.getFullYear() + asset.usefulLife);
+
+  return {
+    monthly: Math.round(currentDep),
+    unitMonthly: Math.round(asset.quantity > 0 ? currentDep / asset.quantity : 0),
+    accumulated: Math.round(accumulated),
+    unitAccumulated: Math.round(unitAccumulated),
+    bookValue: Math.round(bookValue),
+    status,
+    endDate: endDate.toISOString().split('T')[0]
+  };
 }

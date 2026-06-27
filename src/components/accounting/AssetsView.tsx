@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { db } from '../../lib/firebase';
 import { collection, doc, setDoc, deleteDoc, onSnapshot, query, orderBy, getDocs, where } from 'firebase/firestore';
 import { FixedAsset, JournalEntry } from '../../types';
-import { fmt, uid } from '../../lib/utils';
+import { fmt, uid, calculateAssetDepreciation } from '../../lib/utils';
 import { Plus, Trash2, Edit2, Info, CheckCircle2, AlertCircle } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -76,43 +76,8 @@ export default function AssetsView({ shopId, selectedYear }: { shopId: string, s
     setRemarkAssetId(null);
   };
 
-  const calculateDepreciation = (asset: FixedAsset, year: number, month: number) => {
-    const purchaseDate = new Date(asset.purchaseDate);
-    const targetDate = new Date(year, month, 0); // End of month
-    
-    const endDate = new Date(purchaseDate);
-    endDate.setFullYear(purchaseDate.getFullYear() + asset.usefulLife);
-
-    const totalMonths = asset.usefulLife * 12;
-    const monthlyDep = totalMonths > 0 ? (asset.totalCost - asset.residualValue) / totalMonths : 0;
-    const unitMonthlyDep = asset.quantity > 0 ? monthlyDep / asset.quantity : 0;
-
-    let monthsUsed = (targetDate.getFullYear() - purchaseDate.getFullYear()) * 12 + (targetDate.getMonth() - purchaseDate.getMonth());
-    if (targetDate.getDate() < purchaseDate.getDate()) monthsUsed--;
-    monthsUsed = Math.max(0, monthsUsed);
-
-    const accumulated = Math.min(asset.totalCost - asset.residualValue, monthlyDep * monthsUsed);
-    const unitAccumulated = asset.quantity > 0 ? accumulated / asset.quantity : 0;
-    const bookValue = asset.totalCost - accumulated;
-    
-    let status = '折舊中';
-    if (asset.status === '已售出') status = '停止折舊';
-    else if (bookValue <= asset.residualValue || monthsUsed >= totalMonths) status = '折舊結束';
-    else if (targetDate < purchaseDate) status = '尚未開始';
-
-    return {
-      monthly: Math.round(monthlyDep),
-      unitMonthly: Math.round(unitMonthlyDep),
-      accumulated: Math.round(accumulated),
-      unitAccumulated: Math.round(unitAccumulated),
-      bookValue: Math.round(bookValue),
-      status,
-      endDate: endDate.toISOString().split('T')[0]
-    };
-  };
-
   const monthlyTotal = assets.reduce((sum, a) => {
-    const d = calculateDepreciation(a, selectedYear, selectedMonth);
+    const d = calculateAssetDepreciation(a, selectedYear, selectedMonth);
     return sum + (d.status === '折舊中' ? d.monthly : 0);
   }, 0);
 
@@ -131,6 +96,32 @@ export default function AssetsView({ shopId, selectedYear }: { shopId: string, s
   const recordDepreciation = async () => {
     const key = `${selectedYear}-${selectedMonth}`;
     if (depLog[key] || monthlyTotal === 0) return;
+
+    // Define groups
+    const groups: Record<string, { creditName: string; categoryLabel: string; amount: number }> = {
+      '1402': { creditName: '減:生財設備折舊', categoryLabel: '生財設備', amount: 0 },
+      '1404': { creditName: '減:租賃物改良折舊', categoryLabel: '租賃物改良', amount: 0 },
+      '1406': { creditName: '減:運輸設備折舊', categoryLabel: '運輸設備', amount: 0 }
+    };
+
+    assets.forEach(asset => {
+      const d = calculateAssetDepreciation(asset, selectedYear, selectedMonth);
+      if (d.status === '折舊中' && d.monthly > 0) {
+        let creditId = '1402';
+        if (asset.category === '租賃物改良' || asset.category === '裝修工程') {
+          creditId = '1404';
+        } else if (asset.category === '運輸設備') {
+          creditId = '1406';
+        }
+        groups[creditId].amount += d.monthly;
+      }
+    });
+
+    const activeGroups = Object.entries(groups)
+      .map(([creditId, g]) => ({ creditId, ...g }))
+      .filter(g => g.amount > 0);
+
+    if (activeGroups.length === 0) return;
     
     const lastDay = new Date(selectedYear, selectedMonth, 0);
     const dateStr = lastDay.toISOString().split('T')[0];
@@ -148,28 +139,34 @@ export default function AssetsView({ shopId, selectedYear }: { shopId: string, s
       .map(doc => doc.data().voucherNo || doc.id)
       .filter(id => id && id.startsWith(datePrefix));
 
-    let nextSeq = 1;
+    let maxSeq = 0;
     if (todayVouchers.length > 0) {
       const seqs = todayVouchers.map(id => parseInt(id.slice(-2), 10) || 0);
-      nextSeq = Math.max(...seqs) + 1;
+      maxSeq = Math.max(...seqs);
     }
-    const voucherNo = `${datePrefix}${String(nextSeq).padStart(2, '0')}`;
 
-    const entry: JournalEntry = {
-      id: voucherNo,
-      date: dateStr,
-      year: selectedYear,
-      voucherNo,
-      description: `${selectedYear}/${selectedMonth} 固定資產折舊提列`,
-      lines: [
-        { id: uid(), type: 'debit', accountId: '6105', accountName: '折舊費用', amount: monthlyTotal, lineDescription: '本月資產折舊' },
-        { id: uid(), type: 'credit', accountId: '1402', accountName: '累計折舊', amount: monthlyTotal, lineDescription: '本月資產折舊' }
-      ],
-      debitTotal: monthlyTotal,
-      creditTotal: monthlyTotal
-    };
+    for (let i = 0; i < activeGroups.length; i++) {
+      const group = activeGroups[i];
+      const seq = maxSeq + i + 1;
+      const voucherNo = `${datePrefix}${String(seq).padStart(2, '0')}`;
 
-    await setDoc(doc(db, 'shops', shopId, 'entries', voucherNo), entry);
+      const entry: JournalEntry = {
+        id: voucherNo,
+        date: dateStr,
+        year: selectedYear,
+        voucherNo,
+        description: `${selectedYear}/${selectedMonth} ${group.categoryLabel}折舊提列`,
+        lines: [
+          { id: uid(), type: 'debit', accountId: '6103', accountName: '折舊', amount: group.amount, lineDescription: `本月${group.categoryLabel}折舊` },
+          { id: uid(), type: 'credit', accountId: group.creditId, accountName: group.creditName, amount: group.amount, lineDescription: `本月${group.categoryLabel}折舊` }
+        ],
+        debitTotal: group.amount,
+        creditTotal: group.amount
+      };
+
+      await setDoc(doc(db, 'shops', shopId, 'entries', voucherNo), entry);
+    }
+
     await setDoc(doc(db, 'shops', shopId, 'meta', 'depLog'), { ...depLog, [key]: true }, { merge: true });
     alert('提列成功！');
   };
@@ -333,7 +330,7 @@ export default function AssetsView({ shopId, selectedYear }: { shopId: string, s
           </thead>
           <tbody className="divide-y divide-coffee-50 border-t border-coffee-50 bg-[#fffdf5]">
             {assets.map(asset => {
-              const d = calculateDepreciation(asset, selectedYear, selectedMonth);
+              const d = calculateAssetDepreciation(asset, selectedYear, selectedMonth);
               return (
                 <tr key={asset.id} className="group hover:bg-coffee-50/50 transition-colors">
                   <td className="px-3 py-4">
