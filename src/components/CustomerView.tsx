@@ -1355,11 +1355,11 @@ function MergeConfirmModal({ shopId, selectedCustomers, onClose, onFinish }: {
       // Update primary Customer document
       const updatedPrimary: Customer = {
         ...primary,
-        phone,
-        email,
-        lineId,
-        birthday,
-        gender,
+        phone: phone || '',
+        email: email || '',
+        lineId: lineId || '',
+        birthday: birthday || '',
+        gender: gender || '不選擇',
         creditBalance: mergedCredit,
         unpaidBalance: mergedUnpaid,
         purchases: mergedPurchases,
