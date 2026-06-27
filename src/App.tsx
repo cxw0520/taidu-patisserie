@@ -45,7 +45,7 @@ const CostView = lazy(() => import('./components/CostView'));
 const InventoryView = lazy(() => import('./components/InventoryView'));
 const CustomerView = lazy(() => import('./components/CustomerView'));
 const SettingsView = lazy(() => import('./components/settings/SettingsView'));
-const HRView = lazy(() => import('./components/hr/HRView'));
+
 
 const DEFAULT_SETTINGS: Settings = {
   giftItems: [
@@ -81,7 +81,7 @@ const NavMenuItem = ({ label, icon, onClick, active }: { key?: string | number, 
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers' | 'pos' | 'settings' | 'hr'>(() => {
+  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers' | 'pos' | 'settings'>(() => {
     return (localStorage.getItem('app_active_tab') as any) || 'journal';
   });
   const [globalSubTabs, setGlobalSubTabs] = useState<Record<string, string>>(() => {
@@ -110,7 +110,7 @@ export default function App() {
   const openDrawer = () => {
     const sectionMap: Record<string, string> = {
       journal: 'finance', daily: 'reports', monthly: 'reports',
-      hr: 'hr', inventory: 'operations', cost: 'operations', customers: 'operations',
+      inventory: 'operations', cost: 'operations', customers: 'operations',
     };
     setOpenSection(sectionMap[activeTab] || null);
     setIsDrawerOpen(true);
@@ -347,12 +347,7 @@ export default function App() {
     } else if (activeTab === 'cost') {
       category = '營運管理';
       sub = '成本分析';
-    } else if (activeTab === 'hr') {
-      category = '人事與薪資';
-      const s = globalSubTabs['hr'] || 'roster';
-      if (s === 'roster') sub = '排班管理';
-      else if (s === 'attendance') sub = '出勤打卡紀錄';
-      else if (s === 'payroll') sub = '薪資結算總表';
+
     } else if (activeTab === 'customers') {
       category = '營運管理';
       sub = '顧客資料';
@@ -487,16 +482,7 @@ export default function App() {
                     ] : []),
                   ]
                 },
-                {
-                  key: 'hr',
-                  label: '人事與薪資',
-                  show: hasPermission('hr'),
-                  items: [
-                    { label: '排班管理', icon: <Calendar />, tab: 'hr', sub: 'roster' },
-                    { label: '出勤打卡紀錄', icon: <Clock />, tab: 'hr', sub: 'attendance' },
-                    { label: '薪資結算總表', icon: <FileSpreadsheet />, tab: 'hr', sub: 'payroll' },
-                  ]
-                },
+
                 {
                   key: 'operations',
                   label: '營運管理',
@@ -601,7 +587,6 @@ export default function App() {
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-coffee-800"></div>
               </div>
             }>
-              {activeTab === 'hr' && <HRView forcedSubTab={globalSubTabs['hr']} shopId={shopId} operators={operators} settings={settings} />}
               {activeTab === 'journal' && <JournalView forcedSubTab={globalSubTabs['journal']} selectedYear={selectedYear} shopId={shopId} settings={settings} />}
               {activeTab === 'daily' && <DailyView forcedSubTab={globalSubTabs['daily']} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} onNavigateToTab={navigateTo} />}
               {activeTab === 'pos' && <DailyView forcedSubTab={'pos'} currentDate={currentDate} setCurrentDate={setCurrentDate} settings={settings} shopId={shopId} onNavigateToTab={navigateTo} />}

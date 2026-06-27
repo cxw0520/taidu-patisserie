@@ -41,7 +41,7 @@ const PERMISSION_LABELS: Record<keyof Permissions, string> = {
 
 export default function SettingsView({ shopId, roles, operators, settings }: Props) {
   const today = new Date();
-  const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators' | 'business_days' | 'operations' | 'hr_rules' | 'finance' | 'accounting' | 'multi_account' | 'promo_rules'>('operators');
+  const [activeTab, setActiveTab] = useState<'shop' | 'roles' | 'operators' | 'business_days' | 'operations' | 'finance' | 'accounting' | 'multi_account' | 'promo_rules'>('operators');
   const [promoRules, setPromoRules] = useState<any[]>(settings?.promoRules || []);
   const [editingRule, setEditingRule] = useState<any | null>(null);
   
@@ -249,9 +249,7 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
         <button onClick={() => setActiveTab('operations')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'operations' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
           🛡️ 現場營運規則
         </button>
-        <button onClick={() => setActiveTab('hr_rules')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'hr_rules' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
-          👥 人事與薪資規則
-        </button>
+
         <button onClick={() => setActiveTab('accounting')} className={cn("px-6 py-3 rounded-xl font-bold flex items-center gap-2 transition-all whitespace-nowrap", activeTab === 'accounting' ? "bg-coffee-600 text-white shadow-md" : "bg-white text-coffee-600 hover:bg-coffee-50 border border-coffee-100")}>
           🧾 帳務與支出分類
         </button>
@@ -787,100 +785,6 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
                 </div>
                 <p className="text-[10px] text-coffee-400 mt-1">配合先進先出批號管理，當食材到期日小於此天數時，系統將在首頁亮起紅燈。</p>
               </div>
-              <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-4">
-                <Save className="w-5 h-5" /> 儲存設定
-              </button>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'hr_rules' && (
-          <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-coffee-100">
-            <h2 className="text-xl font-bold text-coffee-800 mb-6">人事薪資與打卡規則</h2>
-            <div className="space-y-8 max-w-2xl">
-              <div>
-                <h3 className="text-md font-bold text-coffee-800 mb-4 border-b border-coffee-100 pb-2">⏰ 打卡進位與寬限期 (Time Rounding)</h3>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div>
-                    <label className="block text-xs font-bold text-coffee-600 mb-2">計薪基本區間</label>
-                    <select value={timeRoundingInterval} onChange={e => setTimeRoundingInterval(Number(e.target.value) as any)} className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none font-bold text-coffee-800">
-                      <option value={1}>1 分鐘 (不進位)</option>
-                      <option value={15}>15 分鐘</option>
-                      <option value={30}>30 分鐘</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-coffee-600 mb-2">上班遲到寬限期</label>
-                    <div className="relative">
-                      <input type="number" min="0" value={lateGracePeriod} onChange={e => setLateGracePeriod(Number(e.target.value))} className="w-full border border-coffee-200 rounded-xl p-3 pr-10 focus:ring-2 focus:ring-coffee-500 outline-none font-bold text-coffee-800" />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-coffee-400">分鐘</span>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold text-coffee-600 mb-2">下班提早容忍值</label>
-                    <div className="relative">
-                      <input type="number" min="0" value={earlyLeaveTolerance} onChange={e => setEarlyLeaveTolerance(Number(e.target.value))} className="w-full border border-coffee-200 rounded-xl p-3 pr-10 focus:ring-2 focus:ring-coffee-500 outline-none font-bold text-coffee-800" />
-                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm font-bold text-coffee-400">分鐘</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="text-md font-bold text-coffee-800 mb-4 border-b border-coffee-100 pb-2">📈 加班費與國定假日倍率 (Overtime & Holiday)</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="bg-coffee-50/50 p-4 rounded-xl border border-coffee-100">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="font-bold text-sm text-coffee-800">第一段加班 (Tier 1)</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-coffee-500 font-bold">超過</span>
-                        <input type="number" value={overtimeTier1Hours} onChange={e => setOvertimeTier1Hours(Number(e.target.value))} className="w-12 text-center border border-coffee-200 rounded p-1 text-sm font-bold" />
-                        <span className="text-xs text-coffee-500 font-bold">小時</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-coffee-500">時薪倍率乘上</span>
-                      <div className="flex items-center gap-2">
-                        <input type="number" step="0.01" value={overtimeTier1Rate} onChange={e => setOvertimeTier1Rate(Number(e.target.value))} className="w-16 text-center border border-coffee-200 rounded p-1 text-sm font-bold text-danger-brand" />
-                        <span className="text-xs text-coffee-500 font-bold">倍</span>
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="bg-coffee-50/50 p-4 rounded-xl border border-coffee-100">
-                    <div className="flex items-center justify-between mb-3">
-                      <span className="font-bold text-sm text-coffee-800">第二段加班 (Tier 2)</span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-coffee-500 font-bold">超過</span>
-                        <input type="number" value={overtimeTier2Hours} onChange={e => setOvertimeTier2Hours(Number(e.target.value))} className="w-12 text-center border border-coffee-200 rounded p-1 text-sm font-bold" />
-                        <span className="text-xs text-coffee-500 font-bold">小時</span>
-                      </div>
-                    </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs text-coffee-500">時薪倍率乘上</span>
-                      <div className="flex items-center gap-2">
-                        <input type="number" step="0.01" value={overtimeTier2Rate} onChange={e => setOvertimeTier2Rate(Number(e.target.value))} className="w-16 text-center border border-coffee-200 rounded p-1 text-sm font-bold text-danger-brand" />
-                        <span className="text-xs text-coffee-500 font-bold">倍</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="bg-mint-brand/10 p-4 rounded-xl border border-mint-brand/20 md:col-span-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="font-bold text-sm text-mint-brand">🌟 國定假日出勤</div>
-                        <div className="text-[10px] text-mint-brand/70 mt-1">需於行事曆中將特定日期標註為國定假日</div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-mint-brand/80 font-bold">時薪倍率乘上</span>
-                        <input type="number" step="0.1" value={holidayPayRate} onChange={e => setHolidayPayRate(Number(e.target.value))} className="w-16 text-center border border-mint-brand/30 rounded p-1 text-sm font-bold text-mint-brand bg-white" />
-                        <span className="text-xs text-mint-brand/80 font-bold">倍</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
               <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-4">
                 <Save className="w-5 h-5" /> 儲存設定
               </button>
