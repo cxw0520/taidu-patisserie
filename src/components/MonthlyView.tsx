@@ -714,7 +714,14 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
             if (o.status === '匯款') remit += o.actualAmt || 0;
             else if (o.status === '現結') cash += o.actualAmt || 0;
             else if (o.status === '儲值金扣款') prepaidPay += o.actualAmt || 0;
-            else if (o.status === '未結帳款' || o.status === '已收帳款' || o.status === '已付訂金') ar += o.actualAmt || 0;
+            else if (o.status === '未結帳款' || o.status === '已收帳款' || o.status === '已付訂金') {
+              const collectedCash = parseNum((o as any).arCollectedCash);
+              const collectedRemit = parseNum((o as any).arCollectedRemit);
+              const remaining = Math.max(0, (o.actualAmt || 0) - collectedCash - collectedRemit);
+              ar += remaining;
+              cash += collectedCash;
+              remit += collectedRemit;
+            }
           }
 
         // Calculate sold items / components
