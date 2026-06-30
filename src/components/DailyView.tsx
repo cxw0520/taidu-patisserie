@@ -238,6 +238,69 @@ export default function DailyView({
   const pushOfflineAction = (action: OfflineAction) => {
     setOfflineActions(prev => {
       if (prev.some(a => a.id === action.id)) return prev;
+
+      // Coalescing updates to avoid duplicates and redundant conflicts
+      if (action.type === 'update_order') {
+        const { orderId, patch } = action.payload;
+        
+        // 1. If there's a pending add_order for this order, merge patch directly into it
+        const addIdx = prev.findIndex(a => a.type === 'add_order' && a.payload.id === orderId);
+        if (addIdx !== -1) {
+          const next = [...prev];
+          next[addIdx] = {
+            ...next[addIdx],
+            payload: { ...next[addIdx].payload, ...patch }
+          };
+          return next;
+        }
+
+        // 2. If there's already a pending update_order for this order, merge patch into it
+        const updateIdx = prev.findIndex(a => a.type === 'update_order' && a.payload.orderId === orderId);
+        if (updateIdx !== -1) {
+          const next = [...prev];
+          next[updateIdx] = {
+            ...next[updateIdx],
+            payload: {
+              ...next[updateIdx].payload,
+              patch: { ...next[updateIdx].payload.patch, ...patch }
+            }
+          };
+          return next;
+        }
+      }
+
+      if (action.type === 'delete_order') {
+        const { orderId } = action.payload;
+        
+        // If there's an add_order for this, remove it completely from queue and skip delete_order
+        const hasAdd = prev.some(a => a.type === 'add_order' && a.payload.id === orderId);
+        if (hasAdd) {
+          return prev.filter(a => !(a.type === 'add_order' && a.payload.id === orderId) && !(a.type === 'update_order' && a.payload.orderId === orderId));
+        }
+
+        // Otherwise, remove any pending updates for this order since it's going to be deleted anyway
+        return [...prev.filter(a => !(a.type === 'update_order' && a.payload.orderId === orderId)), action];
+      }
+
+      if (action.type === 'update_daily') {
+        const patch = action.payload;
+        const dailyIdx = prev.findIndex(a => a.type === 'update_daily' && a.dateKey === action.dateKey);
+        if (dailyIdx !== -1) {
+          const next = [...prev];
+          const existingPatch = next[dailyIdx].payload;
+          next[dailyIdx] = {
+            ...next[dailyIdx],
+            payload: {
+              ...existingPatch,
+              inventory: { ...(existingPatch.inventory || {}), ...(patch.inventory || {}) },
+              ar: { ...(existingPatch.ar || {}), ...(patch.ar || {}) },
+              losses: [...(existingPatch.losses || []), ...(patch.losses || [])].filter((v, i, a) => a.findIndex(t => t.id === v.id) === i)
+            }
+          };
+          return next;
+        }
+      }
+
       return [...prev, action];
     });
   };
@@ -321,7 +384,7 @@ export default function DailyView({
                   updatedOrders[idx] = chosenValue;
                 }
                 await setDoc(docRef, { orders: updatedOrders }, { merge: true });
-                popOfflineAction(action.id);
+                setOfflineActions(prev => prev.filter(a => a.id !== action.id && !(a.type === 'update_order' && a.payload.orderId === orderId) && !(a.type === 'delete_order' && a.payload.orderId === orderId)));
                 setActiveConflict(null);
               }
             });
@@ -361,7 +424,7 @@ export default function DailyView({
               localValue: { ...serverInv, ...localInv },
               resolve: async (chosenValue) => {
                 await setDoc(docRef, { inventory: chosenValue }, { merge: true });
-                popOfflineAction(action.id);
+                setOfflineActions(prev => prev.filter(a => a.id !== action.id && !(a.type === 'update_daily' && a.dateKey === action.dateKey)));
                 setActiveConflict(null);
               }
             };
