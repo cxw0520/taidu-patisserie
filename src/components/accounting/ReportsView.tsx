@@ -74,7 +74,7 @@ const calculateBalances = (entries: JournalEntry[], coa: COAItem[], start: Date 
   return balances;
 };
 
-export default function ReportsView({ entries, coa, selectedYear, purchases = [], expenses = [], monthlyData = [], settings }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number, purchases?: any[], expenses?: any[], monthlyData?: any[], settings?: any }) {
+export default function ReportsView({ entries, coa, selectedYear, purchases = [], expenses = [], monthlyData = [], materials = [], settings }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number, purchases?: any[], expenses?: any[], monthlyData?: any[], materials?: any[], settings?: any }) {
   const [activeReport, setActiveReport] = useState<'is' | 'bs' | 'cf'>('is');
   const [hideZero, setHideZero] = useState(false);
   const [costMode, setCostMode] = useState<'cogs' | 'purchases'>('cogs');
@@ -106,23 +106,38 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
     const startStr = start ? fmt(start) : '';
     const endStr   = end   ? fmt(end)   : '';
 
-    // ① 進貨管理（purchases collection）
-    let total = purchases
-      .filter(p => {
-        const ds = (p.date || '').replace(/\//g, '-');
-        if (startStr && ds < startStr) return false;
-        if (endStr   && ds > endStr)   return false;
-        return true;
-      })
-      .reduce((sum, p) => sum + (Number(p.totalAmount) || 0), 0);
+    const startMonth = start ? `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}` : '';
+    const endMonth = end ? `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}` : '';
 
-    // ② 支出總表中標記為食材/包材/物流的分類
+    let total = 0;
+
+    // ① 進貨管理（purchases collection）- Sum only ingredients and packaging lines like MonthlyView!
+    const filteredPurchases = purchases.filter(p => {
+      const ds = (p.date || '').replace(/\//g, '-');
+      if (startStr && ds < startStr) return false;
+      if (endStr   && ds > endStr)   return false;
+      return true;
+    });
+
+    filteredPurchases.forEach((p: any) => {
+      (p.lines || []).forEach((l: any) => {
+        const mat = materials.find((m: any) => m.id === l.materialId);
+        if (mat?.category === '食材' || !mat?.category) { // 預設食材
+          total += Number(l.amount) || 0;
+        } else if (mat?.category === '包材') {
+          total += Number(l.amount) || 0;
+        }
+      });
+    });
+
+    // ② 支出總表中標記為食材/包材/物流的分類 - Filter by yearMonth to align with MonthlyView's query!
     const expenseCategories: any[] = settings?.expenseCategories || [];
     (expenses || []).forEach((e: any) => {
       if (e.isTransfer) return;
-      const ds = (e.dateKey || e.date || '').replace(/\//g, '-');
-      if (startStr && ds < startStr) return;
-      if (endStr   && ds > endStr)   return;
+      const ym = e.yearMonth || (e.dateKey || e.date || '').substring(0, 7);
+      if (startMonth && ym < startMonth) return;
+      if (endMonth && ym > endMonth) return;
+
       (e.lines || []).forEach((line: any) => {
         const cat = expenseCategories.find((c: any) => c.id === line.categoryId);
         if (!cat) return;
@@ -133,15 +148,12 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
           cat.name.includes('貼紙') || cat.name.includes('名片') ||
           cat.name.includes('運費') || cat.name.includes('物流') || cat.name.includes('宅配')
         ) {
-          total += line.amount;
+          total += Number(line.amount) || 0;
         }
       });
     });
 
     // ③ 物流月結金額 (monthlyData)
-    const startMonth = start ? `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}` : '';
-    const endMonth = end ? `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}` : '';
-
     (monthlyData || []).forEach((m: any) => {
       if (startMonth && m.id < startMonth) return;
       if (endMonth && m.id > endMonth) return;
@@ -151,7 +163,7 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
     });
 
     return total;
-  }, [purchases, expenses, monthlyData, settings, isFilter, isCustomDates, selectedYear]);
+  }, [purchases, expenses, monthlyData, materials, settings, isFilter, isCustomDates, selectedYear]);
 
   const revenueTotal = useMemo(() => {
     return (Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '收入').reduce((s, a) => s + a.balance, 0);
