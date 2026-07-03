@@ -308,6 +308,54 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
       </div>
 
       <div className="max-w-4xl mx-auto space-y-8">
+        {/* 🔍 差額 2,211 元偵錯工具 */}
+        <div className="bg-amber-50/80 border border-amber-200 p-6 rounded-2xl text-xs text-amber-900 shadow-sm">
+          <h4 className="font-bold text-sm mb-3 flex items-center gap-2">🔍 差額 2,211 元現場診斷分析</h4>
+          <div className="space-y-3">
+            <div>
+              <span className="font-bold block mb-1">1. 進貨單「整單金額」與「食材/包材明細累加」不符清單：</span>
+              <ul className="list-disc pl-5 space-y-1">
+                {purchases.map(p => {
+                  let lineSum = 0;
+                  (p.lines || []).forEach((l: any) => {
+                    const mat = materials.find((m: any) => m.id === l.materialId);
+                    if (mat?.category === '食材' || !mat?.category || mat?.category === '包材') {
+                      lineSum += Number(l.amount) || 0;
+                    }
+                  });
+                  const diff = p.totalAmount - lineSum;
+                  if (Math.abs(diff) > 0.01) {
+                    return (
+                      <li key={p.id} className="text-amber-800">
+                        進貨日期：{p.date} ｜ 廠商：{p.vendor} ｜ 整單金額：${p.totalAmount} ｜ 食材包材加總：${lineSum} ｜ <strong className="text-rose-600">差額：${diff}</strong> (備註：{p.notes || '無'})
+                      </li>
+                    );
+                  }
+                  return null;
+                })}
+              </ul>
+            </div>
+            <div className="pt-2 border-t border-amber-200">
+              <span className="font-bold block mb-1">2. 支出總表「歸屬月份 (yearMonth)」與「付款日期 (dateKey)」跨月清單：</span>
+              <ul className="list-disc pl-5 space-y-1">
+                {expenses.map(e => {
+                  const ds = (e.dateKey || e.date || '').replace(/\//g, '-');
+                  const ym = e.yearMonth || ds.substring(0, 7);
+                  const payMonth = ds.substring(0, 7);
+                  if (ym !== payMonth) {
+                    return (
+                      <li key={e.id} className="text-amber-800">
+                        付款日期：{ds} ｜ 歸屬月份：{ym} ｜ 對象：{e.vendor} ｜ 類別：{settings?.expenseCategories?.find((c: any) => c.id === e.lines?.[0]?.categoryId)?.name || '未設'} ｜ 金額：${e.totalAmount}
+                      </li>
+                    );
+                  }
+                  return null;
+                })}
+              </ul>
+            </div>
+          </div>
+        </div>
+
         {activeReport === 'is' && (
           <div className="glass-panel p-10 bg-white border border-coffee-50 flex flex-col min-h-[600px]">
             <div className="flex justify-between items-center mb-10">
