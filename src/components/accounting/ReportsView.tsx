@@ -74,7 +74,7 @@ const calculateBalances = (entries: JournalEntry[], coa: COAItem[], start: Date 
   return balances;
 };
 
-export default function ReportsView({ entries, coa, selectedYear, purchases = [] }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number, purchases?: any[] }) {
+export default function ReportsView({ entries, coa, selectedYear, purchases = [], expenses = [], settings }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number, purchases?: any[], expenses?: any[], settings?: any }) {
   const [activeReport, setActiveReport] = useState<'is' | 'bs' | 'cf'>('is');
   const [hideZero, setHideZero] = useState(false);
   const [costMode, setCostMode] = useState<'cogs' | 'purchases'>('cogs');
@@ -99,18 +99,47 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
     return calculateBalances(filteredEntries, coa, start, end);
   }, [entries, coa, isFilter, isCustomDates, selectedYear]);
 
-  // purchases total in selected range
+  // purchases + expense-tagged variable cost in selected range (mirrors MonthlyView logic)
   const purchaseTotal = useMemo(() => {
     const { start, end } = getFilterRange(isFilter, isCustomDates, selectedYear);
-    return purchases
+    const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    const startStr = start ? fmt(start) : '';
+    const endStr   = end   ? fmt(end)   : '';
+
+    // ① 進貨管理（purchases collection）
+    let total = purchases
       .filter(p => {
-        const d = new Date(p.date);
-        if (start && d < start) return false;
-        if (end && d > end) return false;
+        const ds = (p.date || '').replace(/\//g, '-');
+        if (startStr && ds < startStr) return false;
+        if (endStr   && ds > endStr)   return false;
         return true;
       })
       .reduce((sum, p) => sum + (Number(p.totalAmount) || 0), 0);
-  }, [purchases, isFilter, isCustomDates, selectedYear]);
+
+    // ② 支出總表中標記為食材/包材/物流的分類
+    const expenseCategories: any[] = settings?.expenseCategories || [];
+    (expenses || []).forEach((e: any) => {
+      if (e.isTransfer) return;
+      const ds = (e.dateKey || e.date || '').replace(/\//g, '-');
+      if (startStr && ds < startStr) return;
+      if (endStr   && ds > endStr)   return;
+      (e.lines || []).forEach((line: any) => {
+        const cat = expenseCategories.find((c: any) => c.id === line.categoryId);
+        if (!cat) return;
+        if (
+          cat.isMaterialCost ||
+          cat.name.includes('食材') || cat.name.includes('原料') ||
+          cat.name.includes('包材') || cat.name.includes('包裝') ||
+          cat.name.includes('貼紙') || cat.name.includes('名片') ||
+          cat.name.includes('運費') || cat.name.includes('物流') || cat.name.includes('宅配')
+        ) {
+          total += line.amount;
+        }
+      });
+    });
+
+    return total;
+  }, [purchases, expenses, settings, isFilter, isCustomDates, selectedYear]);
 
   const revenueTotal = useMemo(() => {
     return (Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '收入').reduce((s, a) => s + a.balance, 0);
@@ -284,7 +313,7 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
                     costMode === 'purchases' ? "bg-white text-coffee-850 shadow-sm" : "text-coffee-400 hover:text-coffee-600"
                   )}
                 >
-                  🛒 即期採購成本制 (Purchases)
+                  📦 當期變動成本 (進貨管理 + 支出總表食材/包材/物流)
                 </button>
               </div>
             </div>
@@ -299,7 +328,7 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
                   <div className="text-[10px] font-bold text-coffee-300 uppercase tracking-widest mb-1 ml-2">營業成本 (當期進貨總額)</div>
                   <div className="space-y-1">
                     <div className="flex justify-between items-center py-2 px-4 hover:bg-coffee-50/50 rounded-xl transition-colors group">
-                      <span className="text-sm font-bold text-coffee-700 group-hover:text-coffee-950">進貨單累計總額 (進貨管理)</span>
+                      <span className="text-sm font-bold text-coffee-700 group-hover:text-coffee-950">當期變動成本 (進貨管理 + 支出總表食材/包材/物流)</span>
                       <span className="font-mono font-bold text-lg text-coffee-600/80">${fmt(purchaseTotal)}</span>
                     </div>
                   </div>
