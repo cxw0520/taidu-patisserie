@@ -37,6 +37,8 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   const [physicalCounts, setPhysicalCounts] = useState<import('../types').PhysicalCountRecord[]>([]);
   const [assets, setAssets] = useState<import('../types').FixedAsset[]>([]);
   const [depLog, setDepLog] = useState<Record<string, boolean>>({});
+  const [logisticsVoucherLog, setLogisticsVoucherLog] = useState<Record<string, boolean>>({});
+  const [coa, setCoa] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<'finance' | 'product'>('finance');
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
 
@@ -93,26 +95,35 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
         const qMonths = query(collection(db, 'shops', shopId, 'monthly'));
         const monthSnaps = await getDocs(qMonths);
         
-        let previousDefs = [
-          { id: uid(), label: '店鋪房租', amount: 0 },
-          { id: uid(), label: '水電雜支', amount: 0 },
-          { id: uid(), label: '人事費用', amount: 0 },
-          { id: uid(), label: '行銷廣告', amount: 0 },
-          { id: uid(), label: '網路費', amount: 0 }
-        ];
-
-        if (!monthSnaps.empty) {
-          const sorted = monthSnaps.docs.map(d => d.data()).sort((a,b) => b.ym?.localeCompare(a.ym));
+        if (monthSnaps.docs.length > 0) {
+          const sorted = monthSnaps.docs
+            .map(d => ({ id: d.id, ...d.data() } as any))
+            .sort((a, b) => b.id.localeCompare(a.id));
           const latest = sorted[0];
-          if (latest && Array.isArray(latest.fixedCostsList)) {
-            // Carry over definitions but reset amounts to 0 to prevent accidental charge? 
-            // The prompt says "新增後的保留紀錄下月可以不用再重新新增". 
-            // It might imply keeping amounts or resetting. Let's keep amounts! Users usually have same rent.
-            previousDefs = latest.fixedCostsList.map((c: any) => ({ ...c, id: uid() })); // Assign new IDs or keep same? better keep new or same. Let's keep same.
-            previousDefs = latest.fixedCostsList;
+          if (Array.isArray(latest.fixedCostsList)) {
+            setFixedCosts(latest.fixedCostsList.map((f: any) => ({ ...f, amount: 0 })));
+          } else {
+            setFixedCosts([
+              { id: 'rent', label: '店鋪房租', amount: 0 },
+              { id: 'util', label: '水電雜支', amount: 0 },
+              { id: 'staff', label: '人事費用', amount: 0 },
+              { id: 'maint', label: '設備維修', amount: 0 },
+              { id: 'misc', label: '會計雜項', amount: 0 },
+              { id: 'ads', label: '行銷廣告', amount: 0 },
+            ]);
           }
+        } else {
+          setFixedCosts([
+            { id: 'rent', label: '店鋪房租', amount: 0 },
+            { id: 'util', label: '水電雜支', amount: 0 },
+            { id: 'staff', label: '人事費用', amount: 0 },
+            { id: 'maint', label: '設備維修', amount: 0 },
+            { id: 'misc', label: '會計雜項', amount: 0 },
+            { id: 'ads', label: '行銷廣告', amount: 0 },
+          ]);
         }
-        setFixedCosts(previousDefs);
+        setCostOverrides({});
+        setMonthlyLogisticsVal(0);
       }
     });
 
@@ -129,7 +140,7 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
       where('yearMonth', '==', selectedMonth)
     );
     const unsubExpenses = onSnapshot(qExpenses, (snap) => {
-      setExpenses(snap.docs.map(d => d.data() as import('../types').ExpenseRecord));
+      setExpenses(snap.docs.map(d => ({ id: d.id, ...d.data() } as import('../types').ExpenseRecord)));
     });
 
     const qPurchases = query(
@@ -162,7 +173,20 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
       if (snap.exists()) setDepLog(snap.data());
     });
 
-    return () => { unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); unsubExpenses(); unsubPurchases(); unsubCounts(); unsubAssets(); unsubDepLog(); };
+    const unsubLogisticsVoucherLog = onSnapshot(doc(db, 'shops', shopId, 'meta', 'logisticsVoucherLog'), (snap) => {
+      if (snap.exists()) setLogisticsVoucherLog(snap.data());
+    });
+
+    const unsubCoa = onSnapshot(doc(db, 'shops', shopId, 'meta', 'coa'), (snap) => {
+      if (snap.exists() && snap.data()?.list) {
+        setCoa(snap.data().list);
+      }
+    });
+
+    return () => { 
+      unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); unsubExpenses(); unsubPurchases(); unsubCounts(); unsubAssets(); unsubDepLog(); 
+      unsubLogisticsVoucherLog(); unsubCoa();
+    };
   }, [selectedMonth, shopId]);
 
   useEffect(() => {
@@ -405,6 +429,8 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
           physicalCounts={physicalCounts}
           assets={assets}
           depLog={depLog}
+          logisticsVoucherLog={logisticsVoucherLog}
+          coa={coa}
           showARModal={showARModal}
           setShowARModal={setShowARModal}
           selectedBuyer={selectedBuyer}
@@ -617,7 +643,7 @@ function ARReconciliationModal({ monthData, settings, shopId, onClose, selectedB
   );
 }
 
-function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, expenses, purchases, physicalCounts, assets, depLog, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
+function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, expenses, purchases, physicalCounts, assets, depLog, logisticsVoucherLog, coa, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
   const [showFoodCostModal, setShowFoodCostModal] = useState(false);
   const [showPRModal, setShowPRModal] = useState(false);
   const stats = useMemo(() => {
@@ -968,6 +994,69 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
 
       await setDoc(doc(db, 'shops', shopId, 'meta', 'depLog'), { ...depLog, [key]: true }, { merge: true });
       alert('折舊傳票產生成功！');
+    } catch (err) {
+      console.error(err);
+      alert('產生失敗');
+    }
+  };
+
+  const handleRecordLogisticsVoucher = async () => {
+    const key = `${stats.selYear}-${stats.selMon}`;
+    if (logisticsVoucherLog[key] || !monthlyLogisticsVal) return;
+
+    if (!confirm(`確定要產生 ${stats.selYear}年${stats.selMon}月 的物流月結應付傳票嗎？`)) return;
+
+    let debitAccount = coa.find((c: any) => c.name.includes('運費') || c.name.includes('物流')) || coa.find((c: any) => c.id === '5103');
+    let creditAccount = coa.find((c: any) => c.name.includes('應付帳款') || c.name.includes('應付')) || coa.find((c: any) => c.id === '2101');
+
+    const debitId = debitAccount?.id || '5103';
+    const debitName = debitAccount?.name || '物流成本';
+    const creditId = creditAccount?.id || '2101';
+    const creditName = creditAccount?.name || '應付帳款';
+
+    const lastDay = new Date(stats.selYear, stats.selMon, 0);
+    const dateStr = lastDay.toISOString().split('T')[0];
+    const yy = String(stats.selYear).slice(-2);
+    const mm = String(stats.selMon).padStart(2, '0');
+    const dd = String(lastDay.getDate()).padStart(2, '0');
+    const datePrefix = `${yy}${mm}${dd}`;
+
+    try {
+      const q = query(
+        collection(db, 'shops', shopId, 'entries'),
+        where('date', '==', dateStr)
+      );
+      const snap = await getDocs(q);
+      const todayVouchers = snap.docs
+        .map(doc => doc.data().voucherNo || doc.id)
+        .filter(id => id && id.startsWith(datePrefix));
+
+      let maxSeq = 0;
+      if (todayVouchers.length > 0) {
+        const seqs = todayVouchers.map(id => parseInt(id.slice(-2), 10) || 0);
+        maxSeq = Math.max(...seqs);
+      }
+
+      const seq = maxSeq + 1;
+      const voucherNo = `${datePrefix}${String(seq).padStart(2, '0')}`;
+
+      const entry = {
+        id: voucherNo,
+        voucherNo,
+        date: dateStr,
+        year: stats.selYear,
+        description: `${stats.selMon}月份黑貓運費`,
+        lines: [
+          { id: uid(), type: 'debit', accountId: debitId, accountName: debitName, amount: monthlyLogisticsVal, lineDescription: `${stats.selMon}月份黑貓運費` },
+          { id: uid(), type: 'credit', accountId: creditId, accountName: creditName, amount: monthlyLogisticsVal, lineDescription: `${stats.selMon}月份黑貓運費` }
+        ],
+        debitTotal: monthlyLogisticsVal,
+        creditTotal: monthlyLogisticsVal
+      };
+
+      await setDoc(doc(db, 'shops', shopId, 'entries', voucherNo), entry);
+      await setDoc(doc(db, 'shops', shopId, 'meta', 'logisticsVoucherLog'), { ...logisticsVoucherLog, [key]: true }, { merge: true });
+      alert('物流月結傳票產生成功！');
     } catch (err) {
       console.error(err);
       alert('產生失敗');
@@ -1638,6 +1727,17 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                 <div className="flex justify-between items-center text-coffee-600">
                    <span className="font-bold text-xs pl-4">日報表運費實支</span>
                    <span className="font-mono font-bold">${fmt(stats.logSpent)}</span>
+                </div>
+                <div className="flex justify-end mt-1">
+                  <button 
+                    onClick={handleRecordLogisticsVoucher}
+                    disabled={logisticsVoucherLog[`${stats.selYear}-${stats.selMon}`] || !monthlyLogisticsVal}
+                    className={cn("text-[10px] px-2 py-0.5 rounded font-bold transition",
+                      logisticsVoucherLog[`${stats.selYear}-${stats.selMon}`] ? "bg-green-100 text-green-700 cursor-not-allowed" : "bg-blue-100 text-blue-700 hover:bg-blue-200"
+                    )}
+                  >
+                    {logisticsVoucherLog[`${stats.selYear}-${stats.selMon}`] ? '已產生運費傳票' : '產生本月運費傳票'}
+                  </button>
                 </div>
               </div>
             </div>

@@ -74,7 +74,7 @@ const calculateBalances = (entries: JournalEntry[], coa: COAItem[], start: Date 
   return balances;
 };
 
-export default function ReportsView({ entries, coa, selectedYear, purchases = [], expenses = [], settings }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number, purchases?: any[], expenses?: any[], settings?: any }) {
+export default function ReportsView({ entries, coa, selectedYear, purchases = [], expenses = [], monthlyData = [], settings }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number, purchases?: any[], expenses?: any[], monthlyData?: any[], settings?: any }) {
   const [activeReport, setActiveReport] = useState<'is' | 'bs' | 'cf'>('is');
   const [hideZero, setHideZero] = useState(false);
   const [costMode, setCostMode] = useState<'cogs' | 'purchases'>('cogs');
@@ -99,7 +99,7 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
     return calculateBalances(filteredEntries, coa, start, end);
   }, [entries, coa, isFilter, isCustomDates, selectedYear]);
 
-  // purchases + expense-tagged variable cost in selected range (mirrors MonthlyView logic)
+  // purchases + expense-tagged variable cost + monthly logistics fee in selected range
   const purchaseTotal = useMemo(() => {
     const { start, end } = getFilterRange(isFilter, isCustomDates, selectedYear);
     const fmt = (d: Date) => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
@@ -138,8 +138,20 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
       });
     });
 
+    // ③ 物流月結金額 (monthlyData)
+    const startMonth = start ? `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}` : '';
+    const endMonth = end ? `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, '0')}` : '';
+
+    (monthlyData || []).forEach((m: any) => {
+      if (startMonth && m.id < startMonth) return;
+      if (endMonth && m.id > endMonth) return;
+      if (m.monthlyLogisticsVal) {
+        total += Number(m.monthlyLogisticsVal) || 0;
+      }
+    });
+
     return total;
-  }, [purchases, expenses, settings, isFilter, isCustomDates, selectedYear]);
+  }, [purchases, expenses, monthlyData, settings, isFilter, isCustomDates, selectedYear]);
 
   const revenueTotal = useMemo(() => {
     return (Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '收入').reduce((s, a) => s + a.balance, 0);
