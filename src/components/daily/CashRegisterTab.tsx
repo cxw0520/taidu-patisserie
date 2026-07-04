@@ -900,6 +900,16 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                           <th className="p-3 bg-gray-50 border border-gray-300">營業淨額 (含運費、含預購取貨、不含儲值及預購付款)</th>
                           <td className="p-3 border border-gray-300 font-mono font-bold text-lg text-rose-700 bg-rose-50/20">${fmt(metrics?.recv || 0)}</td>
                         </tr>
+                        <tr>
+                          <th className="p-3 bg-gray-50 border border-gray-300">來客數 (總筆數)</th>
+                          <td className="p-3 border border-gray-300 font-mono">{dailyData.orders?.length || 0} 筆</td>
+                        </tr>
+                        <tr>
+                          <th className="p-3 bg-gray-50 border border-gray-300">客單價 (淨額/筆數)</th>
+                          <td className="p-3 border border-gray-300 font-mono">
+                            ${fmt((dailyData.orders?.length || 0) > 0 ? ((metrics?.recv || 0) / (dailyData.orders?.length || 1)) : 0)}
+                          </td>
+                        </tr>
                       </>
                     );
                   })()}
