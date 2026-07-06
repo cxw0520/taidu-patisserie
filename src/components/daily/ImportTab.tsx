@@ -434,7 +434,24 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
                           <span className="text-[10px] text-gray-400 font-mono">{o.recipientPhone}</span>
                         </div>
                       </td>
-                      <td className="p-2 text-left">{Object.keys(o.items).length} 項品項</td>
+                      <td className="p-2 text-left">
+                        <div className="flex flex-col gap-1 text-xs max-w-xs">
+                          {Object.entries(o.items || {}).map(([itemId, qty]) => {
+                            const item = [
+                              ...(settings.giftItems || []),
+                              ...(settings.singleItems || []),
+                              ...(settings.customCategories || []).flatMap((c: any) => c.items || [])
+                            ].find(i => i?.id === itemId);
+                            const name = item ? item.name : itemId;
+                            return (
+                              <div key={itemId} className="flex justify-between items-center bg-gray-50 px-2 py-1 rounded border border-gray-100/80 gap-2">
+                                <span className="font-bold text-coffee-800 truncate">{name}</span>
+                                <span className="font-mono text-coffee-500 font-bold bg-white px-1.5 py-0.5 rounded border border-gray-200 shrink-0">x{qty as number}</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </td>
                       <td className="p-2 font-bold text-rose-brand font-mono text-right">${fmt(o.prodAmt)}</td>
                     </tr>
                   ))}
