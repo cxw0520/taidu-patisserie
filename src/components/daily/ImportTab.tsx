@@ -58,9 +58,16 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
 
   const parseDateFromCell = (raw: string) => {
     const s = (raw || '').trim().replace(/\//g, '-');
-    const m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
-    if (!m) return '';
-    return `${m[1]}-${String(Number(m[2])).padStart(2, '0')}-${String(Number(m[3])).padStart(2, '0')}`;
+    let m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) {
+      return `${m[1]}-${String(Number(m[2])).padStart(2, '0')}-${String(Number(m[3])).padStart(2, '0')}`;
+    }
+    m = s.match(/^(\d{1,2})-(\d{1,2})$/);
+    if (m) {
+      const year = currentDate ? currentDate.split('-')[0] : String(new Date().getFullYear());
+      return `${year}-${String(Number(m[1])).padStart(2, '0')}-${String(Number(m[2])).padStart(2, '0')}`;
+    }
+    return '';
   };
 
   const processImport = async () => {
@@ -69,7 +76,8 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
       if (!raw) return alert("請貼上資料");
 
       const Papa = (await import('papaparse')).default;
-      const { data } = Papa.parse(raw, { skipEmptyLines: 'greedy' });
+      const delimiter = raw.includes('\t') ? '\t' : undefined;
+      const { data } = Papa.parse(raw, { skipEmptyLines: 'greedy', delimiter });
       const rows = data as string[][];
 
       if (rows.length < 2) return alert("資料格式不正確 (需包含標題列)");
@@ -90,9 +98,9 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
       const idxAddr = getIdx(['宅配地址', '地址', '收件地址']);
       const idxRecipientName = getIdx(['收件人姓名']);
       const idxRecipientStatus = getIdx(['收件人']);
-      const idxRecipientPhone = getIdx(['收件人電話']);
-      const idxStoreDate = getIdx(['預約取貨日期', '店取', '取貨日']);
-      const idxShipDate = getIdx(['宅配出貨日', '出貨', '出貨日']);
+      const idxRecipientPhone = getIdx(['收件人電話', '收件人聯絡電話']);
+      const idxStoreDate = getIdx(['預約取貨日期', '店取', '取貨日', '取貨/宅配', '寄出日期', '出貨日期', '日期']);
+      const idxShipDate = getIdx(['宅配出貨日', '出貨', '出貨日', '寄出日期', '出貨日期']);
       const idxMethod = getIdx(['取貨方式', '物流', '運送方式']);
       const idxEmail = getIdx(['電子郵件', '信箱', 'Email', 'email', 'e-mail']);
 
