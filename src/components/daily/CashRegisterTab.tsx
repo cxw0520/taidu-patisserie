@@ -1427,7 +1427,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
           </div>
     
           {/* Right: Cart (4 cols) */}
-          <div className="lg:col-span-4 bg-white border border-coffee-100 rounded-3xl flex flex-col overflow-hidden shadow-lg print:hidden">
+          <div className="lg:col-span-4 lg:sticky lg:top-24 lg:h-[calc(100vh-160px)] bg-white border border-coffee-100 rounded-3xl flex flex-col overflow-hidden shadow-lg print:hidden">
             <div className="p-6 border-b border-coffee-50 bg-coffee-50/50">
               <h3 className="font-bold text-coffee-800 flex items-center gap-2">
                 <ShoppingBag className="w-5 h-5 text-rose-brand" /> 購物車明細
