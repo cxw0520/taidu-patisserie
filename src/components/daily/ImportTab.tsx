@@ -114,10 +114,11 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
         const isGBHeader = cleanH.includes('禮盒') || cleanH.includes('盒');
         const isSGHeader = cleanH.includes('單顆') || cleanH.includes('個') || cleanH.includes('單');
 
-        // 建立正規化函式：過濾掉所有的全半形括號與空白，並將全形英數轉半形且轉小寫
+        // 建立正規化函式：過濾掉所有的全半形括號與空白，並將全形英數轉半形且轉小寫，並統一擂茶的雷/擂字
         const normalize = (s: string) => s
           .replace(/[\s\(\)（）]/g, '')
           .replace(/[\uFF01-\uFF5E]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0))
+          .replace(/雷/g, '擂')
           .toLowerCase();
         const normH = normalize(cleanH);
 
@@ -154,6 +155,20 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
           return normH.includes(normI) || normI.includes(normH);
         });
 
+        // 2.5 備用機制：如果因為分流錯誤（例如巨無霸在單顆/禮盒分類不同）沒找到，就搜尋全部商品池
+        if (!bestMatch) {
+          const fallbackPool = [
+            ...(settings.giftItems || []),
+            ...(settings.singleItems || []),
+            ...allCustomItems
+          ];
+          bestMatch = fallbackPool.find((i) => {
+            if (!i.name) return false;
+            const normI = normalize(i.name);
+            return normH.includes(normI) || normI.includes(normH);
+          });
+        }
+
         // 3. 救援機制：如果真的找不到，再退回最寬鬆的口味關鍵字搜尋
         if (!bestMatch) {
           const tryKeywords = (pool: any[]) => {
@@ -164,7 +179,11 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
             if (normH.includes('抹茶')) return pool.find(i => i.name.includes('抹茶'));
             return null;
           };
-          bestMatch = tryKeywords(searchPool);
+          bestMatch = tryKeywords(searchPool) || tryKeywords([
+            ...(settings.giftItems || []),
+            ...(settings.singleItems || []),
+            ...allCustomItems
+          ]);
         }
 
         if (bestMatch && !itemMap.some((m) => m.colIdx === colIdx)) {
