@@ -9,11 +9,21 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == shopId;
     }
 
+    function isLinked(shopId) {
+      return isSignedIn() && 
+        exists(/databases/$(database)/documents/user_shops/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/user_shops/$(request.auth.uid)).data.targetShopId == shopId;
+    }
+
+    match /user_shops/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+
     match /shops/{shopId} {
-      allow read, write: if isOwner(shopId);
+      allow read, write: if isOwner(shopId) || isLinked(shopId);
 
       match /{document=**} {
-        allow read, write: if isOwner(shopId);
+        allow read, write: if isOwner(shopId) || isLinked(shopId);
       }
     }
 
