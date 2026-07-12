@@ -110,6 +110,8 @@ export interface Item {
   name: string;
   price: number;
   active: boolean;
+  activePOS?: boolean;
+  activeReport?: boolean;
   category?: 'gift' | 'single' | string;
   recipe?: Record<string, number>;
   materialRecipe?: Record<string, number>;
@@ -206,9 +208,13 @@ export interface DailyReport {
   orders: Order[];
   dailyActive?: {
     giftItems?: Record<string, boolean>;
+    giftItemsPOS?: Record<string, boolean>;
     singleItems?: Record<string, boolean>;
+    singleItemsPOS?: Record<string, boolean>;
     packagingItems?: Record<string, boolean>;
+    packagingItemsPOS?: Record<string, boolean>;
     customCategories?: Record<string, Record<string, boolean>>;
+    customCategoriesPOS?: Record<string, Record<string, boolean>>;
   };
   ar: {
     accum: number;

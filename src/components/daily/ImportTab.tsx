@@ -323,11 +323,46 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
           existingData = snap.data();
           existingOrders = snap.data().orders || [];
         }
+        const newDailyActive = { ...(existingData.dailyActive || {}) };
+        orders.forEach(po => {
+          Object.keys(po.items || {}).forEach(itemId => {
+            if (settings.giftItems?.some(i => i.id === itemId)) {
+              if (!newDailyActive.giftItems) newDailyActive.giftItems = {};
+              newDailyActive.giftItems[itemId] = true;
+              if (!newDailyActive.giftItemsPOS) newDailyActive.giftItemsPOS = {};
+              newDailyActive.giftItemsPOS[itemId] = true;
+            } else if (settings.singleItems?.some(i => i.id === itemId)) {
+              if (!newDailyActive.singleItems) newDailyActive.singleItems = {};
+              newDailyActive.singleItems[itemId] = true;
+              if (!newDailyActive.singleItemsPOS) newDailyActive.singleItemsPOS = {};
+              newDailyActive.singleItemsPOS[itemId] = true;
+            } else if (settings.packagingItems?.some(i => i.id === itemId)) {
+              if (!newDailyActive.packagingItems) newDailyActive.packagingItems = {};
+              newDailyActive.packagingItems[itemId] = true;
+              if (!newDailyActive.packagingItemsPOS) newDailyActive.packagingItemsPOS = {};
+              newDailyActive.packagingItemsPOS[itemId] = true;
+            } else {
+              // Custom categories
+              settings.customCategories?.forEach(cat => {
+                if (cat.items?.some(i => i.id === itemId)) {
+                  if (!newDailyActive.customCategories) newDailyActive.customCategories = {};
+                  if (!newDailyActive.customCategories[cat.id]) newDailyActive.customCategories[cat.id] = {};
+                  newDailyActive.customCategories[cat.id][itemId] = true;
+                  
+                  if (!newDailyActive.customCategoriesPOS) newDailyActive.customCategoriesPOS = {};
+                  if (!newDailyActive.customCategoriesPOS[cat.id]) newDailyActive.customCategoriesPOS[cat.id] = {};
+                  newDailyActive.customCategoriesPOS[cat.id][itemId] = true;
+                }
+              });
+            }
+          });
+        });
 
         batch.set(ref, {
           ...existingData,
           date: dateKey,
-          orders: [...existingOrders, ...appended]
+          orders: [...existingOrders, ...appended],
+          dailyActive: newDailyActive
         }, { merge: true });
 
         if (dateKey === currentKey) {

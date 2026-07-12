@@ -700,7 +700,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
     ...(settings.giftItems || []),
     ...(settings.singleItems || []),
     ...(settings.customCategories || []).flatMap(c => c.items || [])
-  ].filter(i => i.active);
+  ].filter(i => i.activePOS ?? i.active);
 
   const validOrders = useMemo(() => {
     return (dailyData.orders || []).filter(o => o.status !== '已取消' && o.status !== '已刪除');

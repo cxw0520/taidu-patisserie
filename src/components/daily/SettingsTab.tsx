@@ -4,7 +4,7 @@ import { Settings, DailyReport, Order, Customer } from '../../types';
 import { uid, fmt, cn, parseNum, normalizeFlavorName } from '../../lib/utils';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, setDoc, writeBatch, collection, query, onSnapshot } from 'firebase/firestore';
-import { Plus, Trash2, Edit2, Check, X, GripVertical, Settings as SettingsIcon, RefreshCw, Gift, Cookie, Box, Package } from 'lucide-react';
+import { Plus, Trash2, Edit2, Check, X, GripVertical, Settings as SettingsIcon, RefreshCw, Gift, Cookie, Box, Package, ArrowUp, ArrowDown } from 'lucide-react';
 
 
 export default function SettingsTab({
@@ -36,7 +36,20 @@ export default function SettingsTab({
     }
   };
 
-  const handleToggle = (type: 'giftItems' | 'singleItems' | 'packagingItems', itemId: string, active: boolean) => {
+  const handleTogglePOS = (type: 'giftItems' | 'singleItems' | 'packagingItems', itemId: string, active: boolean) => {
+    const key = (type + 'POS') as any;
+    updateDaily({
+      dailyActive: {
+        ...(dailyActive || {}),
+        [key]: {
+          ...((dailyActive && dailyActive[key]) || {}),
+          [itemId]: active,
+        },
+      },
+    });
+  };
+
+  const handleToggleReport = (type: 'giftItems' | 'singleItems' | 'packagingItems', itemId: string, active: boolean) => {
     updateDaily({
       dailyActive: {
         ...(dailyActive || {}),
@@ -63,7 +76,7 @@ export default function SettingsTab({
 
   const handleAdd = (type: 'giftItems' | 'singleItems' | 'packagingItems') => {
     const category = type === 'giftItems' ? 'gift' : type === 'singleItems' ? 'single' : undefined;
-    const newItems = [...settings[type], { id: uid(), name: '新品項', price: 0, active: true, ...(category ? { category } : {}) }];
+    const newItems = [...settings[type], { id: uid(), name: '新品項', price: 0, active: true, activePOS: true, activeReport: true, ...(category ? { category } : {}) }];
     updateSettings({ ...settings, [type]: newItems });
   };
 
@@ -90,7 +103,22 @@ export default function SettingsTab({
     updateSettings({ ...settings, customCategories: newCategories });
   };
 
-  const handleCustomToggle = (catId: string, itemId: string, active: boolean) => {
+  const handleCustomTogglePOS = (catId: string, itemId: string, active: boolean) => {
+    updateDaily({
+      dailyActive: {
+        ...(dailyActive || {}),
+        customCategoriesPOS: {
+          ...((dailyActive && dailyActive.customCategoriesPOS) || {}),
+          [catId]: {
+            ...(((dailyActive && dailyActive.customCategoriesPOS && dailyActive.customCategoriesPOS[catId]) || {})),
+            [itemId]: active,
+          },
+        },
+      },
+    });
+  };
+
+  const handleCustomToggleReport = (catId: string, itemId: string, active: boolean) => {
     updateDaily({
       dailyActive: {
         ...(dailyActive || {}),
@@ -103,6 +131,44 @@ export default function SettingsTab({
         },
       },
     });
+  };
+
+  const handleMove = (type: 'giftItems' | 'singleItems' | 'packagingItems', idx: number, direction: 'up' | 'down') => {
+    const newItems = [...settings[type]];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= newItems.length) return;
+    
+    const temp = newItems[idx];
+    newItems[idx] = newItems[targetIdx];
+    newItems[targetIdx] = temp;
+    
+    updateSettings({ ...settings, [type]: newItems });
+  };
+
+  const handleCustomMove = (catIdx: number, idx: number, direction: 'up' | 'down') => {
+    const newCategories = [...(settings.customCategories || [])];
+    const newItems = [...(newCategories[catIdx].items || [])];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= newItems.length) return;
+    
+    const temp = newItems[idx];
+    newItems[idx] = newItems[targetIdx];
+    newItems[targetIdx] = temp;
+    
+    newCategories[catIdx] = { ...newCategories[catIdx], items: newItems };
+    updateSettings({ ...settings, customCategories: newCategories });
+  };
+
+  const handleCategoryMove = (idx: number, direction: 'up' | 'down') => {
+    const newCategories = [...(settings.customCategories || [])];
+    const targetIdx = direction === 'up' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= newCategories.length) return;
+    
+    const temp = newCategories[idx];
+    newCategories[idx] = newCategories[targetIdx];
+    newCategories[targetIdx] = temp;
+    
+    updateSettings({ ...settings, customCategories: newCategories });
   };
 
   const handleCustomChange = (catIdx: number, itemIdx: number, field: string, val: any) => {
@@ -162,11 +228,13 @@ export default function SettingsTab({
               <table className="w-full text-sm text-center border-collapse bg-white">
                 <thead className="bg-[#faf7f2] text-coffee-600">
                   <tr>
-                    <th className="p-3 w-32 border-b border-[#f0ede8]">今日上架 (依日期保留)</th>
+                    <th className="p-3 w-28 border-b border-[#f0ede8]">POS 上架 (今日)</th>
+                    <th className="p-3 w-28 border-b border-[#f0ede8]">日報表上架 (今日)</th>
                     <th className="p-3 border-b border-[#f0ede8]">品項名稱</th>
                     <th className="p-3 border-b border-[#f0ede8]">預設商品單價</th>
                     {t.type === 'giftItems' && <th className="p-3 border-b border-[#f0ede8]">內容配方</th>}
                     <th className="p-3 border-b border-[#f0ede8]">包材綁定</th>
+                    <th className="p-3 w-24 border-b border-[#f0ede8]">排序</th>
                     <th className="p-3 w-20 border-b border-[#f0ede8]">移除</th>
                   </tr>
                 </thead>
@@ -178,8 +246,19 @@ export default function SettingsTab({
                           <input
                             type="checkbox"
                             className="sr-only peer"
-                            checked={dailyActive?.[typeTag]?.[item.id] ?? item.active}
-                            onChange={(e) => handleToggle(typeTag, item.id, e.target.checked)}
+                            checked={dailyActive?.[(typeTag + 'POS') as any]?.[item.id] ?? item.activePOS ?? item.active}
+                            onChange={(e) => handleTogglePOS(typeTag, item.id, e.target.checked)}
+                          />
+                          <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-mint-brand"></div>
+                        </label>
+                      </td>
+                      <td className="p-3">
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="sr-only peer"
+                            checked={dailyActive?.[typeTag]?.[item.id] ?? item.activeReport ?? item.active}
+                            onChange={(e) => handleToggleReport(typeTag, item.id, e.target.checked)}
                           />
                           <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-mint-brand"></div>
                         </label>
@@ -209,11 +288,31 @@ export default function SettingsTab({
                         </button>
                       </td>
                       <td className="p-3">
+                        <div className="flex justify-center items-center gap-1">
+                          <button
+                            disabled={idx === 0}
+                            onClick={() => handleMove(typeTag, idx, 'up')}
+                            className="p-1 bg-coffee-50 border border-coffee-200 rounded-lg text-coffee-600 hover:bg-coffee-100 disabled:opacity-30 disabled:hover:bg-coffee-50 transition"
+                            title="上移"
+                          >
+                            <ArrowUp className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            disabled={idx === (settings[typeTag]?.length || 0) - 1}
+                            onClick={() => handleMove(typeTag, idx, 'down')}
+                            className="p-1 bg-coffee-50 border border-coffee-200 rounded-lg text-coffee-600 hover:bg-coffee-100 disabled:opacity-30 disabled:hover:bg-coffee-50 transition"
+                            title="下移"
+                          >
+                            <ArrowDown className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="p-3">
                         <button onClick={() => handleDelete(typeTag, idx)} className="p-1.5 text-gray-400 hover:text-danger-brand hover:bg-danger-brand/10 inline-block rounded transition"><Trash2 className="w-4 h-4" /></button>
                       </td>
                     </tr>
                   ))}
-                  {settings[typeTag].length === 0 && <tr><td colSpan={t.type === 'giftItems' ? 5 : 4} className="p-6 text-gray-400 italic">尚無設定</td></tr>}
+                  {settings[typeTag].length === 0 && <tr><td colSpan={t.type === 'giftItems' ? 8 : 7} className="p-6 text-gray-400 italic">尚無設定</td></tr>}
                 </tbody>
               </table>
             </div>
@@ -227,10 +326,26 @@ export default function SettingsTab({
             <h2 className="text-lg font-bold flex items-center gap-2 text-coffee-800">
               <Package className="w-5 h-5 text-mint-brand" /> 
               <input 
-                className="bg-transparent outline-none border-b border-transparent focus:border-coffee-300 w-32 md:w-auto" 
+                className="bg-transparent outline-none border-b border-transparent focus:border-coffee-300 w-32 md:w-auto mr-2" 
                 value={cat.name} 
                 onChange={(e) => handleRenameCustomCategory(catIdx, e.target.value)} 
               />
+              <button
+                disabled={catIdx === 0}
+                onClick={() => handleCategoryMove(catIdx, 'up')}
+                className="p-1 bg-coffee-50 border border-coffee-200 rounded-lg text-coffee-600 hover:bg-coffee-100 disabled:opacity-30 disabled:hover:bg-coffee-50 transition"
+                title="類別上移"
+              >
+                <ArrowUp className="w-3.5 h-3.5" />
+              </button>
+              <button
+                disabled={catIdx === (settings.customCategories || []).length - 1}
+                onClick={() => handleCategoryMove(catIdx, 'down')}
+                className="p-1 bg-coffee-50 border border-coffee-200 rounded-lg text-coffee-600 hover:bg-coffee-100 disabled:opacity-30 disabled:hover:bg-coffee-50 transition"
+                title="類別下移"
+              >
+                <ArrowDown className="w-3.5 h-3.5" />
+              </button>
             </h2>
             <div className="flex gap-2">
                 <button 
@@ -252,10 +367,12 @@ export default function SettingsTab({
             <table className="w-full text-sm text-center border-collapse bg-white">
               <thead className="bg-[#faf7f2] text-coffee-600">
                 <tr>
-                  <th className="p-3 w-32 border-b border-[#f0ede8]">今日上架 (依日期保留)</th>
+                  <th className="p-3 w-28 border-b border-[#f0ede8]">POS 上架 (今日)</th>
+                  <th className="p-3 w-28 border-b border-[#f0ede8]">日報表上架 (今日)</th>
                   <th className="p-3 border-b border-[#f0ede8]">品項名稱</th>
                   <th className="p-3 border-b border-[#f0ede8]">預設商品單價</th>
                   <th className="p-3 border-b border-[#f0ede8]">包材綁定</th>
+                  <th className="p-3 w-24 border-b border-[#f0ede8]">排序</th>
                   <th className="p-3 w-20 border-b border-[#f0ede8]">移除</th>
                 </tr>
               </thead>
@@ -267,8 +384,19 @@ export default function SettingsTab({
                         <input
                           type="checkbox"
                           className="sr-only peer"
-                          checked={dailyActive?.customCategories?.[cat.id]?.[item.id] ?? item.active}
-                          onChange={(e) => handleCustomToggle(cat.id, item.id, e.target.checked)}
+                          checked={dailyActive?.customCategoriesPOS?.[cat.id]?.[item.id] ?? item.activePOS ?? item.active}
+                          onChange={(e) => handleCustomTogglePOS(cat.id, item.id, e.target.checked)}
+                        />
+                        <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-mint-brand"></div>
+                      </label>
+                    </td>
+                    <td className="p-3">
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input
+                          type="checkbox"
+                          className="sr-only peer"
+                          checked={dailyActive?.customCategories?.[cat.id]?.[item.id] ?? item.activeReport ?? item.active}
+                          onChange={(e) => handleCustomToggleReport(cat.id, item.id, e.target.checked)}
                         />
                         <div className="w-11 h-6 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-mint-brand"></div>
                       </label>
@@ -288,11 +416,31 @@ export default function SettingsTab({
                       </button>
                     </td>
                     <td className="p-3">
+                      <div className="flex justify-center items-center gap-1">
+                        <button
+                          disabled={idx === 0}
+                          onClick={() => handleCustomMove(catIdx, idx, 'up')}
+                          className="p-1 bg-coffee-50 border border-coffee-200 rounded-lg text-coffee-600 hover:bg-coffee-100 disabled:opacity-30 disabled:hover:bg-coffee-50 transition"
+                          title="上移"
+                        >
+                          <ArrowUp className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          disabled={idx === (cat.items?.length || 0) - 1}
+                          onClick={() => handleCustomMove(catIdx, idx, 'down')}
+                          className="p-1 bg-coffee-50 border border-coffee-200 rounded-lg text-coffee-600 hover:bg-coffee-100 disabled:opacity-30 disabled:hover:bg-coffee-50 transition"
+                          title="下移"
+                        >
+                          <ArrowDown className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </td>
+                    <td className="p-3">
                       <button onClick={() => handleCustomDelete(catIdx, idx)} className="p-1.5 text-gray-400 hover:text-danger-brand hover:bg-danger-brand/10 inline-block rounded transition"><Trash2 className="w-4 h-4" /></button>
                     </td>
                   </tr>
                 ))}
-                {(cat.items || []).length === 0 && <tr><td colSpan={4} className="p-6 text-gray-400 italic">尚無設定</td></tr>}
+                {(cat.items || []).length === 0 && <tr><td colSpan={7} className="p-6 text-gray-400 italic">尚無設定</td></tr>}
               </tbody>
             </table>
           </div>

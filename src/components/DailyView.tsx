@@ -81,21 +81,25 @@ const applyDailyActive = (settings: Settings, dailyActive?: DailyReport['dailyAc
     ...settings,
     giftItems: (settings.giftItems || []).map(item => ({
       ...item,
-      active: dailyActive.giftItems?.[item.id] ?? item.active,
+      active: dailyActive.giftItems?.[item.id] ?? item.activeReport ?? item.active ?? true,
+      activePOS: dailyActive.giftItemsPOS?.[item.id] ?? item.activePOS ?? item.active ?? true,
     })),
     singleItems: (settings.singleItems || []).map(item => ({
       ...item,
-      active: dailyActive.singleItems?.[item.id] ?? item.active,
+      active: dailyActive.singleItems?.[item.id] ?? item.activeReport ?? item.active ?? true,
+      activePOS: dailyActive.singleItemsPOS?.[item.id] ?? item.activePOS ?? item.active ?? true,
     })),
     packagingItems: (settings.packagingItems || []).map(item => ({
       ...item,
-      active: dailyActive.packagingItems?.[item.id] ?? item.active,
+      active: dailyActive.packagingItems?.[item.id] ?? item.activeReport ?? item.active ?? true,
+      activePOS: dailyActive.packagingItemsPOS?.[item.id] ?? item.activePOS ?? item.active ?? true,
     })),
     customCategories: (settings.customCategories || []).map(cat => ({
       ...cat,
       items: (cat.items || []).map(item => ({
         ...item,
-        active: dailyActive.customCategories?.[cat.id]?.[item.id] ?? item.active,
+        active: dailyActive.customCategories?.[cat.id]?.[item.id] ?? item.activeReport ?? item.active ?? true,
+        activePOS: dailyActive.customCategoriesPOS?.[cat.id]?.[item.id] ?? item.activePOS ?? item.active ?? true,
       })),
     })),
   };
