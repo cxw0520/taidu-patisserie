@@ -446,6 +446,12 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
 
   const handleExportDayExcel = async (dateStr: string, orders: any[]) => {
     try {
+      const deliveryOrders = orders.filter(o => o.deliveryMethod === '宅配');
+      if (deliveryOrders.length === 0) {
+        alert("此日期無任何「宅配」訂單可供匯出！");
+        return;
+      }
+
       const XLSX = await import('xlsx');
       
       const getItemName = (id: string) => {
@@ -457,7 +463,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
         return item ? item.name : id;
       };
 
-      const data = orders.map(o => {
+      const data = deliveryOrders.map(o => {
         const itemDetails = (o.items ? Object.entries(o.items) : [])
           .filter(([_, q]) => parseNum(q) > 0)
           .map(([k, q]) => `${getItemName(k)} x ${q}`)
@@ -467,14 +473,14 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
           '訂購人': o.buyer || '未知',
           '收件人': o.recipientName || o.buyer || '未知',
           '收件人電話': o.recipientPhone || o.phone || '',
-          '收件地址': o.address || (o.deliveryMethod === '自取' ? '自取' : ''),
+          '收件地址': o.address || '',
           '項目內容': itemDetails
         };
       });
 
       const ws = XLSX.utils.json_to_sheet(data);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "訂單列表");
+      XLSX.utils.book_append_sheet(wb, ws, "宅配訂單");
       
       ws['!cols'] = [
         { wch: 15 },
@@ -484,7 +490,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
         { wch: 50 }
       ];
 
-      XLSX.writeFile(wb, `Taidu_Orders_${dateStr}.xlsx`);
+      XLSX.writeFile(wb, `Taidu_Delivery_Orders_${dateStr}.xlsx`);
     } catch (err: any) {
       console.error("匯出失敗:", err);
       alert("匯出 Excel 失敗: " + (err?.message || err));
