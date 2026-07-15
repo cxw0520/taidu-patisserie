@@ -4,7 +4,7 @@ import { Settings, DailyReport, Order, Customer } from '../../types';
 import { uid, fmt, cn, parseNum, normalizeDateKey, copyText } from '../../lib/utils';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, writeBatch, collection, query, onSnapshot } from 'firebase/firestore';
-import { UploadCloud, CheckCircle, Copy, AlertCircle, CalendarDays, FileUp, Wand2 } from 'lucide-react';
+import { UploadCloud, CheckCircle, Copy, AlertCircle, CalendarDays, FileUp, Wand2, Download } from 'lucide-react';
 import { upsertCustomerFromOrder, MergeConflictModal } from '../CustomerView';
 
 
@@ -57,12 +57,17 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
   }, [currentDate, shopId, dailyData, refreshKey]); // adding dailyData and refreshKey dependency so it refreshes
 
   const parseDateFromCell = (raw: string) => {
-    const s = (raw || '').trim().replace(/\//g, '-');
+    const s = (raw || '')
+      .trim()
+      .replace(/\//g, '-')
+      .replace(/\./g, '-')
+      .replace(/年|月/g, '-')
+      .replace(/日/g, '');
     let m = s.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
     if (m) {
       return `${m[1]}-${String(Number(m[2])).padStart(2, '0')}-${String(Number(m[3])).padStart(2, '0')}`;
     }
-    m = s.match(/^(\d{1,2})-(\d{1,2})$/);
+    m = s.match(/^(\d{1,2})-(\d{1,2})(?:[^\d]|$)/);
     if (m) {
       const year = currentDate ? currentDate.split('-')[0] : String(new Date().getFullYear());
       return `${year}-${String(Number(m[1])).padStart(2, '0')}-${String(Number(m[2])).padStart(2, '0')}`;
@@ -148,12 +153,15 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
           ];
         }
 
-        // 2. 進行消除干擾後的雙向模糊比對
-        bestMatch = searchPool.find((i) => {
-          if (!i.name) return false;
-          const normI = normalize(i.name);
-          return normH.includes(normI) || normI.includes(normH);
-        });
+        // 2. 進行比對（優先使用精確比對，再使用消除干擾後的雙向模糊比對）
+        bestMatch = searchPool.find(i => i.name && normalize(i.name) === normH);
+        if (!bestMatch) {
+          bestMatch = searchPool.find((i) => {
+            if (!i.name) return false;
+            const normI = normalize(i.name);
+            return normH.includes(normI) || normI.includes(normH);
+          });
+        }
 
         // 2.5 備用機制：如果因為分流錯誤（例如巨無霸在單顆/禮盒分類不同）沒找到，就搜尋全部商品池
         if (!bestMatch) {
@@ -162,11 +170,14 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
             ...(settings.singleItems || []),
             ...allCustomItems
           ];
-          bestMatch = fallbackPool.find((i) => {
-            if (!i.name) return false;
-            const normI = normalize(i.name);
-            return normH.includes(normI) || normI.includes(normH);
-          });
+          bestMatch = fallbackPool.find(i => i.name && normalize(i.name) === normH);
+          if (!bestMatch) {
+            bestMatch = fallbackPool.find((i) => {
+              if (!i.name) return false;
+              const normI = normalize(i.name);
+              return normH.includes(normI) || normI.includes(normH);
+            });
+          }
         }
 
         // 3. 救援機制：如果真的找不到，再退回最寬鬆的口味關鍵字搜尋
@@ -248,6 +259,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
 
         if (Object.keys(items).length > 0) {
           parsed.push({
+            id: uid(),
             date: d,
             buyer, phone, email, addr, recipientName, recipientPhone, items, prodAmt,
             method: method || ''
@@ -295,7 +307,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
             deliveryMethod = '宅配'; // has address → likely delivery
           }
           return ({
-          id: uid(),
+          id: po.id || uid(),
           buyer: po.buyer,
           items: po.items,
           prodAmt: po.prodAmt,
@@ -377,7 +389,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
       for (const [date, orders] of Object.entries(byDate)) {
         const dateKey = normalizeDateKey(date);
         const appended = orders.map(po => ({
-          id: po._orderId || uid(), buyer: po.buyer, phone: po.phone || '',
+          id: po.id || uid(), buyer: po.buyer, phone: po.phone || '',
           items: po.items, prodAmt: po.prodAmt, actualAmt: po.prodAmt, status: '匯款' as const,
           shipAmt: 0, discAmt: 0, note: '', address: po.addr || '',
           recipientName: po.recipientName || '', recipientPhone: po.recipientPhone || '',
@@ -394,7 +406,7 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
           shopId,
           latestCustomers,
           {
-            orderId: uid(), // we don't have the exact id here but dedup is by phone/name
+            orderId: po.id || uid(), // we don't have the exact id here but dedup is by phone/name
             date: dateKey,
             buyer: po.buyer || '',
             phone: po.phone || '',
@@ -431,6 +443,53 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
         }, 1500);
       });
     };
+
+  const handleExportDayExcel = async (dateStr: string, orders: any[]) => {
+    try {
+      const XLSX = await import('xlsx');
+      
+      const getItemName = (id: string) => {
+        const item = [
+          ...(settings.giftItems || []),
+          ...(settings.singleItems || []),
+          ...(settings.customCategories || []).flatMap((c: any) => c.items || [])
+        ].find(i => i?.id === id);
+        return item ? item.name : id;
+      };
+
+      const data = orders.map(o => {
+        const itemDetails = (o.items ? Object.entries(o.items) : [])
+          .filter(([_, q]) => parseNum(q) > 0)
+          .map(([k, q]) => `${getItemName(k)} x ${q}`)
+          .join(', ');
+
+        return {
+          '訂購人': o.buyer || '未知',
+          '收件人': o.recipientName || o.buyer || '未知',
+          '收件人電話': o.recipientPhone || o.phone || '',
+          '收件地址': o.address || (o.deliveryMethod === '自取' ? '自取' : ''),
+          '項目內容': itemDetails
+        };
+      });
+
+      const ws = XLSX.utils.json_to_sheet(data);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "訂單列表");
+      
+      ws['!cols'] = [
+        { wch: 15 },
+        { wch: 15 },
+        { wch: 18 },
+        { wch: 40 },
+        { wch: 50 }
+      ];
+
+      XLSX.writeFile(wb, `Taidu_Orders_${dateStr}.xlsx`);
+    } catch (err: any) {
+      console.error("匯出失敗:", err);
+      alert("匯出 Excel 失敗: " + (err?.message || err));
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -544,6 +603,12 @@ export default function ImportTab({ settings, shopId, currentDate, dailyData, up
               <div key={dateStr} className="flex flex-col bg-white rounded-xl shadow-sm border border-coffee-100 overflow-hidden">
                 <h3 className="bg-coffee-50 p-3 font-bold text-coffee-800 text-sm border-b border-coffee-100 flex items-center gap-2 sticky top-0 z-10">
                   <CalendarDays className="w-4 h-4 text-rose-brand" /> {dateStr}
+                  <button
+                    onClick={() => handleExportDayExcel(dateStr, validOrders)}
+                    className="px-2 py-1 bg-mint-brand hover:bg-mint-brand/90 text-white rounded text-[10px] font-bold transition flex items-center gap-1 shadow-sm cursor-pointer active:scale-95 ml-2"
+                  >
+                    <Download className="w-3.5 h-3.5" /> 匯出 Excel
+                  </button>
                   <span className="ml-auto text-[10px] text-coffee-400 font-bold uppercase tracking-wider">共 {validOrders.length} 筆訂單</span>
                 </h3>
                 <div className="overflow-x-auto">
