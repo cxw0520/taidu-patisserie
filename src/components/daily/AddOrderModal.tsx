@@ -77,8 +77,16 @@ export default function AddOrderModal({ settings, shopId, customers, onClose, on
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-5 gap-1.5">
-              {(['匯款', '現結', '未結帳款', '儲值金扣款', '公關品'] as const).map(s => (
+            <div className="grid grid-cols-4 sm:grid-cols-5 gap-1.5">
+              {(() => {
+                const base = settings.paymentMethods || ['現結', '匯款', '未結帳款'];
+                const hasLinePay = base.some(pm => pm.toUpperCase() === 'LINE PAY');
+                const hasUber = base.some(pm => pm.toUpperCase() === 'UBER' || pm.toUpperCase() === 'UBER EATS');
+                const next = [...base];
+                if (!hasLinePay) next.push('LINE PAY');
+                if (!hasUber) next.push('UBER');
+                return Array.from(new Set([...next, '儲值金扣款', '公關品']));
+              })().map(s => (
                 <button
                   key={s}
                   onClick={() => {
