@@ -2099,14 +2099,24 @@ export default function DailyView({
                             order.status === '未結帳款' && "bg-danger-brand/10 text-danger-brand",
                             order.status === '公關品' && "bg-purple-50 text-purple-600",
                             order.status === '儲值金扣款' && "bg-emerald-50 text-emerald-600",
+                            order.status === 'LINE PAY' && "bg-emerald-50 text-emerald-600",
+                            (order.status === 'UBER' || order.status === 'Uber Eats') && "bg-teal-50 text-teal-600",
                             isCancelled && "bg-gray-100 text-gray-500 line-through border border-gray-300"
                           )}>
-                          <option value="匯款">匯款</option>
-                          <option value="現結">現結</option>
-                          <option value="未結帳款">未結</option>
-                          <option value="公關品">公關</option>
-                          <option value="儲值金扣款">儲值金扣款</option>
-                          <option value="已取消">已取消</option>
+                          {(() => {
+                            const base = settings.paymentMethods || ['現結', '匯款', '未結帳款'];
+                            const hasLinePay = base.some(pm => pm.toUpperCase() === 'LINE PAY');
+                            const hasUber = base.some(pm => pm.toUpperCase() === 'UBER' || pm.toUpperCase() === 'UBER EATS');
+                            const next = [...base];
+                            if (!hasLinePay) next.push('LINE PAY');
+                            if (!hasUber) next.push('UBER');
+                            const allOpts = Array.from(new Set([...next, '儲值金扣款', '公關品', '已取消', order.status].filter(Boolean)));
+                            return allOpts.map(opt => (
+                              <option key={opt} value={opt}>
+                                {opt === '未結帳款' ? '未結' : opt === '公關品' ? '公關' : opt}
+                              </option>
+                            ));
+                          })()}
                         </select>
                       </td>
                       {/* 配送方式 */}
