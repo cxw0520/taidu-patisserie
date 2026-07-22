@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { db, auth } from '../../lib/firebase';
 import { doc, setDoc, deleteDoc, getDoc, onSnapshot } from 'firebase/firestore';
 import { Role, Operator, Permissions } from '../../types';
-import { uid, cn } from '../../lib/utils';
+import { uid, cn, parseNum } from '../../lib/utils';
 import { Shield, Users, Key, Save, Plus, Trash2, Edit2, AlertCircle, Store, Image as ImageIcon, X, ChevronLeft, ChevronRight, Copy } from 'lucide-react';
 import { FundingSource, ExpenseCategory } from '../../types';
 
@@ -107,7 +107,19 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
     { id: uid(), name: '食材與原物料', isMaterialCost: true, active: true },
     { id: uid(), name: '文具郵資', isMaterialCost: false, active: true }
   ]);
-  const [paymentMethods, setPaymentMethods] = useState<string[]>(settings?.paymentMethods || ['現結', '匯款', '未結帳款']);
+  const [paymentMethods, setPaymentMethods] = useState<string[]>(() => {
+    const base = settings?.paymentMethods || ['現結', '匯款', '未結帳款'];
+    const hasLinePay = base.some(pm => pm.toUpperCase() === 'LINE PAY');
+    const hasUber = base.some(pm => pm.toUpperCase() === 'UBER' || pm.toUpperCase() === 'UBER EATS');
+    const next = [...base];
+    if (!hasLinePay) next.push('LINE PAY');
+    if (!hasUber) next.push('UBER');
+    return next;
+  });
+
+  // Fee Rates State
+  const [linePayFeeRate, setLinePayFeeRate] = useState(settings?.linePayFeeRate !== undefined ? settings.linePayFeeRate : 2.2);
+  const [uberFeeRate, setUberFeeRate] = useState(settings?.uberFeeRate !== undefined ? settings.uberFeeRate : 32);
 
   // Role State
   const [editingRole, setEditingRole] = useState<Role | null>(null);
@@ -125,6 +137,7 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
       overtimeTier1Hours, overtimeTier1Rate, overtimeTier2Hours, overtimeTier2Rate, holidayPayRate,
       estimatedMonthlyRent, estimatedMonthlyUtilities, estimatedMonthlyPayroll,
       fundingSources, expenseCategories, paymentMethods,
+      linePayFeeRate, uberFeeRate,
       promoRules // 🌟 包含優惠活動規則
     };
     await setDoc(doc(db, 'shops', shopId), { shopName, logo: logoBase64 }, { merge: true });
@@ -960,6 +973,41 @@ export default function SettingsView({ shopId, roles, operators, settings }: Pro
               <p className="text-[10px] text-coffee-400 mt-4">
                 💡 這些選項將出現在 POS 結帳畫面的按鈕中。建議保留「現結」作為現金交易的標籤，系統將自動計算入收銀機現金中。
               </p>
+
+              {/* 支付平台手續費與抽成設定 */}
+              <div className="mt-8 border-t border-coffee-100 pt-8">
+                <h3 className="text-lg font-bold text-coffee-800 mb-6">💳 支付平台手續費與抽成設定</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-sm font-bold text-coffee-700 mb-2">LINE PAY 手續費率 (%)</label>
+                    <div className="relative">
+                      <input 
+                        type="number" 
+                        step="0.01" 
+                        value={linePayFeeRate} 
+                        onChange={e => setLinePayFeeRate(parseNum(e.target.value))} 
+                        className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none font-mono" 
+                        placeholder="例如 2.2" 
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">%</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-coffee-700 mb-2">UBER (外送平台) 抽成率 (%)</label>
+                    <div className="relative">
+                      <input 
+                        type="number" 
+                        step="0.01" 
+                        value={uberFeeRate} 
+                        onChange={e => setUberFeeRate(parseNum(e.target.value))} 
+                        className="w-full border border-coffee-200 rounded-xl p-3 focus:ring-2 focus:ring-coffee-500 outline-none font-mono" 
+                        placeholder="例如 32" 
+                      />
+                      <span className="absolute right-3 top-1/2 -translate-y-1/2 text-coffee-400 font-bold">%</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
 
             <button onClick={handleSaveShopSettings} className="px-6 py-3 bg-coffee-600 text-white font-bold rounded-xl shadow-md hover:bg-coffee-700 transition flex items-center gap-2 mt-8">

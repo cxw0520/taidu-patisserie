@@ -1707,7 +1707,7 @@ export default function CashRegisterTab({ dailyData, settings, updateDaily, metr
                         )}
                       </div>
                       <div className="grid grid-cols-4 gap-1.5">
-                        {Array.from(new Set([...(settings.paymentMethods || ['現結', '匯款', '未結帳款']), '儲值金扣款'])).map(m => (
+                        {Array.from(new Set([...(settings.paymentMethods || ['現結', '匯款', '未結帳款', 'LINE PAY', 'UBER']), '儲值金扣款'])).map(m => (
                           <button
                             key={m}
                             onClick={() => {

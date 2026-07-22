@@ -72,6 +72,8 @@ const defaultAr = () => ({
   actualRemit: 0,
   actualCash: 0,
   actualUnpaid: 0,
+  actualLinePay: 0,
+  actualUber: 0,
 });
 const calcDayUnpaid = (orders: Order[] = []) =>
   orders.filter(o => o.status === '未結帳款').reduce((sum, o) => sum + Number(o.actualAmt || 0), 0);
@@ -1460,6 +1462,7 @@ export default function DailyView({
         rev: 0, ship: 0, prShip: 0, disc: 0, prVal: 0, recv: 0, act: 0, remit: 0, cash: 0, unpaid: 0,
         topup: 0, topupCash: 0, topupRemit: 0, prepaidPay: 0,
         prepay: 0, prepayCash: 0, prepayRemit: 0, preorderPay: 0,
+        linePay: 0, uber: 0,
         qty: { 
             gb: {} as Record<string,number>, 
             sg: {} as Record<string,number>, 
@@ -1515,6 +1518,10 @@ export default function DailyView({
                     m.cash += o.actualAmt; 
                 } else if (o.status === '儲值金扣款') {
                     m.prepaidPay += o.actualAmt;
+                } else if (o.status === 'LINE PAY') {
+                    m.linePay += o.actualAmt;
+                } else if (o.status === 'UBER' || o.status === 'Uber Eats') {
+                    m.uber += o.actualAmt;
                 }
                 
                 if (o.status === '未結帳款' || o.status === '已收帳款' || o.status === '已付訂金') {
@@ -2331,6 +2338,36 @@ export default function DailyView({
                     onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), actualUnpaid: parseNum(e.target.value) } })}
                     className="w-28 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
                   />
+                </div>
+                <div className="flex flex-col gap-1 py-2 border-t border-dashed border-coffee-100">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-coffee-600">LINE PAY 收入</span>
+                    <span className="font-bold font-mono text-right min-w-[96px]">${fmt(metrics?.linePay || 0)}</span>
+                    <input
+                      type="number"
+                      value={dailyData?.ar?.actualLinePay || ''}
+                      onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), actualLinePay: parseNum(e.target.value) } })}
+                      className="w-28 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
+                    />
+                  </div>
+                  <div className="text-[10px] text-coffee-400 font-bold pl-2">
+                    💡 預估扣除 {settings.linePayFeeRate !== undefined ? settings.linePayFeeRate : 2.2}% 手續費後淨額為：${fmt((metrics?.linePay || 0) * (1 - (settings.linePayFeeRate !== undefined ? settings.linePayFeeRate : 2.2) / 100))}
+                  </div>
+                </div>
+                <div className="flex flex-col gap-1 py-2 border-t border-dashed border-coffee-100">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-coffee-600">UBER 收入</span>
+                    <span className="font-bold font-mono text-right min-w-[96px]">${fmt(metrics?.uber || 0)}</span>
+                    <input
+                      type="number"
+                      value={dailyData?.ar?.actualUber || ''}
+                      onChange={e => updateDaily({ ar: { ...(dailyData?.ar || defaultAr()), actualUber: parseNum(e.target.value) } })}
+                      className="w-28 text-right bg-white border border-coffee-100 rounded-lg px-2 py-1 font-bold font-mono text-mint-brand focus:border-mint-brand focus:ring-2 focus:ring-mint-brand/20 outline-none"
+                    />
+                  </div>
+                  <div className="text-[10px] text-coffee-400 font-bold pl-2">
+                    💡 預估扣除 {settings.uberFeeRate !== undefined ? settings.uberFeeRate : 32}% 抽成後淨額為：${fmt((metrics?.uber || 0) * (1 - (settings.uberFeeRate !== undefined ? settings.uberFeeRate : 32) / 100))}
+                  </div>
                 </div>
                 <div className="flex justify-between items-center border-t border-dashed border-coffee-100 pt-2">
                   <span className="text-coffee-600">儲值金付款</span>

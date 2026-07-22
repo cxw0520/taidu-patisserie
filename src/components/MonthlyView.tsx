@@ -662,6 +662,8 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     let prepayRemit = 0;
     let preorderPay = 0;
     let prepaidPay = 0;
+    let linePay = 0;
+    let uber = 0;
 
     let prShip = 0;
     let logSpent = 0;
@@ -740,6 +742,8 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
             if (o.status === '匯款') remit += o.actualAmt || 0;
             else if (o.status === '現結') cash += o.actualAmt || 0;
             else if (o.status === '儲值金扣款') prepaidPay += o.actualAmt || 0;
+            else if (o.status === 'LINE PAY') linePay += o.actualAmt || 0;
+            else if (o.status === 'UBER' || o.status === 'Uber Eats') uber += o.actualAmt || 0;
             else if (o.status === '未結帳款' || o.status === '已收帳款' || o.status === '已付訂金') {
               const collectedCash = parseNum((o as any).arCollectedCash);
               const collectedRemit = parseNum((o as any).arCollectedRemit);
@@ -893,15 +897,22 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       }
     });
 
+    const linePayFeeRate = settings.linePayFeeRate !== undefined ? settings.linePayFeeRate : 2.2;
+    const uberFeeRate = settings.uberFeeRate !== undefined ? settings.uberFeeRate : 32;
+    const linePayFeeTotal = Math.round(linePay * (linePayFeeRate / 100));
+    const uberFeeTotal = Math.round(uber * (uberFeeRate / 100));
+    const platformFeeTotal = linePayFeeTotal + uberFeeTotal;
+
     // 固定支出 = 支出總表的固定支出 + 本月折舊
     const totalFixedCost = totalFixedCostFromExpenses + depreciationTotal;
 
-    // 淨利 = 營收 - 變動成本 - 人事成本 - 固定支出 - 其他雜支
-    const netProfit = netRevenue - totalVariableCost - staffCost - totalFixedCost - otherExpenseTotal;
+    // 淨利 = 營收 - 變動成本 - 人事成本 - 固定支出 - (其他雜支 + 平台手續費)
+    const netProfit = netRevenue - totalVariableCost - staffCost - totalFixedCost - (otherExpenseTotal + platformFeeTotal);
 
     return {
       salesTotal, discTotal, prTotal, netRevenue,
       remit, cash, ar, normalShip, topup, topupCash, topupRemit, prepay, prepayCash, prepayRemit, preorderPay, prepaidPay,
+      linePay, uber, linePayFeeTotal, uberFeeTotal, platformFeeTotal,
       itemSales, theoreticalIngredCost, itemCostBreakdown, itemPR,
       materialPurchaseTotal, packagingPurchaseTotal, vendorMaterialPurchases,
       logSpent, totalLogisticsCost,
@@ -909,7 +920,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       staffCost,
       totalFixedCostFromExpenses, depreciationTotal, totalFixedCost,
       fixedExpenseCategories,
-      otherExpenseTotal, miscExpenseCategories,
+      otherExpenseTotal: otherExpenseTotal + platformFeeTotal, miscExpenseCategories,
       netProfit,
       selYear, selMon
     };
@@ -1605,6 +1616,14 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                 <span className="text-coffee-600 text-sm font-bold">匯款收入 (匯款)</span>
                 <span className="font-mono font-bold text-mint-brand">${fmt(stats.remit)}</span>
               </div>
+              <div className="flex justify-between items-center px-2">
+                <span className="text-coffee-600 text-sm font-bold">LINE PAY 收入</span>
+                <span className="font-mono font-bold text-mint-brand">${fmt(stats.linePay)}</span>
+              </div>
+              <div className="flex justify-between items-center px-2">
+                <span className="text-coffee-600 text-sm font-bold">UBER 收入</span>
+                <span className="font-mono font-bold text-mint-brand">${fmt(stats.uber)}</span>
+              </div>
               <button 
                 onClick={() => setShowARModal(true)}
                 className="w-full flex justify-between items-center px-3 py-2 bg-rose-50 border border-rose-100 rounded-lg hover:bg-rose-100 transition active:scale-95 group"
@@ -1620,7 +1639,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                 <span className="text-coffee-600 text-sm font-bold">預定金付款 (預購取貨)</span>
                 <span className="font-mono font-bold text-blue-600">${fmt(stats.preorderPay)}</span>
               </div>
-              <div className="text-[10px] text-coffee-400 text-right font-semibold italic">↳ 以上五項加總即為營業淨額</div>
+              <div className="text-[10px] text-coffee-400 text-right font-semibold italic">↳ 以上七項加總即為營業淨額</div>
 
               <h4 className="text-sm font-bold text-coffee-400 uppercase tracking-widest mb-2 pt-2 border-t border-coffee-50">儲值金充值 (金流獨立)</h4>
               <div className="flex justify-between items-center px-2 text-xs text-coffee-600">
@@ -1836,6 +1855,35 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
                   </div>
                 </div>
               ))}
+
+              {/* 平台手續費項目 */}
+              {(stats.linePayFeeTotal > 0 || stats.uberFeeTotal > 0) && (
+                <div className="pt-3 pb-1 mt-2">
+                  <span className="text-[10px] font-bold text-coffee-400 uppercase tracking-widest bg-coffee-100 px-2 py-0.5 rounded-full">支付平台手續費 (自動估算)</span>
+                </div>
+              )}
+              {stats.linePayFeeTotal > 0 && (
+                <div className="flex justify-between items-center p-2 bg-emerald-50/30 rounded-lg border border-emerald-100/60 mt-1">
+                  <span className="text-coffee-600 text-sm font-bold pl-2 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>LINE PAY手續費
+                  </span>
+                  <div className="flex flex-col items-end">
+                    <span className="font-mono font-bold text-emerald-800">${fmt(stats.linePayFeeTotal)}</span>
+                    <span className="text-[9px] text-coffee-400">當月交易 ${fmt(stats.linePay)}</span>
+                  </div>
+                </div>
+              )}
+              {stats.uberFeeTotal > 0 && (
+                <div className="flex justify-between items-center p-2 bg-emerald-50/30 rounded-lg border border-emerald-100/60 mt-1">
+                  <span className="text-coffee-600 text-sm font-bold pl-2 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>UBER手續費
+                  </span>
+                  <div className="flex flex-col items-end">
+                    <span className="font-mono font-bold text-emerald-800">${fmt(stats.uberFeeTotal)}</span>
+                    <span className="text-[9px] text-coffee-400">當月交易 ${fmt(stats.uber)}</span>
+                  </div>
+                </div>
+              )}
 
             </div>
 

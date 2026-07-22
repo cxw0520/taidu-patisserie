@@ -224,6 +224,8 @@ export interface DailyReport {
     actualRemit?: number;
     actualCash?: number;
     actualUnpaid?: number;
+    actualLinePay?: number;
+    actualUber?: number;
   };
   inventory: Record<string, InventoryItem>;
   losses: LossEntry[];
@@ -325,6 +327,8 @@ export interface Settings {
   fundingSources?: FundingSource[];
   expenseCategories?: ExpenseCategory[];
   paymentMethods?: string[];
+  linePayFeeRate?: number;
+  uberFeeRate?: number;
 }
 
 export interface FundingSource {
