@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Clock, Plus, Trash2, AlertTriangle, TrendingUp, DollarSign, Truck, ClipboardList, Check, HelpCircle } from 'lucide-react';
+import { Clock, Plus, Trash2, AlertTriangle, TrendingUp, DollarSign, Truck, ClipboardList, Check, UserCheck, HelpCircle } from 'lucide-react';
 import { Employee, Material, Recipe, ProductionTask, PurchaseRecord } from './SchedulerApp';
 
 interface AdminConsoleProps {
@@ -36,86 +36,145 @@ export default function AdminConsole({
 
   const [newMatName, setNewMatName] = useState('');
   const [newMatQty, setNewMatQty] = useState(10);
-  const [newMatMin, setNewMatMin] = useState(5);
   const [newMatUnit, setNewMatUnit] = useState('kg');
   const [newMatCost, setNewMatCost] = useState(100);
   const [newMatSupplier, setNewMatSupplier] = useState('');
+
+  // Editing state for weekly safety stocks
+  const [editingMatId, setEditingMatId] = useState<string | null>(null);
+
+  // Selected employee in back-end card to grade/mentor
+  const [selectedGradingEmpId, setSelectedGradingEmpId] = useState<string>(employees[0]?.id || '');
+
+  const today = new Date();
+  const currentDayOfWeek = today.getDay(); // 0 is Sunday, 1 is Monday, etc.
+  const daysName = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 
   // Calculate totals for scheduling
   const totalAvailableHours = employees.reduce((acc, curr) => acc + curr.hours, 0);
   const totalTaskHours = tasks.reduce((acc, curr) => acc + curr.requiredTimeHours, 0);
 
-  // Financial Dashboard calculation
+  // Financial calculations
   const totalExpenses = purchases.reduce((acc, curr) => acc + curr.cost, 0);
+  const cashPayments = purchases.filter(p => p.paymentMethod === 'cash').reduce((acc, curr) => acc + curr.cost, 0);
+  const monthlyPayments = purchases.filter(p => p.paymentMethod === 'monthly').reduce((acc, curr) => acc + curr.cost, 0);
+  
   const pendingExpenses = purchases.filter(p => p.status === 'pending').reduce((acc, curr) => acc + curr.cost, 0);
   const accountsPayable = purchases.filter(p => p.status === 'received').reduce((acc, curr) => acc + curr.cost, 0);
 
-  // Auto-scheduling simulation logic
+  const gradingEmployee = employees.find(e => e.id === selectedGradingEmpId);
+
+  // Automatic Scheduling logic based on priority:
+  // Priority 1: urgent orders (simulate orders)
+  // Priority 2: materials lowest in stock relative to dynamic today's safety threshold
+  // Constraints: check employee unlock levels, enforce available work hours
   const handleAutoSchedule = () => {
-    // Generate simulated tasks to fit available work hours
-    const baseTasks = [
-      { name: '經典法式草莓塔', qty: 15, unit: '個', time: 3.0 },
-      { name: '法式塔皮(半成品)', qty: 30, unit: '個', time: 4.5 },
-      { name: '香草卡士達醬(半成品)', qty: 2000, unit: 'g', time: 2.5 },
-      { name: '法式千層蛋糕(半成品)', qty: 2, unit: '個', time: 3.5 },
-      { name: '檸檬糖霜蛋糕', qty: 8, unit: '個', time: 2.0 },
-      { name: '原物料簽收備料', qty: 1, unit: '次', time: 1.0 },
-      { name: '庫存盤點與環境清潔', qty: 1, unit: '次', time: 1.5 }
+    // 1) Define tasks to produce (simulated demands)
+    const productionPool = [
+      { name: '經典法式草莓塔', qty: 15, unit: '個', time: 3.0, recipeId: 'rec-1', isUrgent: true },
+      { name: '法式塔皮(半成品)', qty: 30, unit: '個', time: 4.5, recipeId: 'rec-2', isUrgent: false },
+      { name: '香草卡士達醬(半成品)', qty: 2000, unit: 'g', time: 2.5, recipeId: 'rec-3', isUrgent: false },
+      { name: '經典法式草莓塔', qty: 6, unit: '個', time: 1.5, recipeId: 'rec-1', isUrgent: false }
     ];
 
+    // Sort: Urgent first, then check which materials have the lowest stock relative to today's safety stock
+    const sortedPool = [...productionPool].sort((a, b) => {
+      if (a.isUrgent && !b.isUrgent) return -1;
+      if (!a.isUrgent && b.isUrgent) return 1;
+
+      // Find stock levels relative to today's threshold
+      const matA = materials.find(m => m.name === a.name || m.name === (a.name + '(半成品)'));
+      const matB = materials.find(m => m.name === b.name || m.name === (b.name + '(半成品)'));
+      
+      const thresholdA = matA ? (matA.weeklyMinQty[currentDayOfWeek] || 0) : 0;
+      const thresholdB = matB ? (matB.weeklyMinQty[currentDayOfWeek] || 0) : 0;
+
+      const deficitA = matA ? Math.max(0, thresholdA - matA.qty) : 0;
+      const deficitB = matB ? Math.max(0, thresholdB - matB.qty) : 0;
+
+      return deficitB - deficitA; // Highest deficit first
+    });
+
     const generatedTasks: ProductionTask[] = [];
-    let currentHourCount = 0;
+    let allocatedHours: Record<string, number> = {};
+    employees.forEach(emp => { allocatedHours[emp.id] = 0; });
 
-    // Distribute among employees
-    employees.forEach((emp, empIdx) => {
-      let empAllocatedHours = 0;
-      // Assign 2-3 tasks to this employee
-      const seed = empIdx * 2;
-      const t1 = baseTasks[seed % baseTasks.length];
-      const t2 = baseTasks[(seed + 1) % baseTasks.length];
+    // 2) Allocate tasks to qualified employees
+    sortedPool.forEach((poolItem, idx) => {
+      // Find employees qualified (unlocked this recipe)
+      const qualifiedEmployees = employees.filter(emp => {
+        const progress = emp.progress[poolItem.recipeId] || 0;
+        const recipe = recipes.find(r => r.id === poolItem.recipeId);
+        return recipe ? progress >= recipe.unlockThreshold : false;
+      });
 
-      if (empAllocatedHours + t1.time <= emp.hours) {
+      // Find one employee who has remaining hours
+      let assignedEmp = qualifiedEmployees.find(emp => {
+        const currentUsed = allocatedHours[emp.id] || 0;
+        return (currentUsed + poolItem.time) <= emp.hours;
+      });
+
+      if (assignedEmp) {
+        allocatedHours[assignedEmp.id] += poolItem.time;
         generatedTasks.push({
-          id: `tsk-gen-${emp.id}-1`,
-          name: t1.name,
-          qty: t1.qty,
-          unit: t1.unit,
-          assignedTo: emp.name,
+          id: `tsk-auto-${idx}-${Date.now()}`,
+          name: poolItem.name,
+          qty: poolItem.qty,
+          unit: poolItem.unit,
+          assignedTo: assignedEmp.name,
           status: 'pending',
-          requiredTimeHours: t1.time
+          requiredTimeHours: poolItem.time,
+          startTime: null,
+          actualTimeHours: null,
+          operator: null
         });
-        empAllocatedHours += t1.time;
+      } else {
+        // Flag warning if no qualified workers have capacity
+        console.warn(`No qualified personnel with available hours to assign task: ${poolItem.name}`);
       }
+    });
 
-      if (empAllocatedHours + t2.time <= emp.hours) {
+    // 3) Append general cleanups/openings that don't require specific training
+    employees.forEach(emp => {
+      const currentUsed = allocatedHours[emp.id] || 0;
+      if (emp.hours - currentUsed >= 1.5) {
         generatedTasks.push({
-          id: `tsk-gen-${emp.id}-2`,
-          name: t2.name,
-          qty: t2.qty,
-          unit: t2.unit,
+          id: `tsk-cleanup-${emp.id}-${Date.now()}`,
+          name: '庫存整理與器具清潔',
+          qty: 1,
+          unit: '次',
           assignedTo: emp.name,
           status: 'pending',
-          requiredTimeHours: t2.time
+          requiredTimeHours: 1.5,
+          startTime: null,
+          actualTimeHours: null,
+          operator: null
         });
+        allocatedHours[emp.id] += 1.5;
       }
     });
 
     onUpdateTasks(generatedTasks);
-    alert('自動排程模擬完成！已根據員工人數與總可用工時，自動分配任務。可切換至前台查看。');
+    alert(`自動排班成功！已考量員工技能解鎖門檻與今日工時上限，共生成 ${generatedTasks.length} 項生產任務。`);
   };
 
-  // Auto-ordering logic based on safety levels
+  // Smart Reorder logic based on dynamic safety thresholds for today
   const handleSmartOrder = () => {
-    const lowStockMaterials = materials.filter(m => m.qty < m.minQty);
+    const lowStockMaterials = materials.filter(m => {
+      const safetyThreshold = m.weeklyMinQty[currentDayOfWeek] || 0;
+      return m.qty < safetyThreshold;
+    });
+
     if (lowStockMaterials.length === 0) {
-      alert('所有原物料與半成品均高於安全庫存水位，目前不需要叫貨！');
+      alert('所有原物料與半成品均高於今日安全水位，目前不需要叫貨！');
       return;
     }
 
     const newPurchases: PurchaseRecord[] = [];
     lowStockMaterials.forEach(mat => {
-      // Calculate replenish amount to double the minQty
-      const reorderQty = parseFloat((mat.minQty * 2 - mat.qty).toFixed(1));
+      const todaySafety = mat.weeklyMinQty[currentDayOfWeek] || 0;
+      const reorderQty = parseFloat((todaySafety * 2 - mat.qty).toFixed(1));
+      
       if (reorderQty > 0) {
         newPurchases.push({
           id: `pur-auto-${Date.now()}-${mat.id}`,
@@ -124,14 +183,17 @@ export default function AdminConsole({
           cost: Math.round(reorderQty * mat.cost),
           supplier: mat.supplier === '自家生產' ? '原料庫房' : mat.supplier,
           status: 'pending',
-          date: new Date().toISOString().split('T')[0]
+          date: new Date().toISOString().split('T')[0],
+          expectedDate: new Date().toISOString().split('T')[0], // Expected today
+          paymentMethod: mat.cost > 1000 ? 'monthly' : 'cash', // High costs as monthly, low as cash
+          signedBy: null
         });
       }
     });
 
     if (newPurchases.length > 0) {
       onUpdatePurchases(prev => [...newPurchases, ...prev]);
-      alert(`已成功發起智能一鍵叫貨！生成了 ${newPurchases.length} 筆採購叫貨單（可至前台「物料進貨簽收」頁面處理簽收）。`);
+      alert(`已成功發起智能一鍵叫貨！根據今日(${daysName[currentDayOfWeek]})安全庫存水位生成 ${newPurchases.length} 筆叫貨單。`);
     }
   };
 
@@ -144,7 +206,9 @@ export default function AdminConsole({
       name: newEmpName,
       role: newEmpRole,
       hours: newEmpHours,
-      progress: { 'rec-1': 10, 'rec-2': 10, 'rec-3': 10 }
+      progress: { 'rec-1': 10, 'rec-2': 10, 'rec-3': 10 },
+      mentorName: '小王',
+      apprentices: []
     };
 
     onUpdateEmployees(prev => [...prev, newEmp]);
@@ -164,9 +228,10 @@ export default function AdminConsole({
       name: newMatName,
       qty: newMatQty,
       unit: newMatUnit,
-      minQty: newMatMin,
+      // Default safety stock templates
+      weeklyMinQty: { 0: 10, 1: 5, 2: 5, 3: 5, 4: 5, 5: 8, 6: 10 },
       cost: newMatCost,
-      supplier: newMatSupplier || '無指定廠商',
+      supplier: newMatSupplier || '德麥食品',
       type: 'raw'
     };
 
@@ -175,9 +240,60 @@ export default function AdminConsole({
     setNewMatSupplier('');
   };
 
+  // Update employee skill rating manually in the back-end
+  const handleUpdateEmpProgress = (recipeId: string, value: number) => {
+    if (!selectedGradingEmpId) return;
+    onUpdateEmployees(prev => prev.map(emp => {
+      if (emp.id === selectedGradingEmpId) {
+        return {
+          ...emp,
+          progress: {
+            ...emp.progress,
+            [recipeId]: value
+          }
+        };
+      }
+      return emp;
+    }));
+  };
+
+  // Update weekly safety stock template
+  const handleUpdateWeeklyThreshold = (materialId: string, day: number, value: number) => {
+    onUpdateMaterials(prev => prev.map(mat => {
+      if (mat.id === materialId) {
+        return {
+          ...mat,
+          weeklyMinQty: {
+            ...mat.weeklyMinQty,
+            [day]: value
+          }
+        };
+      }
+      return mat;
+    }));
+  };
+
+  // Assign Mentor to student
+  const handleAssignMentor = (studentId: string, mentorNameStr: string) => {
+    onUpdateEmployees(prev => prev.map(emp => {
+      if (emp.id === studentId) {
+        return { ...emp, mentorName: mentorNameStr || undefined };
+      }
+      // If mentor was assigned, append student name to mentor's apprentices list
+      if (emp.name === mentorNameStr) {
+        const student = prev.find(e => e.id === studentId);
+        const currentApprentices = emp.apprentices || [];
+        if (student && !currentApprentices.includes(student.name)) {
+          return { ...emp, apprentices: [...currentApprentices, student.name] };
+        }
+      }
+      return emp;
+    }));
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-      {/* Sidebar: Navigation Accordion */}
+      {/* Sidebar: Sub navigation */}
       <div className="lg:col-span-1 bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
         <div>
           <h3 className="text-sm font-bold text-stone-400 uppercase tracking-widest">後台管理控制台</h3>
@@ -193,7 +309,7 @@ export default function AdminConsole({
                 : 'text-stone-500 hover:bg-stone-50'
             }`}
           >
-            排班與工時設定
+            排班與師徒考核
           </button>
           <button
             onClick={() => setActiveTab('bom')}
@@ -213,7 +329,7 @@ export default function AdminConsole({
                 : 'text-stone-500 hover:bg-stone-50'
             }`}
           >
-            庫存預警與智能叫貨
+            週安全水位範本
           </button>
           <button
             onClick={() => setActiveTab('finance')}
@@ -223,15 +339,15 @@ export default function AdminConsole({
                 : 'text-stone-500 hover:bg-stone-50'
             }`}
           >
-            消耗統計與廠商帳款
+            財務消耗與應付帳款
           </button>
         </div>
 
         <div className="mt-auto pt-6 border-t border-stone-100">
           <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50 flex flex-col gap-2">
-            <h4 className="text-xs font-bold text-blue-700">自動排程核心</h4>
+            <h4 className="text-xs font-bold text-blue-700">安全水位預警機制</h4>
             <p className="text-[11px] text-stone-500 leading-relaxed">
-              系統會根據本日排班的**總工時**，合理分派草莓塔、卡士達等生產量，避免員工過勞並確保產能最大化。
+              今日為<strong>{daysName[currentDayOfWeek]}</strong>，系統叫貨與防置排班將自動參考今日對應的安全水位數據進行比對。
             </p>
           </div>
         </div>
@@ -241,61 +357,136 @@ export default function AdminConsole({
       <div className="lg:col-span-3 flex flex-col gap-6">
         <div className="min-h-[550px]">
           
-          {/* TAB 1: SCHEDULING & MANPOWER */}
+          {/* TAB 1: SCHEDULING & MENTOR GRADING */}
           {activeTab === 'scheduling' && (
             <div className="flex flex-col gap-6">
-              {/* Metric Card */}
+              {/* Metric Cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-white p-5 rounded-2xl border border-stone-200/60 shadow-sm flex flex-col gap-1">
                   <span className="text-[10px] uppercase font-extrabold text-stone-400 tracking-wider">今日總可用人力</span>
                   <span className="text-2xl font-bold text-stone-800">{employees.length} 人</span>
                 </div>
                 <div className="bg-white p-5 rounded-2xl border border-stone-200/60 shadow-sm flex flex-col gap-1">
-                  <span className="text-[10px] uppercase font-extrabold text-stone-400 tracking-wider">總排班可用工時</span>
+                  <span className="text-[10px] uppercase font-extrabold text-stone-400 tracking-wider">排班總可用工時</span>
                   <span className="text-2xl font-bold text-blue-600">{totalAvailableHours} 小時</span>
                 </div>
                 <div className="bg-white p-5 rounded-2xl border border-stone-200/60 shadow-sm flex flex-col gap-1">
-                  <span className="text-[10px] uppercase font-extrabold text-stone-400 tracking-wider">已分配生產工時</span>
+                  <span className="text-[10px] uppercase font-extrabold text-stone-400 tracking-wider">已分派任務總工時</span>
                   <span className="text-2xl font-bold text-stone-700">{totalTaskHours} 小時</span>
                 </div>
               </div>
 
-              {/* Employees List */}
+              {/* Master-Apprentice and Grading Panel */}
+              <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-6">
+                
+                {/* Employee select picker */}
+                <div className="md:col-span-1 border-r border-stone-100 pr-0 md:pr-6 flex flex-col gap-4">
+                  <div>
+                    <h4 className="font-bold text-stone-800 text-sm">選擇評分員工</h4>
+                    <p className="text-[11px] text-stone-400 mt-0.5">師傅可為選定之徒弟考核技能</p>
+                  </div>
+                  <div className="flex flex-col gap-2">
+                    {employees.map(emp => (
+                      <button
+                        key={emp.id}
+                        onClick={() => setSelectedGradingEmpId(emp.id)}
+                        className={`text-left p-3 rounded-xl border text-xs transition ${
+                          selectedGradingEmpId === emp.id
+                            ? 'bg-blue-50/60 border-blue-300 font-bold text-blue-800'
+                            : 'bg-stone-50 border-stone-200 hover:bg-stone-100 text-stone-600'
+                        }`}
+                      >
+                        {emp.name} ({emp.role})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Grading Panel details */}
+                <div className="md:col-span-2 flex flex-col gap-6">
+                  {gradingEmployee ? (
+                    <>
+                      <div className="flex justify-between items-start border-b border-stone-100 pb-3">
+                        <div>
+                          <h4 className="font-bold text-stone-800 text-md">{gradingEmployee.name} • 技能考核與師徒設定</h4>
+                          <p className="text-xs text-stone-400 mt-1">
+                            師徒配對：
+                            <select
+                              value={gradingEmployee.mentorName || ''}
+                              onChange={(e) => handleAssignMentor(gradingEmployee.id, e.target.value)}
+                              className="bg-stone-50 border border-stone-200 rounded px-2 py-0.5 ml-1 text-stone-700 outline-none text-[11px]"
+                            >
+                              <option value="">無指定師父</option>
+                              {employees.filter(e => e.id !== gradingEmployee.id).map(e => (
+                                <option key={e.id} value={e.name}>{e.name} ({e.role})</option>
+                              ))}
+                            </select>
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Recipe skill sliders */}
+                      <div className="flex flex-col gap-5">
+                        {recipes.map(recipe => {
+                          const score = gradingEmployee.progress[recipe.id] || 0;
+                          return (
+                            <div key={recipe.id} className="flex flex-col gap-1 bg-stone-50/60 p-4 rounded-xl border border-stone-200/40">
+                              <div className="flex justify-between items-center text-xs">
+                                <span className="font-bold text-stone-700">{recipe.name}</span>
+                                <span className="font-bold text-blue-600">{score}%</span>
+                              </div>
+                              <div className="flex items-center gap-4">
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="100"
+                                  value={score}
+                                  onChange={(e) => handleUpdateEmpProgress(recipe.id, Number(e.target.value))}
+                                  className="w-full h-1.5 bg-stone-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                                />
+                                <span className="text-[10px] text-stone-400 shrink-0">
+                                  解鎖需: {recipe.unlockThreshold}%
+                                </span>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-stone-400 text-xs">
+                      請選擇一名員工進行考核設定
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Employees Work Hours List */}
               <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 pb-4">
                   <div>
-                    <h3 className="font-bold text-stone-800 text-lg">員工排班工時管理</h3>
-                    <p className="text-xs text-stone-500">在此設定今日上班的員工及其工時，供自動排班分配任务使用</p>
+                    <h3 className="font-bold text-stone-800 text-lg">今日排班人名單</h3>
+                    <p className="text-xs text-stone-500">在此設定今日上班的員工工時。確認後可點擊自動排程按鈕進行自動分派。</p>
                   </div>
                   <button
                     onClick={handleAutoSchedule}
                     className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition shadow-md shadow-blue-200/50"
                   >
-                    ⚙️ 自動計算並排程
+                    ⚙️ 自動分派生產排程
                   </button>
                 </div>
 
-                <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-2">
                   {employees.map(emp => (
-                    <div key={emp.id} className="p-4 bg-stone-50/50 border border-stone-200 rounded-2xl flex items-center justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm">
-                          {emp.name[0]}
-                        </div>
-                        <div>
-                          <h4 className="font-bold text-stone-800 text-sm">{emp.name}</h4>
-                          <p className="text-xs text-stone-400">{emp.role}</p>
-                        </div>
-                      </div>
-
+                    <div key={emp.id} className="p-3.5 bg-stone-50/50 border border-stone-200/60 rounded-xl flex items-center justify-between gap-4">
+                      <span className="font-bold text-stone-800 text-sm">{emp.name} ({emp.role})</span>
                       <div className="flex items-center gap-4">
-                        <div className="flex items-center gap-1.5 text-xs text-stone-600">
-                          <Clock className="w-4 h-4 text-stone-400" />
-                          <span>今日排班: <strong>{emp.hours}</strong> 小時</span>
+                        <div className="text-xs text-stone-500">
+                          排班時間: <strong>{emp.hours}</strong> 小時
                         </div>
                         <button
                           onClick={() => handleDeleteEmployee(emp.id)}
-                          className="p-2 text-stone-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition"
+                          className="p-2 text-stone-400 hover:text-rose-500 transition"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -305,8 +496,8 @@ export default function AdminConsole({
                 </div>
 
                 {/* Add new employee mock form */}
-                <form onSubmit={handleAddEmployee} className="p-5 bg-stone-50 border border-stone-200/60 rounded-2xl flex flex-col sm:flex-row gap-4 items-end">
-                  <div className="flex-1 flex flex-col gap-1.5">
+                <form onSubmit={handleAddEmployee} className="p-4 bg-stone-50 border border-stone-200/60 rounded-2xl flex flex-col sm:flex-row gap-4 items-end">
+                  <div className="flex-grow flex flex-col gap-1.5">
                     <label className="text-[11px] font-bold text-stone-500">員工姓名</label>
                     <input
                       type="text"
@@ -316,8 +507,8 @@ export default function AdminConsole({
                       className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-blue-500 w-full"
                     />
                   </div>
-                  <div className="w-full sm:w-32 flex flex-col gap-1.5">
-                    <label className="text-[11px] font-bold text-stone-500">角色定位</label>
+                  <div className="w-full sm:w-36 flex flex-col gap-1.5">
+                    <label className="text-[11px] font-bold text-stone-500">角色分配</label>
                     <select
                       value={newEmpRole}
                       onChange={(e) => setNewEmpRole(e.target.value)}
@@ -343,19 +534,19 @@ export default function AdminConsole({
                     type="submit"
                     className="px-4 py-2.5 bg-stone-800 text-white rounded-xl text-xs font-bold hover:bg-stone-900 shadow-sm transition flex items-center justify-center gap-1.5 shrink-0"
                   >
-                    <Plus className="w-4 h-4" /> 新增員工
+                    <Plus className="w-4 h-4" /> 新增排班
                   </button>
                 </form>
               </div>
             </div>
           )}
 
-          {/* TAB 2: BOM & RECIPES */}
+          {/* TAB 2: BOM & RECIPES LIST */}
           {activeTab === 'bom' && (
             <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
               <div className="border-b border-stone-100 pb-4">
                 <h3 className="font-bold text-stone-800 text-lg">食譜 BOM 與 SOP 配置管理</h3>
-                <p className="text-xs text-stone-500">建立店內產品所消耗的原物料比例、製程 SOP，以及對應的員工學習進度解鎖門檻</p>
+                <p className="text-xs text-stone-500">設定甜點成品的材料清單、SOP步驟與合格技能門檻</p>
               </div>
 
               <div className="flex flex-col gap-4">
@@ -364,17 +555,17 @@ export default function AdminConsole({
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <h4 className="font-bold text-stone-800 text-sm">{recipe.name}</h4>
-                        <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 tracking-wider">
+                        <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 tracking-wider">
                           {recipe.type === 'finished' ? '成品' : '半成品'}
                         </span>
                       </div>
                       <span className="text-xs text-stone-500">
-                        最低技能解鎖門檻: <strong>{recipe.unlockThreshold}%</strong>
+                        最低解鎖技能值: <strong>{recipe.unlockThreshold}%</strong>
                       </span>
                     </div>
 
                     <div>
-                      <h5 className="text-[11px] font-bold text-stone-400 uppercase tracking-wider mb-2">配方消耗清單 (BOM)</h5>
+                      <h5 className="text-[11px] font-bold text-stone-400 uppercase tracking-wider mb-2">配方用量 (單個/單份)</h5>
                       <div className="flex flex-wrap gap-2">
                         {recipe.bom.map((b, i) => (
                           <span key={i} className="text-xs bg-stone-200/60 text-stone-700 px-3 py-1 rounded-lg border border-stone-200 font-medium">
@@ -389,64 +580,88 @@ export default function AdminConsole({
             </div>
           )}
 
-          {/* TAB 3: INVENTORY SAFETY & AUTO-ORDER */}
+          {/* TAB 3: WEEKLY SAFETY STOCK TEMPLATE */}
           {activeTab === 'inventory' && (
             <div className="flex flex-col gap-6">
-              {/* Auto ordering button header */}
+              {/* Intelligent order and template description */}
               <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
-                  <h3 className="font-bold text-stone-800 text-lg">物料安全水位預警與採購</h3>
-                  <p className="text-xs text-stone-500">系統自動比對實體庫存。當庫存低於預設安全水位時，自動提示並建立採購叫貨單。</p>
+                  <h3 className="font-bold text-stone-800 text-lg">週安全水位範本 (Weekly Safety Stocks)</h3>
+                  <p className="text-xs text-stone-500">
+                    可自訂「週一至週日」每日最低庫存水位（如假日提高以備料）。智能叫貨與任務分派將自動根據「今天星期幾」進行判定。
+                  </p>
                 </div>
                 <button
                   onClick={handleSmartOrder}
-                  className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition shadow-md shadow-blue-200/50"
+                  className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition shadow-md shadow-blue-200/50 shrink-0"
                 >
                   ⚡️ 智能一鍵叫貨
                 </button>
               </div>
 
-              {/* Materials stock warning list */}
+              {/* Weekly Minimum Safety Stocks Grid table */}
               <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
-                <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider">物料清單明細</h4>
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold text-stone-400 uppercase tracking-wider">
+                    今日水位依循模式: {daysName[currentDayOfWeek]}
+                  </h4>
+                </div>
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b border-stone-100 text-stone-400 font-bold">
-                        <th className="pb-3">物料名稱</th>
+                      <tr className="border-b border-stone-200 text-stone-400 font-bold">
+                        <th className="pb-3 pr-2">物料名稱</th>
                         <th className="pb-3">目前庫存</th>
-                        <th className="pb-3">安全水位</th>
-                        <th className="pb-3">狀態標籤</th>
-                        <th className="pb-3">預估成本</th>
-                        <th className="pb-3">供應商</th>
+                        {daysName.map((dayName, idx) => (
+                          <th key={idx} className={`pb-3 text-center ${idx === currentDayOfWeek ? 'text-blue-600 bg-blue-50/50 rounded-t-xl px-1' : ''}`}>
+                            {dayName.slice(-2)}
+                          </th>
+                        ))}
+                        <th className="pb-3 text-right">設定</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100">
                       {materials.map(mat => {
-                        const isLow = mat.qty < mat.minQty;
+                        const isEditing = editingMatId === mat.id;
+                        const isLowToday = mat.qty < (mat.weeklyMinQty[currentDayOfWeek] || 0);
+
                         return (
-                          <tr key={mat.id} className="text-stone-700">
-                            <td className="py-4 font-bold">{mat.name}</td>
-                            <td className="py-4 font-mono font-bold text-stone-800">
-                              {mat.qty} {mat.unit}
+                          <tr key={mat.id} className="text-stone-700 hover:bg-stone-50/30">
+                            <td className="py-4 font-bold pr-2">{mat.name}</td>
+                            <td className="py-4 font-mono font-bold">
+                              <span className={isLowToday ? 'text-rose-600' : 'text-emerald-600'}>
+                                {mat.qty} {mat.unit}
+                              </span>
                             </td>
-                            <td className="py-4 font-mono text-stone-500">
-                              {mat.minQty} {mat.unit}
+                            
+                            {/* Days rendering */}
+                            {[0, 1, 2, 3, 4, 5, 6].map(dayIdx => {
+                              const val = mat.weeklyMinQty[dayIdx] || 0;
+                              return (
+                                <td key={dayIdx} className={`py-4 text-center font-mono ${dayIdx === currentDayOfWeek ? 'bg-blue-50/20 font-bold' : ''}`}>
+                                  {isEditing ? (
+                                    <input
+                                      type="number"
+                                      value={val}
+                                      onChange={(e) => handleUpdateWeeklyThreshold(mat.id, dayIdx, Number(e.target.value))}
+                                      className="w-12 text-center border border-stone-200 rounded py-0.5 bg-white font-mono text-xs"
+                                    />
+                                  ) : (
+                                    <span>{val} {mat.unit}</span>
+                                  )}
+                                </td>
+                              );
+                            })}
+
+                            <td className="py-4 text-right">
+                              <button
+                                onClick={() => setEditingMatId(isEditing ? null : mat.id)}
+                                className="text-blue-600 hover:text-blue-800 text-xs font-bold underline"
+                              >
+                                {isEditing ? '儲存' : '修改範本'}
+                              </button>
                             </td>
-                            <td className="py-4">
-                              {isLow ? (
-                                <span className="px-2.5 py-1 bg-rose-50 text-rose-600 border border-rose-100 text-[10px] font-bold rounded-full flex items-center gap-1 w-max">
-                                  <AlertTriangle className="w-3.5 h-3.5" /> 低於水位
-                                </span>
-                              ) : (
-                                <span className="px-2.5 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold rounded-full flex items-center gap-1 w-max">
-                                  <Check className="w-3.5 h-3.5" /> 庫存充沛
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-4 font-mono">${mat.cost} / {mat.unit}</td>
-                            <td className="py-4 text-stone-500">{mat.supplier}</td>
                           </tr>
                         );
                       })}
@@ -458,7 +673,7 @@ export default function AdminConsole({
               {/* Add Material mock form */}
               <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
                 <h4 className="text-xs font-bold text-stone-600">➕ 建立新原料品項</h4>
-                <form onSubmit={handleAddMaterial} className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <form onSubmit={handleAddMaterial} className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                   <div className="flex flex-col gap-1">
                     <label className="text-[11px] font-bold text-stone-400">原料名稱</label>
                     <input
@@ -475,15 +690,6 @@ export default function AdminConsole({
                       type="number"
                       value={newMatQty}
                       onChange={(e) => setNewMatQty(Number(e.target.value))}
-                      className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs outline-none focus:bg-white focus:border-blue-500"
-                    />
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <label className="text-[11px] font-bold text-stone-400">安全水位</label>
-                    <input
-                      type="number"
-                      value={newMatMin}
-                      onChange={(e) => setNewMatMin(Number(e.target.value))}
                       className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs outline-none focus:bg-white focus:border-blue-500"
                     />
                   </div>
@@ -505,7 +711,7 @@ export default function AdminConsole({
                       className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs outline-none focus:bg-white focus:border-blue-500"
                     />
                   </div>
-                  <div className="flex flex-col gap-1">
+                  <div className="flex flex-col gap-1 sm:col-span-2">
                     <label className="text-[11px] font-bold text-stone-400">指定廠商</label>
                     <input
                       type="text"
@@ -515,10 +721,10 @@ export default function AdminConsole({
                       className="bg-stone-50 border border-stone-200 rounded-xl px-3 py-2 text-xs outline-none focus:bg-white focus:border-blue-500"
                     />
                   </div>
-                  <div className="sm:col-span-3 flex justify-end">
+                  <div className="sm:col-span-2 flex justify-end items-end">
                     <button
                       type="submit"
-                      className="px-5 py-2.5 bg-stone-800 text-white rounded-xl text-xs font-bold hover:bg-stone-900 transition shadow-sm active:scale-95"
+                      className="px-5 py-2.5 bg-stone-800 text-white rounded-xl text-xs font-bold hover:bg-stone-900 transition shadow-sm active:scale-95 w-full sm:w-auto"
                     >
                       建立原料品項
                     </button>
@@ -528,10 +734,10 @@ export default function AdminConsole({
             </div>
           )}
 
-          {/* TAB 4: FINANCIAL CONSUMPTION & AP */}
+          {/* TAB 4: FINANCIAL LEGER EXPENSES */}
           {activeTab === 'finance' && (
             <div className="flex flex-col gap-6">
-              {/* Financial KPI stats */}
+              {/* Financial cards */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-white p-5 rounded-2xl border border-stone-200/60 shadow-sm flex flex-col gap-1">
                   <span className="text-[10px] uppercase font-extrabold text-stone-400 tracking-wider">本週累計進貨總額</span>
@@ -556,21 +762,34 @@ export default function AdminConsole({
                 </div>
               </div>
 
-              {/* Purchase accounts breakdown list */}
+              {/* Extra payment method stats */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-emerald-50/20 p-4 rounded-xl border border-emerald-100 flex justify-between items-center text-xs">
+                  <span className="font-bold text-emerald-800">現金結算累積金額 (現結):</span>
+                  <strong className="font-mono text-emerald-800 text-sm">${cashPayments}</strong>
+                </div>
+                <div className="bg-blue-50/20 p-4 rounded-xl border border-blue-100 flex justify-between items-center text-xs">
+                  <span className="font-bold text-blue-800">月結帳款累計金額 (月結):</span>
+                  <strong className="font-mono text-blue-800 text-sm">${monthlyPayments}</strong>
+                </div>
+              </div>
+
+              {/* Purchases AP Breakdown */}
               <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
-                <h3 className="font-bold text-stone-800 text-lg">採購清單與應付帳款明細</h3>
-                <p className="text-xs text-stone-500">已簽收的採購單將納入「應付帳款 (Accounts Payable)」，未簽收的列為「在途叫貨」</p>
+                <h3 className="font-bold text-stone-800 text-lg">採購單明細與結算對帳單</h3>
+                <p className="text-xs text-stone-500">展示所有已發起之採購記錄，已簽收帳目直接納入未結算應付帳款</p>
 
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-xs border-collapse">
                     <thead>
-                      <tr className="border-b border-stone-100 text-stone-400 font-bold">
-                        <th className="pb-3">採購品項</th>
+                      <tr className="border-b border-stone-200 text-stone-400 font-bold">
+                        <th className="pb-3">採購原物料</th>
                         <th className="pb-3">採購數量</th>
-                        <th className="pb-3">採購總價</th>
+                        <th className="pb-3">單項總價</th>
+                        <th className="pb-3">付款方式</th>
                         <th className="pb-3">廠商名稱</th>
-                        <th className="pb-3">訂單狀態</th>
-                        <th className="pb-3">叫貨日期</th>
+                        <th className="pb-3">簽收狀態</th>
+                        <th className="pb-3">簽收核對人</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100">
@@ -579,19 +798,26 @@ export default function AdminConsole({
                           <td className="py-4 font-bold">{p.materialName}</td>
                           <td className="py-4 font-mono font-bold text-stone-800">{p.qty}</td>
                           <td className="py-4 font-mono text-stone-600">${p.cost}</td>
+                          <td className="py-4">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold ${
+                              p.paymentMethod === 'monthly' ? 'bg-blue-50 text-blue-600' : 'bg-emerald-50 text-emerald-600'
+                            }`}>
+                              {p.paymentMethod === 'monthly' ? '月結' : '現結'}
+                            </span>
+                          </td>
                           <td className="py-4 text-stone-500">{p.supplier}</td>
                           <td className="py-4">
                             {p.status === 'received' ? (
-                              <span className="px-2.5 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold rounded-full w-max inline-block">
-                                已簽收 (轉入應付)
+                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold rounded-full">
+                                已簽收進庫
                               </span>
                             ) : (
-                              <span className="px-2.5 py-1 bg-amber-50 text-amber-600 border border-amber-100 text-[10px] font-bold rounded-full w-max inline-block">
-                                在途叫貨 (未決)
+                              <span className="px-2 py-0.5 bg-amber-50 text-amber-600 border border-amber-100 text-[10px] font-bold rounded-full">
+                                待簽收在途
                               </span>
                             )}
                           </td>
-                          <td className="py-4 text-stone-400 font-mono">{p.date}</td>
+                          <td className="py-4 text-stone-400 font-bold">{p.signedBy || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
