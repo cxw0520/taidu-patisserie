@@ -45,6 +45,8 @@ const CostView = lazy(() => import('./components/CostView'));
 const InventoryView = lazy(() => import('./components/InventoryView'));
 const CustomerView = lazy(() => import('./components/CustomerView'));
 const SettingsView = lazy(() => import('./components/settings/SettingsView'));
+const SchedulerApp = lazy(() => import('./components/scheduler/SchedulerApp'));
+
 
 
 const DEFAULT_SETTINGS: Settings = {
@@ -81,7 +83,7 @@ const NavMenuItem = ({ label, icon, onClick, active }: { key?: string | number, 
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
-  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers' | 'pos' | 'settings'>(() => {
+  const [activeTab, setActiveTab] = useState<'journal' | 'daily' | 'inventory' | 'monthly' | 'cost' | 'customers' | 'pos' | 'settings' | 'scheduler'>(() => {
     return (localStorage.getItem('app_active_tab') as any) || 'journal';
   });
   const [globalSubTabs, setGlobalSubTabs] = useState<Record<string, string>>(() => {
@@ -359,6 +361,18 @@ export default function App() {
     return baseName;
   };
 
+  if (activeTab === 'scheduler') {
+    return (
+      <Suspense fallback={
+        <div className="min-h-screen flex items-center justify-center bg-[#fffdf5]">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-[#5d2e17]"></div>
+        </div>
+      }>
+        <SchedulerApp onBack={() => navigateTo('journal')} shopId={shopId} />
+      </Suspense>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       {isLocked && (
@@ -450,6 +464,12 @@ export default function App() {
                   </button>
                 </div>
               )}
+
+              <div className="space-y-1">
+                <button onClick={() => navigateTo('scheduler')} className="w-full flex items-center p-3 bg-coffee-800 text-white rounded-xl font-bold shadow-md hover:bg-coffee-900 transition">
+                  <Clock className="w-5 h-5 mr-3" /> 生產與排班管理
+                </button>
+              </div>
 
               {/* 手風琴選單 */}
               {[  
