@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Circle, BookOpen, Clock, Award, ChevronDown, ChevronUp, Check, Truck, AlertTriangle, Play, HelpCircle, ShieldAlert, UserCheck } from 'lucide-react';
-import { Employee, ProductionTask, Recipe, PurchaseRecord, Material } from './SchedulerApp';
+import { CheckCircle, Circle, BookOpen, Clock, Award, ChevronDown, ChevronUp, Check, Truck, AlertTriangle, Play, ShieldAlert, ShoppingBag, Plus, Trash2 } from 'lucide-react';
+import { Employee, ProductionTask, Recipe, PurchaseRecord, Material, HistoricalOrder } from './SchedulerApp';
 
 interface StaffPortalProps {
   employees: Employee[];
@@ -11,7 +11,19 @@ interface StaffPortalProps {
   onStartTask: (taskId: string, operatorName: string) => void;
   onCompleteTask: (taskId: string, actualHours?: number, shortageOption?: 'deconstruct' | 'negative') => void;
   onReceivePurchase: (purchaseId: string, signedByName: string) => void;
+  currentLoggedInEmpId: string;
+  onAddPurchaseOrders: (newPOs: PurchaseRecord[]) => void;
+  onAddHistoricalOrder: (newHist: HistoricalOrder) => void;
   onUpdateProgress: (empId: string, recipeId: string, newProgress: number) => void;
+}
+
+interface SuggestedOrderItem {
+  materialId: string;
+  name: string;
+  suggestedQty: number;
+  unit: string;
+  cost: number;
+  supplier: string;
 }
 
 export default function StaffPortal({
@@ -22,11 +34,18 @@ export default function StaffPortal({
   materials,
   onStartTask,
   onCompleteTask,
-  onReceivePurchase
+  onReceivePurchase,
+  currentLoggedInEmpId,
+  onAddPurchaseOrders,
+  onAddHistoricalOrder
 }: StaffPortalProps) {
-  const [selectedEmpId, setSelectedEmpId] = useState<string>(employees[0]?.id || '');
-  const [activeTab, setActiveTab] = useState<'tasks' | 'training' | 'receiving'>('tasks');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'training' | 'receiving' | 'ordering'>('tasks');
   const [expandedRecipeId, setExpandedRecipeId] = useState<string | null>(null);
+
+  // Suggested orders states
+  const [orderItems, setOrderItems] = useState<SuggestedOrderItem[]>([]);
+  const [paymentMethod, setPaymentMethod] = useState<'monthly' | 'cash'>('cash');
+  const [isOrderInitiated, setIsOrderInitiated] = useState(false);
 
   // Stopwatch ticking state
   const [, setTick] = useState(0);
@@ -36,8 +55,10 @@ export default function StaffPortal({
   const [shortageTaskId, setShortageTaskId] = useState<string | null>(null);
   const [shortageDetails, setShortageDetails] = useState<{ name: string; needed: number; stock: number } | null>(null);
 
-  // Deliveries states
-  const [receiverName, setReceiverName] = useState('');
+  const today = new Date();
+  const currentDayOfWeek = today.getDay();
+  const todayISOStr = today.toISOString().split('T')[0];
+  const daysName = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -46,12 +67,41 @@ export default function StaffPortal({
     return () => clearInterval(timer);
   }, []);
 
-  const currentEmployee = employees.find(e => e.id === selectedEmpId);
-  const employeeTasks = tasks.filter(t => t.assignedTo === currentEmployee?.name);
-  
-  // Filter today's purchases
-  const todayISOStr = new Date().toISOString().split('T')[0];
+  const currentEmployee = employees.find(e => e.id === currentLoggedInEmpId) || employees[0];
+  const pendingPurchases = purchases.filter(p => p.status === 'pending');
   const todayPurchases = purchases.filter(p => p.expectedDate === todayISOStr);
+
+  // Initialize dynamic reorder list based on safety stocks for today
+  useEffect(() => {
+    if (activeTab === 'ordering' && !isOrderInitiated) {
+      const suggested: SuggestedOrderItem[] = [];
+      materials.forEach(mat => {
+        if (mat.type === 'raw') {
+          const safetyStock = mat.weeklyMinQty[currentDayOfWeek] || 0;
+          if (mat.qty < safetyStock) {
+            const gap = safetyStock * 2 - mat.qty;
+            suggested.push({
+              materialId: mat.id,
+              name: mat.name,
+              suggestedQty: parseFloat(Math.max(1, gap).toFixed(1)),
+              unit: mat.unit,
+              cost: mat.cost,
+              supplier: mat.supplier
+            });
+          }
+        }
+      });
+      setOrderItems(suggested);
+      setIsOrderInitiated(true);
+    }
+  }, [activeTab, materials, currentDayOfWeek, isOrderInitiated]);
+
+  // Clean ordering state when leaving the tab
+  useEffect(() => {
+    if (activeTab !== 'ordering') {
+      setIsOrderInitiated(false);
+    }
+  }, [activeTab]);
 
   // Helper to format elapsed time for the stopwatch running
   const getElapsedTimeString = (startTimeStr: string) => {
@@ -123,459 +173,631 @@ export default function StaffPortal({
     setShortageDetails(null);
   };
 
+  // Calculate Overall Progress (Average of all recipes for current employee)
+  const totalRecipeCount = recipes.length;
+  const progressSum = recipes.reduce((sum, r) => sum + (currentEmployee.progress[r.id] || 0), 0);
+  const overallProgress = totalRecipeCount > 0 ? Math.round(progressSum / totalRecipeCount) : 0;
+
+  // Submit generated purchase orders
+  const handleSubmitOrders = () => {
+    if (orderItems.length === 0) {
+      alert('請先填載欲叫貨的物料項目！');
+      return;
+    }
+
+    // Create Purchase records & historical groups
+    const newPOs: PurchaseRecord[] = [];
+    const groupedBySupplier: Record<string, typeof orderItems> = {};
+
+    orderItems.forEach(item => {
+      if (!groupedBySupplier[item.supplier]) {
+        groupedBySupplier[item.supplier] = [];
+      }
+      groupedBySupplier[item.supplier].push(item);
+    });
+
+    const currentOrderDate = new Date().toISOString().replace('T', ' ').slice(0, 16);
+
+    Object.keys(groupedBySupplier).forEach(supplier => {
+      const supplierItems = groupedBySupplier[supplier];
+      
+      // Save individual purchase records
+      supplierItems.forEach((item, idx) => {
+        newPOs.push({
+          id: `pur-staff-${Date.now()}-${idx}`,
+          materialName: item.name,
+          qty: item.suggestedQty,
+          cost: Math.round(item.suggestedQty * item.cost),
+          supplier: item.supplier,
+          status: 'pending',
+          date: todayISOStr,
+          expectedDate: todayISOStr, // Standard Mock: Delivered today
+          paymentMethod: paymentMethod,
+          signedBy: null
+        });
+      });
+
+      // Save to history log
+      onAddHistoricalOrder({
+        id: `hist-staff-${Date.now()}-${supplier}`,
+        date: currentOrderDate,
+        supplier: supplier,
+        items: supplierItems.map(item => ({
+          name: item.name,
+          qty: item.suggestedQty,
+          cost: Math.round(item.suggestedQty * item.cost)
+        })),
+        orderedBy: currentEmployee.name
+      });
+    });
+
+    onAddPurchaseOrders(newPOs);
+    alert(`已為您成功生成並保存叫貨單！今日叫貨單已安全記錄到後台「歷史叫貨單」以備查核。`);
+    setOrderItems([]);
+    setActiveTab('tasks');
+  };
+
+  const handleUpdateOrderItemQty = (materialId: string, val: number) => {
+    setOrderItems(prev => prev.map(item => {
+      if (item.materialId === materialId) {
+        return { ...item, suggestedQty: Math.max(0.1, val) };
+      }
+      return item;
+    }));
+  };
+
+  const handleDeleteOrderItem = (materialId: string) => {
+    setOrderItems(prev => prev.filter(item => item.materialId !== materialId));
+  };
+
+  const handleAddCustomOrderItem = (matId: string) => {
+    const mat = materials.find(m => m.id === matId);
+    if (!mat) return;
+    if (orderItems.some(i => i.materialId === matId)) {
+      alert('該原物料已在採購單中！');
+      return;
+    }
+    setOrderItems(prev => [...prev, {
+      materialId: mat.id,
+      name: mat.name,
+      suggestedQty: 5, // Default amount
+      unit: mat.unit,
+      cost: mat.cost,
+      supplier: mat.supplier
+    }]);
+  };
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-      {/* Sidebar: Employee Picker & Mentorship */}
+      {/* Sidebar: Logged In Employee Info & Mentorship */}
       <div className="lg:col-span-1 bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
-        <div>
-          <h3 className="text-sm font-bold text-stone-400 uppercase tracking-widest">當前登入員工</h3>
-          <p className="text-xs text-stone-500 mt-1">選擇您的名字以查看專屬任務與師徒配對</p>
-        </div>
-
-        <div className="flex flex-col gap-3">
-          {employees.map(emp => {
-            const isActive = emp.id === selectedEmpId;
-            const empTasks = tasks.filter(t => t.assignedTo === emp.name);
-            const completedCount = empTasks.filter(t => t.status === 'completed').length;
-            const totalCount = empTasks.length;
-
-            return (
-              <button
-                key={emp.id}
-                onClick={() => {
-                  setSelectedEmpId(emp.id);
-                  setExpandedRecipeId(null);
-                }}
-                className={`w-full text-left p-4 rounded-2xl border transition-all flex flex-col gap-2 ${
-                  isActive
-                    ? 'bg-amber-50/50 border-amber-300 shadow-sm'
-                    : 'bg-stone-50/50 border-stone-200/70 hover:bg-stone-50 hover:border-stone-300'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span className="font-bold text-stone-800 text-sm">{emp.name}</span>
-                  <span className="text-[9px] font-extrabold uppercase px-2 py-0.5 rounded-full bg-stone-200 text-stone-600 tracking-wider">
-                    {emp.role}
-                  </span>
-                </div>
-                
-                {/* Apprenticeship display */}
-                <div className="text-[10px] text-stone-500 font-medium">
-                  {emp.mentorName && (
-                    <div className="flex items-center gap-1 text-amber-700">
-                      <span className="bg-amber-100 px-1.5 py-0.2 rounded font-extrabold text-[9px]">師父</span>
-                      <span>{emp.mentorName} 師傅</span>
-                    </div>
-                  )}
-                  {emp.apprentices && emp.apprentices.length > 0 && (
-                    <div className="flex items-center gap-1 text-blue-700 mt-0.5">
-                      <span className="bg-blue-100 px-1.5 py-0.2 rounded font-extrabold text-[9px]">徒弟</span>
-                      <span>{emp.apprentices.join(', ')}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between text-xs text-stone-500 mt-1 border-t border-stone-200/40 pt-1.5">
-                  <span className="flex items-center gap-1">
-                    <Clock className="w-3.5 h-3.5 text-stone-400" />
-                    今日工時: {emp.hours}h
-                  </span>
-                  <span className="font-bold text-stone-700">
-                    任務: {completedCount}/{totalCount}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
-        </div>
-
-        <div className="mt-auto pt-6 border-t border-stone-100 flex flex-col gap-4">
-          <div className="bg-stone-50 p-4 rounded-2xl border border-stone-200/50 flex flex-col gap-2">
-            <h4 className="text-xs font-bold text-stone-600">系統小提示</h4>
-            <p className="text-[11px] text-stone-500 leading-relaxed">
-              計時器啟動後將在背景持續運算，即便您暫時切換分頁，計時也不會中斷！
-            </p>
+        <div className="flex flex-col gap-4 border-b border-stone-100 pb-5">
+          <div className="flex items-center gap-3">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500 text-white flex items-center justify-center font-bold text-lg shadow-md shadow-amber-200">
+              {currentEmployee.name[0]}
+            </div>
+            <div>
+              <h3 className="font-extrabold text-stone-800 text-sm">{currentEmployee.name}</h3>
+              <span className="text-[10px] font-extrabold uppercase px-2 py-0.5 rounded bg-stone-100 text-stone-500 tracking-wider">
+                {currentEmployee.role}
+              </span>
+            </div>
           </div>
+
+          {/* Mentorship relationship detail */}
+          <div className="text-[11px] text-stone-500 font-medium flex flex-col gap-1">
+            {currentEmployee.mentorName && (
+              <div className="flex items-center gap-1.5 text-amber-700 bg-amber-50/50 px-2.5 py-1 rounded-lg">
+                <span className="font-extrabold text-[9px] uppercase tracking-wider">師父</span>
+                <span>{currentEmployee.mentorName} 師傅</span>
+              </div>
+            )}
+            {currentEmployee.apprentices && currentEmployee.apprentices.length > 0 && (
+              <div className="flex items-center gap-1.5 text-blue-700 bg-blue-50/50 px-2.5 py-1 rounded-lg">
+                <span className="font-extrabold text-[9px] uppercase tracking-wider">帶領徒弟</span>
+                <span>{currentEmployee.apprentices.join(', ')}</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Workspace navigation tabs */}
+        <div className="flex flex-col gap-1.5">
+          <button
+            onClick={() => setActiveTab('tasks')}
+            className={`w-full text-left px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
+              activeTab === 'tasks'
+                ? 'bg-amber-50 text-amber-800 border border-amber-200 shadow-sm'
+                : 'text-stone-500 hover:bg-stone-50'
+            }`}
+          >
+            📋 今日工作總覽
+          </button>
+          
+          <button
+            onClick={() => setActiveTab('training')}
+            className={`w-full text-left px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
+              activeTab === 'training'
+                ? 'bg-amber-50 text-amber-800 border border-amber-200 shadow-sm'
+                : 'text-stone-500 hover:bg-stone-50'
+            }`}
+          >
+            🎓 學習進度 & 食譜
+          </button>
+
+          <button
+            onClick={() => setActiveTab('receiving')}
+            className={`w-full text-left px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-between ${
+              activeTab === 'receiving'
+                ? 'bg-amber-50 text-amber-800 border border-amber-200 shadow-sm'
+                : 'text-stone-500 hover:bg-stone-50'
+            }`}
+          >
+            <span>🚚 今日應收貨</span>
+            {todayPurchases.filter(p => p.status === 'pending').length > 0 && (
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping shrink-0" />
+            )}
+          </button>
+
+          {currentEmployee.canOrder && (
+            <button
+              onClick={() => setActiveTab('ordering')}
+              className={`w-full text-left px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-between ${
+                activeTab === 'ordering'
+                  ? 'bg-amber-50 text-amber-800 border border-amber-200 shadow-sm'
+                  : 'text-stone-500 hover:bg-stone-50'
+              }`}
+            >
+              <span>⚡️ 今日叫貨區</span>
+              <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 tracking-wider">
+                權限
+              </span>
+            </button>
+          )}
         </div>
       </div>
 
-      {/* Main Workspace */}
+      {/* Main Workspace display */}
       <div className="lg:col-span-3 flex flex-col gap-6">
-        {/* Workspace Navigation */}
-        <div className="flex border-b border-stone-200/80">
-          <button
-            onClick={() => setActiveTab('tasks')}
-            className={`px-6 py-3 font-bold text-xs tracking-wider uppercase border-b-2 transition-all -mb-[2px] ${
-              activeTab === 'tasks'
-                ? 'border-amber-500 text-amber-600'
-                : 'border-transparent text-stone-500 hover:text-stone-700'
-            }`}
-          >
-            當日生產任務 ({employeeTasks.length})
-          </button>
-          <button
-            onClick={() => setActiveTab('training')}
-            className={`px-6 py-3 font-bold text-xs tracking-wider uppercase border-b-2 transition-all -mb-[2px] ${
-              activeTab === 'training'
-                ? 'border-amber-500 text-amber-600'
-                : 'border-transparent text-stone-500 hover:text-stone-700'
-            }`}
-          >
-            我的學習進度 & 食譜
-          </button>
-          <button
-            onClick={() => setActiveTab('receiving')}
-            className={`px-6 py-3 font-bold text-xs tracking-wider uppercase border-b-2 transition-all -mb-[2px] flex items-center gap-2 ${
-              activeTab === 'receiving'
-                ? 'border-amber-500 text-amber-600'
-                : 'border-transparent text-stone-500 hover:text-stone-700'
-            }`}
-          >
-            今日應收貨
-            {todayPurchases.filter(p => p.status === 'pending').length > 0 && (
-              <span className="px-1.5 py-0.2 rounded-full bg-rose-500 text-white font-extrabold text-[8px] animate-pulse">
-                {todayPurchases.filter(p => p.status === 'pending').length}
-              </span>
-            )}
-          </button>
+        
+        {/* Workspace header title */}
+        <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm">
+          {activeTab === 'tasks' && (
+            <div>
+              <h3 className="font-extrabold text-stone-800 text-lg">今日生產工作清單 (總覽)</h3>
+              <p className="text-xs text-stone-500 mt-1">選定要製作的品項點擊「領取並開始」，系統會自動計算排程與記錄實際工時。</p>
+            </div>
+          )}
+          {activeTab === 'training' && (
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h3 className="font-extrabold text-stone-800 text-lg">技能教學進度總覽</h3>
+                <p className="text-xs text-stone-500 mt-1">產品與半成品進度由師傅定期考核。解鎖後卡片將亮起，即可點閱對應食譜圖文與 SOP。</p>
+              </div>
+              
+              {/* Overall Completion Circle */}
+              <div className="bg-amber-50 border border-amber-200 px-4 py-2.5 rounded-2xl flex items-center gap-2 text-xs">
+                <span className="font-bold text-amber-800">全產品解鎖進度:</span>
+                <strong className="font-mono text-amber-800 text-sm">{overallProgress}%</strong>
+              </div>
+            </div>
+          )}
+          {activeTab === 'receiving' && (
+            <div>
+              <h3 className="font-extrabold text-stone-800 text-lg">今日應簽收物料清單</h3>
+              <p className="text-xs text-stone-500 mt-1">實體清點到店物料，點選確認簽收後會自動匯入後台庫存中。</p>
+            </div>
+          )}
+          {activeTab === 'ordering' && (
+            <div>
+              <h3 className="font-extrabold text-stone-800 text-lg">本日智能採購叫貨區</h3>
+              <p className="text-xs text-stone-500 mt-1">系統自動比對今日安全水位，在此編輯採購用量與品項，確認後生成各廠商之採購單。</p>
+            </div>
+          )}
         </div>
 
-        {/* Tab Content Rendering */}
-        <div className="min-h-[500px]">
+        {/* WORKSPACE DETAIL SECTION */}
+        <div className="min-h-[480px]">
           
-          {/* 1. TASKS TAB WITH TIMER */}
+          {/* TAB 1: DAILY TASKS (WITH CLAIM FLOW) */}
           {activeTab === 'tasks' && (
-            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
-              <div className="flex items-center justify-between border-b border-stone-100 pb-4">
-                <div>
-                  <h3 className="font-bold text-stone-800 text-lg">今日生產排程看板 ({currentEmployee?.name})</h3>
-                  <p className="text-xs text-stone-500">點擊「開始製作」來記錄工時，製作完成後將自動扣除對應的物料與半成品庫存</p>
-                </div>
-              </div>
-
-              {employeeTasks.length === 0 ? (
-                <div className="py-16 text-center flex flex-col items-center justify-center gap-3">
-                  <CheckCircle className="w-12 h-12 text-emerald-500 animate-bounce" />
-                  <p className="font-bold text-stone-700 text-sm">今日無分派任務，或所有任務均已完成！</p>
-                  <p className="text-xs text-stone-400">您可以切換至其他員工，或前往自主學習。</p>
+            <div className="flex flex-col gap-4">
+              {tasks.length === 0 ? (
+                <div className="bg-white py-16 text-center rounded-3xl border border-stone-200/60 shadow-sm flex flex-col items-center justify-center gap-3">
+                  <CheckCircle className="w-12 h-12 text-emerald-500" />
+                  <p className="font-bold text-stone-700 text-sm">今日沒有任何生產排程</p>
+                  <p className="text-xs text-stone-400">請前往後台管理介面生成今日生產排程。</p>
                 </div>
               ) : (
-                <div className="flex flex-col gap-4">
-                  {employeeTasks.map(task => {
-                    const isPending = task.status === 'pending';
-                    const isInProgress = task.status === 'inprogress';
-                    const isCompleted = task.status === 'completed';
+                tasks.map(task => {
+                  const isPending = task.status === 'pending';
+                  const isInProgress = task.status === 'inprogress';
+                  const isCompleted = task.status === 'completed';
+                  const isAssignedToSelf = task.assignedTo === currentEmployee.name;
 
-                    return (
-                      <div
-                        key={task.id}
-                        className={`p-5 rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
-                          isCompleted
-                            ? 'bg-emerald-50/20 border-emerald-200/50 opacity-70'
-                            : isInProgress
-                            ? 'bg-amber-50/20 border-amber-300/80 shadow-md shadow-amber-50'
-                            : 'bg-stone-50/30 border-stone-200/60 hover:bg-stone-50 hover:shadow-sm'
-                        }`}
-                      >
-                        <div className="flex items-center gap-4">
-                          <div className={`p-3 rounded-xl ${
-                            isCompleted ? 'bg-emerald-100 text-emerald-600' : isInProgress ? 'bg-amber-100 text-amber-600' : 'bg-stone-100 text-stone-400'
-                          }`}>
-                            <Clock className="w-5 h-5" />
-                          </div>
+                  return (
+                    <div
+                      key={task.id}
+                      className={`p-5 bg-white rounded-2xl border transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-4 ${
+                        isCompleted
+                          ? 'border-emerald-200 opacity-60'
+                          : isInProgress
+                          ? 'border-amber-300 shadow-md shadow-amber-50 bg-amber-50/5'
+                          : 'border-stone-200/70 hover:shadow-sm'
+                      }`}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`p-3 rounded-xl shrink-0 ${
+                          isCompleted ? 'bg-emerald-100 text-emerald-600' : isInProgress ? 'bg-amber-100 text-amber-600' : 'bg-stone-100 text-stone-400'
+                        }`}>
+                          <Clock className="w-5 h-5" />
+                        </div>
 
-                          <div>
+                        <div>
+                          <div className="flex items-center gap-2">
                             <span className={`font-bold text-sm text-stone-800 ${isCompleted ? 'line-through text-stone-400' : ''}`}>
                               {task.name}
                             </span>
-                            <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px]">
-                              <span className="font-bold text-stone-500 bg-stone-100 px-2 py-0.5 rounded">
-                                數量: {task.qty} {task.unit}
+                            <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-stone-100 text-stone-600">
+                              派工人: {task.assignedTo}
+                            </span>
+                            {isInProgress && task.operator && (
+                              <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-amber-100 text-amber-700">
+                                製作中: {task.operator}
                               </span>
-                              <span className="font-medium text-stone-400">
-                                預估工時: {task.requiredTimeHours}h
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 mt-1.5 text-[11px] text-stone-400">
+                            <span className="font-bold text-stone-500 bg-stone-100 px-2 py-0.5 rounded">
+                              產量: {task.qty} {task.unit}
+                            </span>
+                            <span>預估工時: {task.requiredTimeHours}h</span>
+                            {isCompleted && task.actualTimeHours && (
+                              <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
+                                實際工時: {task.actualTimeHours}h
                               </span>
-                              {isCompleted && task.actualTimeHours && (
-                                <span className="font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded">
-                                  實際花費: {task.actualTimeHours}h
-                                </span>
-                              )}
-                            </div>
+                            )}
                           </div>
                         </div>
-
-                        {/* Interactive Stopwatch and Operations */}
-                        <div className="flex items-center gap-3 self-end sm:self-auto">
-                          {isPending && (
-                            <button
-                              onClick={() => currentEmployee && onStartTask(task.id, currentEmployee.name)}
-                              className="px-4 py-2 bg-stone-800 text-white rounded-xl text-xs font-bold hover:bg-stone-900 shadow-sm transition active:scale-95 flex items-center gap-1.5"
-                            >
-                              <Play className="w-3.5 h-3.5 fill-current" /> 開始製作
-                            </button>
-                          )}
-
-                          {isInProgress && task.startTime && (
-                            <div className="flex items-center gap-3">
-                              {/* Running stopwatch */}
-                              <div className="bg-amber-100/60 text-amber-700 px-3 py-1.5 rounded-xl font-mono text-xs font-bold animate-pulse border border-amber-200">
-                                已計時: {getElapsedTimeString(task.startTime)}
-                              </div>
-                              <button
-                                onClick={() => triggerCompleteTask(task)}
-                                className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-sm transition active:scale-95"
-                              >
-                                結束並勾選完成
-                              </button>
-                            </div>
-                          )}
-
-                          {isCompleted && (
-                            <div className="flex flex-col items-end gap-1">
-                              <button
-                                onClick={() => onCompleteTask(task.id)}
-                                className="text-xs text-stone-400 hover:text-stone-600 underline font-medium"
-                              >
-                                撤回完成 (還原庫存)
-                              </button>
-                              
-                              {task.overtimeTriggered && (
-                                <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-100 flex items-center gap-1 mt-1">
-                                  ⚠️ 製作超時，下次請留意效率
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
                       </div>
-                    );
-                  })}
-                </div>
+
+                      {/* Claims & Timer actions */}
+                      <div className="flex items-center gap-3 self-end sm:self-auto shrink-0">
+                        {isPending && (
+                          <button
+                            onClick={() => onStartTask(task.id, currentEmployee.name)}
+                            className="px-4 py-2 bg-stone-800 text-white rounded-xl text-xs font-bold hover:bg-stone-900 shadow-sm transition active:scale-95 flex items-center gap-1.5"
+                          >
+                            <Play className="w-3.5 h-3.5 fill-current" /> 領取並開始
+                          </button>
+                        )}
+
+                        {isInProgress && (
+                          <div className="flex items-center gap-3">
+                            {task.startTime && (
+                              <div className="bg-amber-100/60 text-amber-700 px-3 py-1.5 rounded-xl font-mono text-xs font-bold animate-pulse border border-amber-200">
+                                ⏱️ {getElapsedTimeString(task.startTime)}
+                              </div>
+                            )}
+                            
+                            {/* Allow anyone with active profile to complete, but tracks operator */}
+                            <button
+                              onClick={() => triggerCompleteTask(task)}
+                              className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-sm transition active:scale-95"
+                            >
+                              結束製作並勾選
+                            </button>
+                          </div>
+                        )}
+
+                        {isCompleted && (
+                          <div className="flex flex-col items-end gap-1">
+                            <button
+                              onClick={() => onCompleteTask(task.id)}
+                              className="text-xs text-stone-400 hover:text-stone-600 underline font-medium"
+                            >
+                              撤回勾選 (還原庫存)
+                            </button>
+                            
+                            {task.overtimeTriggered && (
+                              <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-2.5 py-0.5 rounded-full border border-rose-100 flex items-center gap-1 mt-1">
+                                ⚠️ 超時, 下次請留意效率
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
               )}
             </div>
           )}
 
-          {/* 2. TRAINING TAB (READ-ONLY PROGRESS & RECIPES) */}
+          {/* TAB 2: LEARNING & GREYED OUT RECIPES */}
           {activeTab === 'training' && (
-            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
-              <div className="border-b border-stone-100 pb-4">
-                <h3 className="font-bold text-stone-800 text-lg">我的學習進度 & 食譜解鎖庫</h3>
-                <p className="text-xs text-stone-500">技能分數由您的師傅評估。技能點數達到解鎖門檻時，即可查閱完整的 SOP 設計與 BOM 清單。</p>
-              </div>
+            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
+              {recipes.map(recipe => {
+                const userProgress = currentEmployee.progress[recipe.id] || 0;
+                const isUnlocked = userProgress >= recipe.unlockThreshold;
+                const isExpanded = expandedRecipeId === recipe.id;
 
-              <div className="flex flex-col gap-5">
-                {recipes.map(recipe => {
-                  const userProgress = currentEmployee?.progress[recipe.id] || 0;
-                  const isUnlocked = userProgress >= recipe.unlockThreshold;
-                  const isExpanded = expandedRecipeId === recipe.id;
-
-                  return (
-                    <div
-                      key={recipe.id}
-                      className={`rounded-2xl border transition-all ${
-                        isUnlocked
-                          ? 'border-stone-200 bg-stone-50/20'
-                          : 'border-stone-100 bg-stone-50/10 opacity-75'
-                      }`}
-                    >
-                      {/* Recipe Title Bar */}
-                      <div className="p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100">
-                        <div className="flex items-center gap-3">
-                          <div className={`p-2.5 rounded-xl ${isUnlocked ? 'bg-amber-100/50 text-amber-600' : 'bg-stone-100 text-stone-400'}`}>
-                            <BookOpen className="w-5 h-5" />
-                          </div>
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <h4 className="font-bold text-stone-800 text-sm">{recipe.name}</h4>
-                              <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 tracking-wider">
-                                {recipe.type === 'finished' ? '成品' : '半成品'}
-                              </span>
-                            </div>
-                            <p className="text-xs text-stone-500 mt-0.5">
-                              解鎖門檻: {recipe.unlockThreshold}% 
-                            </p>
-                          </div>
-                        </div>
-
-                        {/* Drag Progress read-only display with slider disabled */}
-                        <div className="flex items-center gap-4 flex-1 max-w-xs sm:justify-end">
-                          <div className="flex-grow flex flex-col gap-1">
-                            <div className="h-2 bg-stone-200 rounded-full overflow-hidden">
-                              <div 
-                                className={`h-full rounded-full transition-all duration-500 ${isUnlocked ? 'bg-amber-500' : 'bg-stone-400'}`}
-                                style={{ width: `${userProgress}%` }}
-                              />
-                            </div>
-                            <span className="text-[10px] font-bold text-stone-500 text-right">
-                              師父核定: {userProgress}%
-                            </span>
-                          </div>
-
-                          {isUnlocked ? (
-                            <button
-                              onClick={() => setExpandedRecipeId(isExpanded ? null : recipe.id)}
-                              className="text-stone-500 hover:text-stone-800 transition flex items-center gap-1 text-xs font-bold shrink-0"
-                            >
-                              {isExpanded ? (
-                                <>收合食譜 <ChevronUp className="w-4 h-4" /></>
-                              ) : (
-                                <>食譜與SOP <ChevronDown className="w-4 h-4" /></>
-                              )}
-                            </button>
-                          ) : (
-                            <span className="text-xs font-bold text-stone-400 flex items-center gap-1 shrink-0">
-                              <ShieldAlert className="w-3.5 h-3.5 text-stone-300" /> 尚未解鎖
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Recipe SOP Details */}
-                      {isUnlocked && isExpanded && (
-                        <div className="p-5 bg-white rounded-b-2xl border-t border-stone-100 flex flex-col gap-6">
-                          <div>
-                            <h5 className="text-xs font-bold text-stone-600 mb-2.5">📋 配方清單 (BOM)</h5>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                              {recipe.bom.map(bomItem => {
-                                const currentStock = materials.find(m => m.id === bomItem.materialId)?.qty || 0;
-                                return (
-                                  <div key={bomItem.materialId} className="flex justify-between items-center p-3 bg-stone-50 rounded-xl border border-stone-200/40 text-xs">
-                                    <span className="font-medium text-stone-600">{bomItem.name}</span>
-                                    <div className="flex items-center gap-2">
-                                      <span className="font-mono text-stone-700 bg-stone-200/50 px-2 py-0.5 rounded font-bold">
-                                        單個用量: {bomItem.qty} {bomItem.unit}
-                                      </span>
-                                      <span className="text-[10px] text-stone-400">
-                                        (庫存: {currentStock} {bomItem.unit})
-                                      </span>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-
-                          {/* SOP Images Preview */}
-                          {recipe.images && recipe.images.length > 0 && (
-                            <div>
-                              <h5 className="text-xs font-bold text-stone-600 mb-2.5">📸 SOP 圖文對照</h5>
-                              <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin">
-                                {recipe.images.map((imgUrl, i) => (
-                                  <div key={i} className="flex-shrink-0 w-36 h-24 rounded-xl overflow-hidden border border-stone-200 shadow-sm bg-stone-50 relative group">
-                                    <img src={imgUrl} alt={`Step image ${i + 1}`} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                                    <div className="absolute top-1 left-1 bg-black/60 text-white font-mono text-[9px] px-1.5 py-0.2 rounded font-extrabold">步驟對照</div>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-
-                          <div>
-                            <h5 className="text-xs font-bold text-stone-600 mb-3">🥖 製作 SOP 步驟</h5>
-                            <ol className="flex flex-col gap-3">
-                              {recipe.sop.map((step, idx) => (
-                                <li key={idx} className="flex gap-3 text-xs leading-relaxed text-stone-600">
-                                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center font-bold font-mono text-[10px]">
-                                    {idx + 1}
-                                  </span>
-                                  <span className="pt-0.5">{step}</span>
-                                </li>
-                              ))}
-                            </ol>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* 3. RECEIVING TAB (TODAY'S DELIVERIES) */}
-          {activeTab === 'receiving' && (
-            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
-              <div className="border-b border-stone-100 pb-4">
-                <h3 className="font-bold text-stone-800 text-lg">今日應進貨簽收</h3>
-                <p className="text-xs text-stone-500">此清單會自動列出預計今日（{todayISOStr}）到貨的物料採購。請進行實物數量清點，核對無誤後完成簽收。</p>
-              </div>
-
-              {/* Receive operator select picker */}
-              <div className="flex flex-col sm:flex-row items-center gap-4 bg-stone-50 p-4 rounded-2xl border border-stone-200/50">
-                <div className="flex items-center gap-2 text-xs text-stone-600 font-bold shrink-0">
-                  <UserCheck className="w-4 h-4 text-stone-400" />
-                  <span>指定簽收核對人:</span>
-                </div>
-                <div className="flex gap-2">
-                  {employees.map(emp => (
-                    <button
-                      key={emp.id}
-                      onClick={() => setReceiverName(emp.name)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
-                        receiverName === emp.name
-                          ? 'bg-stone-800 text-white border-stone-800'
-                          : 'bg-white text-stone-600 border-stone-200 hover:bg-stone-100'
-                      }`}
-                    >
-                      {emp.name}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {todayPurchases.filter(p => p.status === 'pending').length === 0 ? (
-                <div className="py-16 text-center flex flex-col items-center justify-center gap-3 text-stone-400">
-                  <Truck className="w-12 h-12 text-stone-300" />
-                  <p className="font-bold text-stone-600 text-sm">今日沒有待簽收的進貨</p>
-                  <p className="text-xs text-stone-400">如需採購叫貨，可前往後台「庫存預警與智能叫貨」發起。</p>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-3.5">
-                  {todayPurchases.filter(p => p.status === 'pending').map(purchase => (
-                    <div
-                      key={purchase.id}
-                      className="p-5 bg-stone-50/50 border border-stone-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all"
-                    >
-                      <div className="flex items-center gap-4">
-                        <div className="p-3 bg-amber-100/50 text-amber-600 rounded-xl">
-                          <Truck className="w-5 h-5" />
+                return (
+                  <div
+                    key={recipe.id}
+                    className={`rounded-2xl border transition-all ${
+                      isUnlocked
+                        ? 'border-stone-200 bg-stone-50/20'
+                        : 'border-stone-100 bg-stone-50/5 opacity-55 grayscale cursor-not-allowed'
+                    }`}
+                  >
+                    <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-2.5 rounded-xl ${isUnlocked ? 'bg-amber-100/50 text-amber-600' : 'bg-stone-100 text-stone-400'}`}>
+                          <BookOpen className="w-5 h-5" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
-                            <h4 className="font-bold text-stone-800 text-sm">{purchase.materialName}</h4>
-                            <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${
-                              purchase.paymentMethod === 'monthly' ? 'bg-blue-100 text-blue-700' : 'bg-amber-100 text-amber-700'
-                            }`}>
-                              {purchase.paymentMethod === 'monthly' ? '月結' : '現結'}
+                            <h4 className="font-bold text-stone-800 text-sm">{recipe.name}</h4>
+                            <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 tracking-wider">
+                              {recipe.type === 'finished' ? '成品' : '半成品'}
                             </span>
                           </div>
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className="text-[11px] font-bold text-stone-500 bg-stone-200/50 px-2 py-0.5 rounded">
-                              進貨量: {purchase.qty}
-                            </span>
-                            <span className="text-[11px] font-medium text-stone-400">
-                              廠商: {purchase.supplier}
-                            </span>
-                          </div>
+                          <p className="text-xs text-stone-500 mt-0.5">
+                            解鎖限制: {recipe.unlockThreshold}% 
+                          </p>
                         </div>
                       </div>
 
+                      <div className="flex items-center gap-4 flex-1 max-w-xs sm:justify-end">
+                        <div className="flex-grow flex flex-col gap-1">
+                          <div className="h-2 bg-stone-200 rounded-full overflow-hidden">
+                            <div 
+                              className={`h-full rounded-full transition-all duration-500 ${isUnlocked ? 'bg-amber-500' : 'bg-stone-400'}`}
+                              style={{ width: `${userProgress}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-bold text-stone-500 text-right">
+                            我的進度: {userProgress}%
+                          </span>
+                        </div>
+
+                        {isUnlocked ? (
+                          <button
+                            onClick={() => setExpandedRecipeId(isExpanded ? null : recipe.id)}
+                            className="text-stone-500 hover:text-stone-800 transition flex items-center gap-1 text-xs font-bold shrink-0"
+                          >
+                            {isExpanded ? '收合食譜' : '檢視食譜與SOP'}
+                          </button>
+                        ) : (
+                          <span className="text-xs font-bold text-stone-400 flex items-center gap-1 shrink-0">
+                            <ShieldAlert className="w-3.5 h-3.5 text-stone-300" /> 未解鎖
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {isUnlocked && isExpanded && (
+                      <div className="p-5 bg-white rounded-b-2xl border-t border-stone-100 flex flex-col gap-6">
+                        <div>
+                          <h5 className="text-xs font-bold text-stone-600 mb-2.5">📋 配方清單 (BOM)</h5>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                            {recipe.bom.map(bomItem => {
+                              const currentStock = materials.find(m => m.id === bomItem.materialId)?.qty || 0;
+                              return (
+                                <div key={bomItem.materialId} className="flex justify-between items-center p-3 bg-stone-50 rounded-xl border border-stone-200/40 text-xs">
+                                  <span className="font-medium text-stone-600">{bomItem.name}</span>
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-stone-700 bg-stone-200/50 px-2 py-0.5 rounded font-bold">
+                                      單個用量: {bomItem.qty} {bomItem.unit}
+                                    </span>
+                                    <span className="text-[10px] text-stone-400">
+                                      (庫存: {currentStock} {bomItem.unit})
+                                    </span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {recipe.images && recipe.images.length > 0 && (
+                          <div>
+                            <h5 className="text-xs font-bold text-stone-600 mb-2.5">📸 SOP 圖文對照</h5>
+                            <div className="flex gap-4 overflow-x-auto pb-2 scrollbar-thin">
+                              {recipe.images.map((imgUrl, i) => (
+                                <div key={i} className="flex-shrink-0 w-36 h-24 rounded-xl overflow-hidden border border-stone-200 bg-stone-50 relative">
+                                  <img src={imgUrl} alt={`Step image ${i + 1}`} className="w-full h-full object-cover" />
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <h5 className="text-xs font-bold text-stone-600 mb-3">🥖 製作 SOP 步驟</h5>
+                          <ol className="flex flex-col gap-3">
+                            {recipe.sop.map((step, idx) => (
+                              <li key={idx} className="flex gap-3 text-xs leading-relaxed text-stone-600">
+                                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-amber-50 text-amber-600 border border-amber-200 flex items-center justify-center font-bold font-mono text-[10px]">
+                                  {idx + 1}
+                                </span>
+                                <span className="pt-0.5">{step}</span>
+                              </li>
+                            ))}
+                          </ol>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* TAB 3: RECEIVING DELIVERIES */}
+          {activeTab === 'receiving' && (
+            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
+              {todayPurchases.filter(p => p.status === 'pending').length === 0 ? (
+                <div className="py-16 text-center flex flex-col items-center justify-center gap-3 text-stone-400">
+                  <Truck className="w-12 h-12 text-stone-300 animate-bounce" />
+                  <p className="font-bold text-stone-600 text-sm">今日沒有待簽收的物料</p>
+                </div>
+              ) : (
+                todayPurchases.filter(p => p.status === 'pending').map(purchase => (
+                  <div
+                    key={purchase.id}
+                    className="p-5 bg-stone-50/50 border border-stone-200/85 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all"
+                  >
+                    <div className="flex items-center gap-4">
+                      <div className="p-3 bg-amber-100/50 text-amber-600 rounded-xl">
+                        <Truck className="w-5 h-5" />
+                      </div>
                       <div>
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-bold text-stone-800 text-sm">{purchase.materialName}</h4>
+                          <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${
+                            purchase.paymentMethod === 'monthly' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
+                          }`}>
+                            {purchase.paymentMethod === 'monthly' ? '月結' : '現結'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 mt-1">
+                          <span className="text-[11px] font-bold text-stone-500 bg-stone-200/50 px-2 py-0.5 rounded">
+                            應收數量: {purchase.qty}
+                          </span>
+                          <span className="text-[11px] font-medium text-stone-400">
+                            廠牌: {purchase.supplier}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <button
+                        onClick={() => onReceivePurchase(purchase.id, currentEmployee.name)}
+                        className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-sm transition active:scale-95 flex items-center gap-1"
+                      >
+                        <Check className="w-4 h-4" /> 確認無誤並簽收
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+
+          {/* TAB 4: ORDERING SYSTEM (今日叫貨區 - ONLY ACCESSIBLE FOR OPERATORS WITH ordering PRIVILEGE) */}
+          {activeTab === 'ordering' && currentEmployee.canOrder && (
+            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 bg-blue-100 text-blue-600 rounded-xl">
+                    <ShoppingBag className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-stone-800 text-sm">智能安全庫存採購清單</h4>
+                    <p className="text-[11px] text-stone-400 mt-0.5">
+                      今日為 {daysName[currentDayOfWeek]}，安全水位標準自動套用今日範本。
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <span className="text-xs font-bold text-stone-500">付款設定:</span>
+                  <select
+                    value={paymentMethod}
+                    onChange={(e: any) => setPaymentMethod(e.target.value)}
+                    className="bg-stone-50 border border-stone-200 rounded px-2.5 py-1 text-xs outline-none"
+                  >
+                    <option value="cash">現結 (貨到付現)</option>
+                    <option value="monthly">月結 (定期請款)</option>
+                  </select>
+                </div>
+              </div>
+
+              {orderItems.length === 0 ? (
+                <div className="py-12 text-center text-stone-400 text-xs flex flex-col items-center justify-center gap-2">
+                  <Check className="w-8 h-8 text-emerald-500" />
+                  <span>目前沒有低於水位之原物料需要採購！</span>
+                  <button
+                    onClick={() => {
+                      // Manual seed of standard raw materials to allow custom testing
+                      setOrderItems(materials.filter(m => m.type === 'raw').map(mat => ({
+                        materialId: mat.id,
+                        name: mat.name,
+                        suggestedQty: 5,
+                        unit: mat.unit,
+                        cost: mat.cost,
+                        supplier: mat.supplier
+                      })));
+                    }}
+                    className="text-blue-500 underline font-bold mt-2 hover:text-blue-700"
+                  >
+                    模擬手動載入原物料進行測試
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col gap-4">
+                  {orderItems.map(item => (
+                    <div key={item.materialId} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-stone-50/50 border border-stone-200/60 rounded-2xl hover:bg-stone-50 transition">
+                      <div>
+                        <h5 className="font-bold text-stone-800 text-xs">{item.name}</h5>
+                        <p className="text-[10px] text-stone-400 mt-0.5">
+                          供應商: {item.supplier} | 預計成本: ${Math.round(item.suggestedQty * item.cost)}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-3 self-end sm:self-auto">
+                        <div className="flex items-center gap-1">
+                          <span className="text-xs text-stone-500">數量:</span>
+                          <input
+                            type="number"
+                            min="0.1"
+                            step="0.1"
+                            value={item.suggestedQty}
+                            onChange={(e) => handleUpdateOrderItemQty(item.materialId, Number(e.target.value))}
+                            className="w-16 border border-stone-200 rounded px-2 py-1 text-center text-xs font-mono bg-white"
+                          />
+                          <span className="text-xs text-stone-400 font-bold ml-1">{item.unit}</span>
+                        </div>
                         <button
-                          onClick={() => {
-                            if (!receiverName) {
-                              alert('請先在上方選擇指定簽收核對人！');
-                              return;
-                            }
-                            onReceivePurchase(purchase.id, receiverName);
-                          }}
-                          className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-sm transition active:scale-95 flex items-center gap-1"
+                          onClick={() => handleDeleteOrderItem(item.materialId)}
+                          className="p-2 text-stone-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition"
                         >
-                          <Check className="w-4 h-4" /> 確認清點無誤並簽收
+                          <Trash2 className="w-4 h-4" />
                         </button>
                       </div>
                     </div>
                   ))}
+
+                  {/* Add manual custom order item dropdown picker */}
+                  <div className="flex flex-col sm:flex-row items-center gap-4 bg-stone-50 p-4 rounded-2xl border border-stone-200/40">
+                    <span className="text-xs text-stone-600 font-bold shrink-0">➕ 手動新增物料項目:</span>
+                    <select
+                      onChange={(e) => {
+                        if (e.target.value) {
+                          handleAddCustomOrderItem(e.target.value);
+                          e.target.value = ''; // Reset select
+                        }
+                      }}
+                      className="bg-white border border-stone-200 rounded-xl px-3 py-1.5 text-xs text-stone-800 outline-none w-full sm:w-auto"
+                    >
+                      <option value="">選擇原物料...</option>
+                      {materials.filter(m => m.type === 'raw').map(mat => (
+                        <option key={mat.id} value={mat.id}>{mat.name} ({mat.supplier})</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="flex justify-end pt-4 border-t border-stone-100">
+                    <button
+                      onClick={handleSubmitOrders}
+                      className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-200/50 transition active:scale-95"
+                    >
+                      確認並生成今日叫貨單
+                    </button>
+                  </div>
                 </div>
               )}
             </div>

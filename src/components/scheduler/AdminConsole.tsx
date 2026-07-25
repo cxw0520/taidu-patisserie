@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Clock, Plus, Trash2, AlertTriangle, TrendingUp, DollarSign, Truck, ClipboardList, Check, UserCheck, HelpCircle } from 'lucide-react';
-import { Employee, Material, Recipe, ProductionTask, PurchaseRecord } from './SchedulerApp';
+import { Employee, Material, Recipe, ProductionTask, PurchaseRecord, HistoricalOrder } from './SchedulerApp';
 
 interface AdminConsoleProps {
   employees: Employee[];
@@ -8,11 +8,15 @@ interface AdminConsoleProps {
   recipes: Recipe[];
   tasks: ProductionTask[];
   purchases: PurchaseRecord[];
+  orderHistory: HistoricalOrder[];
+  supplierDeliveryDays: Record<string, number[]>;
+  currentDayOfWeek: number;
   onUpdateEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
   onUpdateMaterials: React.Dispatch<React.SetStateAction<Material[]>>;
   onUpdateRecipes: React.Dispatch<React.SetStateAction<Recipe[]>>;
   onUpdateTasks: React.Dispatch<React.SetStateAction<ProductionTask[]>>;
   onUpdatePurchases: React.Dispatch<React.SetStateAction<PurchaseRecord[]>>;
+  onUpdateHistory: React.Dispatch<React.SetStateAction<HistoricalOrder[]>>;
 }
 
 export default function AdminConsole({
@@ -21,13 +25,18 @@ export default function AdminConsole({
   recipes,
   tasks,
   purchases,
+  orderHistory,
+  supplierDeliveryDays,
+  currentDayOfWeek,
   onUpdateEmployees,
   onUpdateMaterials,
   onUpdateRecipes,
   onUpdateTasks,
-  onUpdatePurchases
+  onUpdatePurchases,
+  onUpdateHistory
 }: AdminConsoleProps) {
-  const [activeTab, setActiveTab] = useState<'scheduling' | 'bom' | 'inventory' | 'finance'>('scheduling');
+  const [activeTab, setActiveTab] = useState<'scheduling' | 'bom' | 'inventory' | 'history' | 'finance'>('scheduling');
+  const today = new Date();
 
   // Input states for adding new elements in mockup
   const [newEmpName, setNewEmpName] = useState('');
@@ -46,8 +55,6 @@ export default function AdminConsole({
   // Selected employee in back-end card to grade/mentor
   const [selectedGradingEmpId, setSelectedGradingEmpId] = useState<string>(employees[0]?.id || '');
 
-  const today = new Date();
-  const currentDayOfWeek = today.getDay(); // 0 is Sunday, 1 is Monday, etc.
   const daysName = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 
   // Calculate totals for scheduling
@@ -183,8 +190,8 @@ export default function AdminConsole({
           cost: Math.round(reorderQty * mat.cost),
           supplier: mat.supplier === '自家生產' ? '原料庫房' : mat.supplier,
           status: 'pending',
-          date: new Date().toISOString().split('T')[0],
-          expectedDate: new Date().toISOString().split('T')[0], // Expected today
+          date: today.toISOString().split('T')[0],
+          expectedDate: today.toISOString().split('T')[0], // Expected today
           paymentMethod: mat.cost > 1000 ? 'monthly' : 'cash', // High costs as monthly, low as cash
           signedBy: null
         });
@@ -208,7 +215,9 @@ export default function AdminConsole({
       hours: newEmpHours,
       progress: { 'rec-1': 10, 'rec-2': 10, 'rec-3': 10 },
       mentorName: '小王',
-      apprentices: []
+      apprentices: [],
+      canAccessAdmin: false,
+      canOrder: false
     };
 
     onUpdateEmployees(prev => [...prev, newEmp]);
@@ -293,7 +302,7 @@ export default function AdminConsole({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
-      {/* Sidebar: Sub navigation */}
+      {/* Sidebar: Navigation tabs */}
       <div className="lg:col-span-1 bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
         <div>
           <h3 className="text-sm font-bold text-stone-400 uppercase tracking-widest">後台管理控制台</h3>
@@ -332,6 +341,16 @@ export default function AdminConsole({
             週安全水位範本
           </button>
           <button
+            onClick={() => setActiveTab('history')}
+            className={`w-full text-left px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
+              activeTab === 'history'
+                ? 'bg-blue-50 text-blue-600 border border-blue-100 shadow-sm'
+                : 'text-stone-500 hover:bg-stone-50'
+            }`}
+          >
+            歷史叫貨單
+          </button>
+          <button
             onClick={() => setActiveTab('finance')}
             className={`w-full text-left px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
               activeTab === 'finance'
@@ -339,17 +358,8 @@ export default function AdminConsole({
                 : 'text-stone-500 hover:bg-stone-50'
             }`}
           >
-            財務消耗與應付帳款
+            財務與應付帳款
           </button>
-        </div>
-
-        <div className="mt-auto pt-6 border-t border-stone-100">
-          <div className="bg-blue-50/50 p-4 rounded-2xl border border-blue-100/50 flex flex-col gap-2">
-            <h4 className="text-xs font-bold text-blue-700">安全水位預警機制</h4>
-            <p className="text-[11px] text-stone-500 leading-relaxed">
-              今日為<strong>{daysName[currentDayOfWeek]}</strong>，系統叫貨與防置排班將自動參考今日對應的安全水位數據進行比對。
-            </p>
-          </div>
         </div>
       </div>
 
@@ -734,10 +744,47 @@ export default function AdminConsole({
             </div>
           )}
 
-          {/* TAB 4: FINANCIAL LEGER EXPENSES */}
+          {/* TAB 4: HISTORICAL PURCHASE ORDERS HISTORY LOG */}
+          {activeTab === 'history' && (
+            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
+              <h3 className="font-bold text-stone-800 text-lg">歷史叫貨單記錄簿</h3>
+              <p className="text-xs text-stone-500">此處妥善保存每次由員工發起或後台自動生成的原物料採購清單，可隨時追溯核對</p>
+
+              <div className="flex flex-col gap-4 mt-2">
+                {orderHistory.map(hist => {
+                  const histTotal = hist.items.reduce((acc, curr) => acc + curr.cost, 0);
+                  return (
+                    <div key={hist.id} className="p-4 bg-stone-50/50 border border-stone-200 rounded-2xl flex flex-col gap-3">
+                      <div className="flex justify-between items-center text-xs border-b border-stone-200/50 pb-2">
+                        <span className="font-bold text-stone-500">時間: {hist.date}</span>
+                        <span className="font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                          叫貨人: {hist.orderedBy}
+                        </span>
+                      </div>
+                      <div className="text-xs flex flex-col gap-1">
+                        <div className="flex justify-between text-stone-700 font-bold mb-1">
+                          <span>供應商: {hist.supplier}</span>
+                          <span>總計: ${histTotal}</span>
+                        </div>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {hist.items.map((item, idx) => (
+                            <span key={idx} className="bg-white border border-stone-200 px-2.5 py-1 rounded text-[11px] text-stone-600">
+                              {item.name}: {item.qty} (${item.cost})
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* TAB 5: FINANCIAL AP LEDGER */}
           {activeTab === 'finance' && (
             <div className="flex flex-col gap-6">
-              {/* Financial cards */}
+              {/* Financial stats */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="bg-white p-5 rounded-2xl border border-stone-200/60 shadow-sm flex flex-col gap-1">
                   <span className="text-[10px] uppercase font-extrabold text-stone-400 tracking-wider">本週累計進貨總額</span>
@@ -762,7 +809,7 @@ export default function AdminConsole({
                 </div>
               </div>
 
-              {/* Extra payment method stats */}
+              {/* Extra stats */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="bg-emerald-50/20 p-4 rounded-xl border border-emerald-100 flex justify-between items-center text-xs">
                   <span className="font-bold text-emerald-800">現金結算累積金額 (現結):</span>
@@ -774,7 +821,7 @@ export default function AdminConsole({
                 </div>
               </div>
 
-              {/* Purchases AP Breakdown */}
+              {/* Purchases list */}
               <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
                 <h3 className="font-bold text-stone-800 text-lg">採購單明細與結算對帳單</h3>
                 <p className="text-xs text-stone-500">展示所有已發起之採購記錄，已簽收帳目直接納入未結算應付帳款</p>

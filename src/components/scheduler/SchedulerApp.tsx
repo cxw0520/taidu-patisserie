@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, Users, Award } from 'lucide-react';
+import { ArrowLeft, Users, Award, ShieldAlert, LogIn } from 'lucide-react';
 import StaffPortal from './StaffPortal.tsx';
 import AdminConsole from './AdminConsole.tsx';
 import { motion, AnimatePresence } from 'motion/react';
@@ -12,6 +12,8 @@ export interface Employee {
   progress: Record<string, number>; // recipeId -> progress (0 to 100)
   mentorName?: string;             // Mentor name
   apprentices?: string[];          // Apprentices list
+  canAccessAdmin?: boolean;        // Permission: Can access back-end Admin Console
+  canOrder?: boolean;              // Permission: Can place material orders
 }
 
 export interface BOMItem {
@@ -69,15 +71,30 @@ export interface PurchaseRecord {
   signedBy?: string | null;
 }
 
+export interface HistoricalOrder {
+  id: string;
+  date: string;
+  supplier: string;
+  items: Array<{
+    name: string;
+    qty: number;
+    cost: number;
+  }>;
+  orderedBy: string;
+}
+
 export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, shopId: string }) {
   const [currentView, setCurrentView] = useState<'staff' | 'admin'>('staff');
+  const currentDayOfWeek = new Date().getDay();
 
   // Simulated Global State for Pastry Scheduling & Training Portal
   const [employees, setEmployees] = useState<Employee[]>([
-    { id: 'emp-1', name: '小王', role: '正職主廚', hours: 8, progress: { 'rec-1': 95, 'rec-2': 40, 'rec-3': 10 }, mentorName: undefined, apprentices: ['阿明', '小芳'] },
-    { id: 'emp-2', name: '阿明', role: '烘焙助手', hours: 8, progress: { 'rec-1': 85, 'rec-2': 90, 'rec-3': 20 }, mentorName: '小王', apprentices: [] },
-    { id: 'emp-3', name: '小芳', role: '兼職實習生', hours: 6, progress: { 'rec-1': 30, 'rec-2': 10, 'rec-3': 0 }, mentorName: '小王', apprentices: [] },
+    { id: 'emp-1', name: '小王', role: '正職主廚', hours: 8, progress: { 'rec-1': 95, 'rec-2': 40, 'rec-3': 10 }, mentorName: undefined, apprentices: ['阿明', '小芳'], canAccessAdmin: true, canOrder: true },
+    { id: 'emp-2', name: '阿明', role: '烘焙助手', hours: 8, progress: { 'rec-1': 85, 'rec-2': 90, 'rec-3': 20 }, mentorName: '小王', apprentices: [], canAccessAdmin: false, canOrder: true },
+    { id: 'emp-3', name: '小芳', role: '兼職實習生', hours: 6, progress: { 'rec-1': 30, 'rec-2': 10, 'rec-3': 0 }, mentorName: '小王', apprentices: [], canAccessAdmin: false, canOrder: false },
   ]);
+
+  const [currentEmpId, setCurrentEmpId] = useState<string>('emp-1'); // Default logged in employee
 
   const [materials, setMaterials] = useState<Material[]>([
     { id: 'mat-1', name: '日本麵粉', qty: 25, unit: 'kg', weeklyMinQty: { 0: 20, 1: 10, 2: 10, 3: 10, 4: 10, 5: 15, 6: 20 }, cost: 180, supplier: '豐盟麵粉', type: 'raw' },
@@ -87,6 +104,14 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
     { id: 'mat-5', name: '法式塔皮(半成品)', qty: 8, unit: '個', weeklyMinQty: { 0: 25, 1: 10, 2: 10, 3: 10, 4: 12, 5: 20, 6: 25 }, cost: 25, supplier: '自家生產', type: 'semi' },
     { id: 'mat-6', name: '卡士達醬(半成品)', qty: 800, unit: 'g', weeklyMinQty: { 0: 2500, 1: 1000, 2: 1000, 3: 1000, 4: 1200, 5: 2000, 6: 2500 }, cost: 0.1, supplier: '自家生產', type: 'semi' },
   ]);
+
+  // Suppliers delivery days settings: Day of week (0: Sun, 1: Mon, 2: Tue, etc.)
+  const supplierDeliveryDays: Record<string, number[]> = {
+    '德麥食品': [2, 5],       // Tuesday, Friday
+    '豐盟麵粉': [1, 4],       // Monday, Thursday
+    '大湖草莓農場': [0, 3, 5], // Sunday, Wednesday, Friday
+    '自家生產': [0, 1, 2, 3, 4, 5, 6] // Daily
+  };
 
   const [recipes, setRecipes] = useState<Recipe[]>([
     {
@@ -156,6 +181,11 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
   const [purchases, setPurchases] = useState<PurchaseRecord[]>([
     { id: 'pur-1', materialName: '新鮮草莓', qty: 10, cost: 2500, supplier: '大湖草莓農場', status: 'pending', date: '2026-07-25', expectedDate: '2026-07-25', paymentMethod: 'cash', signedBy: null },
     { id: 'pur-2', materialName: '法國發酵奶油', qty: 20, cost: 8400, supplier: '德麥食品', status: 'received', date: '2026-07-24', expectedDate: '2026-07-24', paymentMethod: 'monthly', signedBy: '小王' }
+  ]);
+
+  // Order placement history log
+  const [orderHistory, setOrderHistory] = useState<HistoricalOrder[]>([
+    { id: 'hist-1', date: '2026-07-24 10:30', supplier: '德麥食品', items: [{ name: '法國發酵奶油', qty: 20, cost: 8400 }], orderedBy: '小王' }
   ]);
 
   // Start production timer for task
@@ -252,18 +282,15 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
               // Option A (deconstruct): If the shortage item is a semi-finished product, 
               // instead of deducting semi-finished item below zero, we deduct its constituent raw materials.
               if (requiresShortageHandling && mat.id === shortageMaterialId) {
-                // Deduct only available stock for this semi-finished item
                 return { ...mat, qty: 0 };
               }
 
               // Also, check if we need to deduct raw materials for the deconstructed portion
               if (requiresShortageHandling) {
-                // Find the recipe of the semi-finished product to get its BOM
                 const semiRecipe = recipes.find(r => r.name === bomMatch.name || (r.name + '(半成品)') === bomMatch.name);
                 if (semiRecipe) {
                   const semiBomMatch = semiRecipe.bom.find(sb => sb.materialId === mat.id);
                   if (semiBomMatch) {
-                    // Deduct: standard recipe raw materials + deconstructed portion * raw material ratios
                     const normalDeduction = (recipe.bom.find(b => b.materialId === mat.id)?.qty || 0) * targetTask.qty;
                     const deconstructedDeduction = semiBomMatch.qty * shortageAmount;
                     return { ...mat, qty: Math.max(0, parseFloat((mat.qty - (normalDeduction + deconstructedDeduction)).toFixed(2))) };
@@ -271,10 +298,9 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 }
               }
 
-              // Normal deduction (Option B - allow negative, or stock is sufficient)
+              // Normal deduction (Option B)
               const deduction = bomMatch.qty * targetTask.qty;
               const newQty = mat.qty - deduction;
-              // If it's a raw material, clamp at 0. If semi-finished, Option B allows negative.
               const finalQty = mat.type === 'raw' ? Math.max(0, newQty) : newQty;
               return { ...mat, qty: parseFloat(finalQty.toFixed(2)) };
             }
@@ -319,47 +345,82 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
     });
   };
 
+  const currentEmployee = employees.find(e => e.id === currentEmpId) || employees[0];
+
   return (
     <div className="min-h-screen bg-gradient-to-tr from-[#fbf9f4] via-[#f7f3e9] to-[#ffffff] text-stone-800 font-sans antialiased">
       {/* Top Banner Control */}
-      <div className="sticky top-0 bg-white/80 backdrop-blur-md z-30 border-b border-stone-200/60 shadow-sm px-6 py-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="sticky top-0 bg-white/80 backdrop-blur-md z-30 border-b border-stone-200/60 shadow-sm px-6 py-4 flex flex-col md:flex-row items-center justify-between gap-4">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
-            className="p-2.5 rounded-xl hover:bg-stone-100/80 border border-stone-200 text-stone-600 transition flex items-center justify-center"
+            className="p-2.5 rounded-xl hover:bg-stone-100/80 border border-stone-200 text-stone-600 transition flex items-center justify-center animate-pulse"
           >
             <ArrowLeft className="w-5 h-5" />
           </button>
           <div>
-            <h2 className="text-xl font-bold text-stone-800 tracking-wide">生產與排班管理系統</h2>
-            <p className="text-xs text-stone-500 font-medium">麵包房與烘焙工坊營運模組 • 專業版</p>
+            <h2 className="text-lg md:text-xl font-bold text-stone-800 tracking-wide">生產與排班管理系統</h2>
+            <p className="text-xs text-stone-500 font-medium">麵包房與烘焙工坊營運模組 • 專業權限版</p>
           </div>
         </div>
 
-        {/* Tab switchers */}
-        <div className="flex bg-stone-100 p-1.5 rounded-2xl border border-stone-200">
-          <button
-            onClick={() => setCurrentView('staff')}
-            className={`px-5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-              currentView === 'staff'
-                ? 'bg-white text-stone-800 shadow-md shadow-stone-200/50'
-                : 'text-stone-500 hover:text-stone-800'
-            }`}
-          >
-            <Award className="w-4 h-4 text-amber-500" />
-            前台員工工作區
-          </button>
-          <button
-            onClick={() => setCurrentView('admin')}
-            className={`px-5 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
-              currentView === 'admin'
-                ? 'bg-white text-stone-800 shadow-md shadow-stone-200/50'
-                : 'text-stone-500 hover:text-stone-800'
-            }`}
-          >
-            <Users className="w-4 h-4 text-blue-500" />
-            後台管理控制台
-          </button>
+        <div className="flex items-center flex-wrap gap-4">
+          {/* Mock Authentication Switcher */}
+          <div className="flex items-center gap-2 bg-stone-100 px-3 py-1.5 rounded-xl border border-stone-200 text-xs">
+            <LogIn className="w-3.5 h-3.5 text-stone-400" />
+            <span className="font-bold text-stone-600">模擬登入身分:</span>
+            <select
+              value={currentEmpId}
+              onChange={(e) => {
+                setCurrentEmpId(e.target.value);
+                // Return to staff view if new user has no admin access
+                const newEmp = employees.find(emp => emp.id === e.target.value);
+                if (newEmp && !newEmp.canAccessAdmin) {
+                  setCurrentView('staff');
+                }
+              }}
+              className="bg-transparent font-bold text-stone-800 outline-none cursor-pointer"
+            >
+              {employees.map(emp => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name} ({emp.role})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Tab switchers (only visible if current employee has admin permission) */}
+          <div className="flex bg-stone-100 p-1.5 rounded-2xl border border-stone-200">
+            <button
+              onClick={() => setCurrentView('staff')}
+              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                currentView === 'staff'
+                  ? 'bg-white text-stone-800 shadow-md shadow-stone-200/50'
+                  : 'text-stone-500 hover:text-stone-800'
+              }`}
+            >
+              <Award className="w-4 h-4 text-amber-500" />
+              前台員工工作區
+            </button>
+            
+            {currentEmployee.canAccessAdmin ? (
+              <button
+                onClick={() => setCurrentView('admin')}
+                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 ${
+                  currentView === 'admin'
+                    ? 'bg-white text-stone-800 shadow-md shadow-stone-200/50'
+                    : 'text-stone-500 hover:text-stone-800'
+                }`}
+              >
+                <Users className="w-4 h-4 text-blue-500" />
+                後台管理控制台
+              </button>
+            ) : (
+              <div className="px-4 py-2 text-xs text-stone-400 font-medium flex items-center gap-1 cursor-not-allowed">
+                <ShieldAlert className="w-4 h-4" /> 權限受限
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
@@ -374,7 +435,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
             >
-              <StaffPortal
+               <StaffPortal
                 employees={employees}
                 tasks={tasks}
                 recipes={recipes}
@@ -383,6 +444,9 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 onStartTask={handleStartTask}
                 onCompleteTask={handleCompleteTask}
                 onReceivePurchase={handleReceivePurchase}
+                currentLoggedInEmpId={currentEmpId}
+                onAddPurchaseOrders={(newPOs) => setPurchases(prev => [...newPOs, ...prev])}
+                onAddHistoricalOrder={(newHist) => setOrderHistory(prev => [newHist, ...prev])}
                 onUpdateProgress={(empId, recId, score) => {
                   setEmployees(prev => prev.map(emp => {
                     if (emp.id === empId) {
@@ -407,11 +471,15 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 recipes={recipes}
                 tasks={tasks}
                 purchases={purchases}
+                orderHistory={orderHistory}
+                supplierDeliveryDays={supplierDeliveryDays}
+                currentDayOfWeek={currentDayOfWeek}
                 onUpdateEmployees={setEmployees}
                 onUpdateMaterials={setMaterials}
                 onUpdateRecipes={setRecipes}
                 onUpdateTasks={setTasks}
                 onUpdatePurchases={setPurchases}
+                onUpdateHistory={setOrderHistory}
               />
             </motion.div>
           )}
