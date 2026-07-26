@@ -1154,7 +1154,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     });
 
     const netRevenue = stats.netRevenue;
-    const cashRemitArSum = stats.cash + stats.remit + stats.ar + stats.prepaidPay + stats.preorderPay;
+    const cashRemitArSum = stats.cash + stats.remit + stats.ar + stats.prepaidPay + stats.preorderPay + stats.linePay + stats.uber;
     const diff = netRevenue - cashRemitArSum;
 
     return {
