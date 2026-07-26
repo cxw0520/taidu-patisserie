@@ -85,7 +85,6 @@ export interface HistoricalOrder {
 
 export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, shopId: string }) {
   const [currentView, setCurrentView] = useState<'staff' | 'admin'>('staff');
-  const currentDayOfWeek = new Date().getDay();
 
   // Simulated Global State for Pastry Scheduling & Training Portal
   const [employees, setEmployees] = useState<Employee[]>([
@@ -95,6 +94,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
   ]);
 
   const [currentEmpId, setCurrentEmpId] = useState<string>('emp-1'); // Default logged in employee
+  const currentDayOfWeek = new Date().getDay();
 
   const [materials, setMaterials] = useState<Material[]>([
     { id: 'mat-1', name: '日本麵粉', qty: 25, unit: 'kg', weeklyMinQty: { 0: 20, 1: 10, 2: 10, 3: 10, 4: 10, 5: 15, 6: 20 }, cost: 180, supplier: '豐盟麵粉', type: 'raw' },
@@ -279,8 +279,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
           if (recipe) {
             const bomMatch = recipe.bom.find(b => b.materialId === mat.id);
             if (bomMatch) {
-              // Option A (deconstruct): If the shortage item is a semi-finished product, 
-              // instead of deducting semi-finished item below zero, we deduct its constituent raw materials.
+              // Option A (deconstruct)
               if (requiresShortageHandling && mat.id === shortageMaterialId) {
                 return { ...mat, qty: 0 };
               }
@@ -343,6 +342,19 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
 
       return updated;
     });
+  };
+
+  // Mock Import HR schedules from taidu-HR project
+  const handleImportHRSchedules = () => {
+    setEmployees(prev => prev.map(emp => {
+      // In taidu-HR, positive attendance records reflect active workers
+      // We simulate pulling their daily shift roster allocations
+      if (emp.name === '小王') return { ...emp, hours: 8 };
+      if (emp.name === '阿明') return { ...emp, hours: 8 };
+      if (emp.name === '小芳') return { ...emp, hours: 8 }; // Set 8h as pre-scheduled
+      return emp;
+    }));
+    alert("🎉 已模擬從 taidu-HR 雲端系統成功匯入今日班表！今日值班名單：\n- 小王 (8小時)\n- 阿明 (8小時)\n- 小芳 (8小時)\n已為您更新當日工時產能資料。");
   };
 
   const currentEmployee = employees.find(e => e.id === currentEmpId) || employees[0];
@@ -435,7 +447,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
               exit={{ opacity: 0, y: -15 }}
               transition={{ duration: 0.25 }}
             >
-               <StaffPortal
+              <StaffPortal
                 employees={employees}
                 tasks={tasks}
                 recipes={recipes}
@@ -480,6 +492,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 onUpdateTasks={setTasks}
                 onUpdatePurchases={setPurchases}
                 onUpdateHistory={setOrderHistory}
+                onImportHR={handleImportHRSchedules}
               />
             </motion.div>
           )}

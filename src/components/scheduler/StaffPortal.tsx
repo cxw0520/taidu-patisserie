@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Circle, BookOpen, Clock, Award, ChevronDown, ChevronUp, Check, Truck, AlertTriangle, Play, ShieldAlert, ShoppingBag, Plus, Trash2 } from 'lucide-react';
+import { CheckCircle, Circle, BookOpen, Clock, Award, ChevronDown, ChevronUp, Check, Truck, AlertTriangle, Play, ShieldAlert, ShoppingBag, Plus, Trash2, UserCheck, Users, BookMarked } from 'lucide-react';
 import { Employee, ProductionTask, Recipe, PurchaseRecord, Material, HistoricalOrder } from './SchedulerApp';
 
 interface StaffPortalProps {
@@ -37,15 +37,19 @@ export default function StaffPortal({
   onReceivePurchase,
   currentLoggedInEmpId,
   onAddPurchaseOrders,
-  onAddHistoricalOrder
+  onAddHistoricalOrder,
+  onUpdateProgress
 }: StaffPortalProps) {
-  const [activeTab, setActiveTab] = useState<'tasks' | 'training' | 'receiving' | 'ordering'>('tasks');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'training' | 'receiving' | 'ordering' | 'mentorship'>('tasks');
   const [expandedRecipeId, setExpandedRecipeId] = useState<string | null>(null);
 
   // Suggested orders states
   const [orderItems, setOrderItems] = useState<SuggestedOrderItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<'monthly' | 'cash'>('cash');
   const [isOrderInitiated, setIsOrderInitiated] = useState(false);
+
+  // Mentor Tab states
+  const [selectedApprenticeId, setSelectedApprenticeId] = useState<string>('');
 
   // Stopwatch ticking state
   const [, setTick] = useState(0);
@@ -70,6 +74,17 @@ export default function StaffPortal({
   const currentEmployee = employees.find(e => e.id === currentLoggedInEmpId) || employees[0];
   const pendingPurchases = purchases.filter(p => p.status === 'pending');
   const todayPurchases = purchases.filter(p => p.expectedDate === todayISOStr);
+
+  // Apprentices of current logged-in employee
+  const apprenticeNames = currentEmployee.apprentices || [];
+  const apprenticeList = employees.filter(e => apprenticeNames.includes(e.name));
+
+  // Initialize selected apprentice
+  useEffect(() => {
+    if (apprenticeList.length > 0 && !selectedApprenticeId) {
+      setSelectedApprenticeId(apprenticeList[0].id);
+    }
+  }, [apprenticeList, selectedApprenticeId]);
 
   // Initialize dynamic reorder list based on safety stocks for today
   useEffect(() => {
@@ -178,14 +193,13 @@ export default function StaffPortal({
   const progressSum = recipes.reduce((sum, r) => sum + (currentEmployee.progress[r.id] || 0), 0);
   const overallProgress = totalRecipeCount > 0 ? Math.round(progressSum / totalRecipeCount) : 0;
 
-  // Submit generated purchase orders
+  // Submit generated purchase orders (Grouped by supplier!)
   const handleSubmitOrders = () => {
     if (orderItems.length === 0) {
       alert('請先填載欲叫貨的物料項目！');
       return;
     }
 
-    // Create Purchase records & historical groups
     const newPOs: PurchaseRecord[] = [];
     const groupedBySupplier: Record<string, typeof orderItems> = {};
 
@@ -204,7 +218,7 @@ export default function StaffPortal({
       // Save individual purchase records
       supplierItems.forEach((item, idx) => {
         newPOs.push({
-          id: `pur-staff-${Date.now()}-${idx}`,
+          id: `pur-staff-${Date.now()}-${idx}-${supplier}`,
           materialName: item.name,
           qty: item.suggestedQty,
           cost: Math.round(item.suggestedQty * item.cost),
@@ -232,7 +246,7 @@ export default function StaffPortal({
     });
 
     onAddPurchaseOrders(newPOs);
-    alert(`已為您成功生成並保存叫貨單！今日叫貨單已安全記錄到後台「歷史叫貨單」以備查核。`);
+    alert(`已為您成功生成並保存叫貨單！已依廠商分類拆分生成採購單，並妥善記錄到後台歷史叫貨單中。`);
     setOrderItems([]);
     setActiveTab('tasks');
   };
@@ -267,6 +281,9 @@ export default function StaffPortal({
     }]);
   };
 
+  // Mentorship Tab helper
+  const selectedApprentice = employees.find(e => e.id === selectedApprenticeId);
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-4 gap-8">
       {/* Sidebar: Logged In Employee Info & Mentorship */}
@@ -292,10 +309,10 @@ export default function StaffPortal({
                 <span>{currentEmployee.mentorName} 師傅</span>
               </div>
             )}
-            {currentEmployee.apprentices && currentEmployee.apprentices.length > 0 && (
+            {apprenticeList.length > 0 && (
               <div className="flex items-center gap-1.5 text-blue-700 bg-blue-50/50 px-2.5 py-1 rounded-lg">
                 <span className="font-extrabold text-[9px] uppercase tracking-wider">帶領徒弟</span>
-                <span>{currentEmployee.apprentices.join(', ')}</span>
+                <span>{apprenticeNames.join(', ')}</span>
               </div>
             )}
           </div>
@@ -349,8 +366,24 @@ export default function StaffPortal({
               }`}
             >
               <span>⚡️ 今日叫貨區</span>
-              <span className="text-[10px] font-extrabold uppercase px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 tracking-wider">
+              <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-blue-100 text-blue-700 tracking-wider">
                 權限
+              </span>
+            </button>
+          )}
+
+          {apprenticeList.length > 0 && (
+            <button
+              onClick={() => setActiveTab('mentorship')}
+              className={`w-full text-left px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-between ${
+                activeTab === 'mentorship'
+                  ? 'bg-amber-50 text-amber-800 border border-amber-200 shadow-sm'
+                  : 'text-stone-500 hover:bg-stone-50'
+              }`}
+            >
+              <span>👩‍🍳 師徒教學區</span>
+              <span className="text-[10px] font-extrabold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 tracking-wider">
+                教學
               </span>
             </button>
           )}
@@ -372,10 +405,9 @@ export default function StaffPortal({
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
               <div>
                 <h3 className="font-extrabold text-stone-800 text-lg">技能教學進度總覽</h3>
-                <p className="text-xs text-stone-500 mt-1">產品與半成品進度由師傅定期考核。解鎖後卡片將亮起，即可點閱對應食譜圖文與 SOP。</p>
+                <p className="text-xs text-stone-500 mt-1">配方解鎖由師傅定期考核。已解鎖的品項可點閱，未解鎖的半成品與成品皆呈反白灰色。</p>
               </div>
               
-              {/* Overall Completion Circle */}
               <div className="bg-amber-50 border border-amber-200 px-4 py-2.5 rounded-2xl flex items-center gap-2 text-xs">
                 <span className="font-bold text-amber-800">全產品解鎖進度:</span>
                 <strong className="font-mono text-amber-800 text-sm">{overallProgress}%</strong>
@@ -391,7 +423,13 @@ export default function StaffPortal({
           {activeTab === 'ordering' && (
             <div>
               <h3 className="font-extrabold text-stone-800 text-lg">本日智能採購叫貨區</h3>
-              <p className="text-xs text-stone-500 mt-1">系統自動比對今日安全水位，在此編輯採購用量與品項，確認後生成各廠商之採購單。</p>
+              <p className="text-xs text-stone-500 mt-1">採購單將依供應商（廠商）分區排列，方便核對與送出。</p>
+            </div>
+          )}
+          {activeTab === 'mentorship' && (
+            <div>
+              <h3 className="font-extrabold text-stone-800 text-lg">師徒專屬教學評分區</h3>
+              <p className="text-xs text-stone-500 mt-1">師傅可在前台直接勾選確認徒弟是否「已完成學習」。勾選完成後，徒弟即解鎖該項食譜SOP。</p>
             </div>
           )}
         </div>
@@ -399,7 +437,7 @@ export default function StaffPortal({
         {/* WORKSPACE DETAIL SECTION */}
         <div className="min-h-[480px]">
           
-          {/* TAB 1: DAILY TASKS (WITH CLAIM FLOW) */}
+          {/* TAB 1: DAILY TASKS */}
           {activeTab === 'tasks' && (
             <div className="flex flex-col gap-4">
               {tasks.length === 0 ? (
@@ -413,7 +451,6 @@ export default function StaffPortal({
                   const isPending = task.status === 'pending';
                   const isInProgress = task.status === 'inprogress';
                   const isCompleted = task.status === 'completed';
-                  const isAssignedToSelf = task.assignedTo === currentEmployee.name;
 
                   return (
                     <div
@@ -476,11 +513,10 @@ export default function StaffPortal({
                           <div className="flex items-center gap-3">
                             {task.startTime && (
                               <div className="bg-amber-100/60 text-amber-700 px-3 py-1.5 rounded-xl font-mono text-xs font-bold animate-pulse border border-amber-200">
-                                ⏱️ {getElapsedTimeString(task.startTime)}
+                                ⏱. {getElapsedTimeString(task.startTime)}
                               </div>
                             )}
                             
-                            {/* Allow anyone with active profile to complete, but tracks operator */}
                             <button
                               onClick={() => triggerCompleteTask(task)}
                               className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-sm transition active:scale-95"
@@ -528,7 +564,7 @@ export default function StaffPortal({
                     className={`rounded-2xl border transition-all ${
                       isUnlocked
                         ? 'border-stone-200 bg-stone-50/20'
-                        : 'border-stone-100 bg-stone-50/5 opacity-55 grayscale cursor-not-allowed'
+                        : 'border-stone-100 bg-stone-50/5 opacity-55 grayscale cursor-not-allowed select-none'
                     }`}
                   >
                     <div className="p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -657,7 +693,7 @@ export default function StaffPortal({
                         <div className="flex items-center gap-2">
                           <h4 className="font-bold text-stone-800 text-sm">{purchase.materialName}</h4>
                           <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${
-                            purchase.paymentMethod === 'monthly' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-emerald-700'
+                            purchase.paymentMethod === 'monthly' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-amber-700'
                           }`}>
                             {purchase.paymentMethod === 'monthly' ? '月結' : '現結'}
                           </span>
@@ -687,7 +723,7 @@ export default function StaffPortal({
             </div>
           )}
 
-          {/* TAB 4: ORDERING SYSTEM (今日叫貨區 - ONLY ACCESSIBLE FOR OPERATORS WITH ordering PRIVILEGE) */}
+          {/* TAB 4: ORDERING SYSTEM (GROUPED BY SUPPLIER!) */}
           {activeTab === 'ordering' && currentEmployee.canOrder && (
             <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 pb-4">
@@ -696,9 +732,9 @@ export default function StaffPortal({
                     <ShoppingBag className="w-5 h-5" />
                   </div>
                   <div>
-                    <h4 className="font-bold text-stone-800 text-sm">智能安全庫存採購清單</h4>
+                    <h4 className="font-bold text-stone-800 text-sm">今日原物料採購清單 (廠商分組)</h4>
                     <p className="text-[11px] text-stone-400 mt-0.5">
-                      今日為 {daysName[currentDayOfWeek]}，安全水位標準自動套用今日範本。
+                      系統已自動按廠商分組列表。安全水位對應今日 {daysName[currentDayOfWeek]} 範本。
                     </p>
                   </div>
                 </div>
@@ -708,7 +744,7 @@ export default function StaffPortal({
                   <select
                     value={paymentMethod}
                     onChange={(e: any) => setPaymentMethod(e.target.value)}
-                    className="bg-stone-50 border border-stone-200 rounded px-2.5 py-1 text-xs outline-none"
+                    className="bg-stone-50 border border-stone-200 rounded px-2.5 py-1 text-xs outline-none font-bold text-stone-700"
                   >
                     <option value="cash">現結 (貨到付現)</option>
                     <option value="monthly">月結 (定期請款)</option>
@@ -722,7 +758,6 @@ export default function StaffPortal({
                   <span>目前沒有低於水位之原物料需要採購！</span>
                   <button
                     onClick={() => {
-                      // Manual seed of standard raw materials to allow custom testing
                       setOrderItems(materials.filter(m => m.type === 'raw').map(mat => ({
                         materialId: mat.id,
                         name: mat.name,
@@ -734,51 +769,67 @@ export default function StaffPortal({
                     }}
                     className="text-blue-500 underline font-bold mt-2 hover:text-blue-700"
                   >
-                    模擬手動載入原物料進行測試
+                    模擬載入原物料進行測試
                   </button>
                 </div>
               ) : (
-                <div className="flex flex-col gap-4">
-                  {orderItems.map(item => (
-                    <div key={item.materialId} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-stone-50/50 border border-stone-200/60 rounded-2xl hover:bg-stone-50 transition">
-                      <div>
-                        <h5 className="font-bold text-stone-800 text-xs">{item.name}</h5>
-                        <p className="text-[10px] text-stone-400 mt-0.5">
-                          供應商: {item.supplier} | 預計成本: ${Math.round(item.suggestedQty * item.cost)}
-                        </p>
-                      </div>
-
-                      <div className="flex items-center gap-3 self-end sm:self-auto">
-                        <div className="flex items-center gap-1">
-                          <span className="text-xs text-stone-500">數量:</span>
-                          <input
-                            type="number"
-                            min="0.1"
-                            step="0.1"
-                            value={item.suggestedQty}
-                            onChange={(e) => handleUpdateOrderItemQty(item.materialId, Number(e.target.value))}
-                            className="w-16 border border-stone-200 rounded px-2 py-1 text-center text-xs font-mono bg-white"
-                          />
-                          <span className="text-xs text-stone-400 font-bold ml-1">{item.unit}</span>
+                <div className="flex flex-col gap-6">
+                  {/* Group items by supplier */}
+                  {Array.from(new Set(orderItems.map(item => item.supplier))).map(supplier => {
+                    const supplierItems = orderItems.filter(item => item.supplier === supplier);
+                    return (
+                      <div key={supplier} className="border border-stone-200/80 rounded-2xl overflow-hidden shadow-sm">
+                        <div className="bg-stone-100 px-4 py-2.5 border-b border-stone-200 text-xs font-bold text-stone-700 flex justify-between items-center">
+                          <span>🏢 供應商：{supplier}</span>
+                          <span className="bg-stone-200 px-2 py-0.5 rounded text-[10px]">
+                            {supplierItems.length} 項物料
+                          </span>
                         </div>
-                        <button
-                          onClick={() => handleDeleteOrderItem(item.materialId)}
-                          className="p-2 text-stone-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
+                        <div className="p-4 flex flex-col gap-3.5 bg-white">
+                          {supplierItems.map(item => (
+                            <div key={item.materialId} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 last:border-b-0 pb-3 last:pb-0">
+                              <div>
+                                <h5 className="font-bold text-stone-800 text-xs">{item.name}</h5>
+                                <p className="text-[10px] text-stone-400 mt-0.5">
+                                  預估小計: ${Math.round(item.suggestedQty * item.cost)} (${item.cost}/{item.unit})
+                                </p>
+                              </div>
 
-                  {/* Add manual custom order item dropdown picker */}
+                              <div className="flex items-center gap-3 self-end sm:self-auto">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-xs text-stone-500">數量:</span>
+                                  <input
+                                    type="number"
+                                    min="0.1"
+                                    step="0.1"
+                                    value={item.suggestedQty}
+                                    onChange={(e) => handleUpdateOrderItemQty(item.materialId, Number(e.target.value))}
+                                    className="w-16 border border-stone-200 rounded px-2 py-1 text-center text-xs font-mono bg-white"
+                                  />
+                                  <span className="text-xs text-stone-400 font-bold ml-1">{item.unit}</span>
+                                </div>
+                                <button
+                                  onClick={() => handleDeleteOrderItem(item.materialId)}
+                                  className="p-2 text-stone-400 hover:text-rose-500 rounded-lg transition"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {/* Add manual custom order item */}
                   <div className="flex flex-col sm:flex-row items-center gap-4 bg-stone-50 p-4 rounded-2xl border border-stone-200/40">
                     <span className="text-xs text-stone-600 font-bold shrink-0">➕ 手動新增物料項目:</span>
                     <select
                       onChange={(e) => {
                         if (e.target.value) {
                           handleAddCustomOrderItem(e.target.value);
-                          e.target.value = ''; // Reset select
+                          e.target.value = '';
                         }
                       }}
                       className="bg-white border border-stone-200 rounded-xl px-3 py-1.5 text-xs text-stone-800 outline-none w-full sm:w-auto"
@@ -795,13 +846,104 @@ export default function StaffPortal({
                       onClick={handleSubmitOrders}
                       className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-200/50 transition active:scale-95"
                     >
-                      確認並生成今日叫貨單
+                      送出叫貨並生成採購單
                     </button>
                   </div>
                 </div>
               )}
             </div>
           )}
+
+          {/* TAB 5: MENTORSHIP VIEW (師徒教學區) */}
+          {activeTab === 'mentorship' && apprenticeList.length > 0 && (
+            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
+              {/* Apprentice selector panel */}
+              <div className="flex flex-col sm:flex-row items-center gap-4 bg-stone-50 p-4 rounded-2xl border border-stone-200/50">
+                <div className="flex items-center gap-2 text-xs text-stone-600 font-bold shrink-0">
+                  <UserCheck className="w-4 h-4 text-stone-400" />
+                  <span>選擇評分徒弟:</span>
+                </div>
+                <div className="flex gap-2">
+                  {apprenticeList.map(app => (
+                    <button
+                      key={app.id}
+                      onClick={() => setSelectedApprenticeId(app.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                        selectedApprenticeId === app.id
+                          ? 'bg-amber-800 text-white border-amber-800'
+                          : 'bg-white text-stone-600 border-stone-200 hover:bg-stone-100'
+                      }`}
+                    >
+                      {app.name} ({app.role})
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {selectedApprentice ? (
+                <div className="flex flex-col gap-5">
+                  <div className="border-b border-stone-100 pb-2">
+                    <h4 className="font-extrabold text-stone-800 text-sm">{selectedApprentice.name} 的教學技能清單</h4>
+                    <p className="text-[11px] text-stone-400 mt-1">勾選「已完成學習」後，徒弟端便能看見配方與製作 SOP。</p>
+                  </div>
+
+                  <div className="flex flex-col gap-3">
+                    {recipes.map(recipe => {
+                      const currentProgress = selectedApprentice.progress[recipe.id] || 0;
+                      const isCompleted = currentProgress >= recipe.unlockThreshold;
+
+                      return (
+                        <div
+                          key={recipe.id}
+                          className={`p-4 rounded-xl border flex items-center justify-between gap-4 transition-all ${
+                            isCompleted ? 'bg-emerald-50/20 border-emerald-200' : 'bg-stone-50/50 border-stone-200'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3">
+                            <BookMarked className={`w-4 h-4 ${isCompleted ? 'text-emerald-600' : 'text-stone-400'}`} />
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-xs text-stone-800">{recipe.name}</span>
+                                <span className="text-[9px] font-extrabold bg-stone-200 px-1.5 py-0.2 rounded text-stone-600">
+                                  需 {recipe.unlockThreshold}%
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-stone-400">目前技能進度: {currentProgress}%</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => {
+                                // Toggle apprentice learning progress between 10% (unlearnt) and 100% (learnt)
+                                onUpdateProgress(selectedApprentice.id, recipe.id, isCompleted ? 10 : 100);
+                              }}
+                              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1 ${
+                                isCompleted
+                                  ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
+                                  : 'bg-stone-800 text-white hover:bg-stone-900'
+                              }`}
+                            >
+                              {isCompleted ? (
+                                <><Check className="w-3.5 h-3.5" /> 勾選已完成學習</>
+                              ) : (
+                                <>確認完成學習</>
+                              )}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="py-12 text-center text-xs text-stone-400">
+                  請選擇一名徒弟進行教學進度調整
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
       </div>
 

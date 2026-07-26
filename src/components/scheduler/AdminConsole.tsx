@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Clock, Plus, Trash2, AlertTriangle, TrendingUp, DollarSign, Truck, ClipboardList, Check, UserCheck, HelpCircle } from 'lucide-react';
+import { Clock, Plus, Trash2, AlertTriangle, TrendingUp, DollarSign, Truck, ClipboardList, Check, UserCheck, HelpCircle, UserPlus, Database } from 'lucide-react';
 import { Employee, Material, Recipe, ProductionTask, PurchaseRecord, HistoricalOrder } from './SchedulerApp';
 
 interface AdminConsoleProps {
@@ -17,6 +17,7 @@ interface AdminConsoleProps {
   onUpdateTasks: React.Dispatch<React.SetStateAction<ProductionTask[]>>;
   onUpdatePurchases: React.Dispatch<React.SetStateAction<PurchaseRecord[]>>;
   onUpdateHistory: React.Dispatch<React.SetStateAction<HistoricalOrder[]>>;
+  onImportHR: () => void;
 }
 
 export default function AdminConsole({
@@ -33,15 +34,17 @@ export default function AdminConsole({
   onUpdateRecipes,
   onUpdateTasks,
   onUpdatePurchases,
-  onUpdateHistory
+  onUpdateHistory,
+  onImportHR
 }: AdminConsoleProps) {
-  const [activeTab, setActiveTab] = useState<'scheduling' | 'bom' | 'inventory' | 'history' | 'finance'>('scheduling');
-  const today = new Date();
+  const [activeTab, setActiveTab] = useState<'scheduling' | 'bom' | 'inventory' | 'accounts' | 'history' | 'finance'>('scheduling');
 
   // Input states for adding new elements in mockup
   const [newEmpName, setNewEmpName] = useState('');
   const [newEmpHours, setNewEmpHours] = useState(8);
   const [newEmpRole, setNewEmpRole] = useState('烘焙助手');
+  const [newEmpCanAdmin, setNewEmpCanAdmin] = useState(false);
+  const [newEmpCanOrder, setNewEmpCanOrder] = useState(false);
 
   const [newMatName, setNewMatName] = useState('');
   const [newMatQty, setNewMatQty] = useState(10);
@@ -55,6 +58,7 @@ export default function AdminConsole({
   // Selected employee in back-end card to grade/mentor
   const [selectedGradingEmpId, setSelectedGradingEmpId] = useState<string>(employees[0]?.id || '');
 
+  const today = new Date();
   const daysName = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 
   // Calculate totals for scheduling
@@ -73,7 +77,7 @@ export default function AdminConsole({
 
   // Automatic Scheduling logic based on priority:
   // Priority 1: urgent orders (simulate orders)
-  // Priority 2: materials lowest in stock relative to dynamic today's safety threshold
+  // Priority 2: materials lowest in stock relative to today's safety threshold
   // Constraints: check employee unlock levels, enforce available work hours
   const handleAutoSchedule = () => {
     // 1) Define tasks to produce (simulated demands)
@@ -214,14 +218,16 @@ export default function AdminConsole({
       role: newEmpRole,
       hours: newEmpHours,
       progress: { 'rec-1': 10, 'rec-2': 10, 'rec-3': 10 },
-      mentorName: '小王',
+      mentorName: undefined,
       apprentices: [],
-      canAccessAdmin: false,
-      canOrder: false
+      canAccessAdmin: newEmpCanAdmin,
+      canOrder: newEmpCanOrder
     };
 
     onUpdateEmployees(prev => [...prev, newEmp]);
     setNewEmpName('');
+    setNewEmpCanAdmin(false);
+    setNewEmpCanOrder(false);
   };
 
   const handleDeleteEmployee = (id: string) => {
@@ -339,6 +345,16 @@ export default function AdminConsole({
             }`}
           >
             週安全水位範本
+          </button>
+          <button
+            onClick={() => setActiveTab('accounts')}
+            className={`w-full text-left px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all ${
+              activeTab === 'accounts'
+                ? 'bg-blue-50 text-blue-600 border border-blue-100 shadow-sm'
+                : 'text-stone-500 hover:bg-stone-50'
+            }`}
+          >
+            帳號與權限設定
           </button>
           <button
             onClick={() => setActiveTab('history')}
@@ -476,14 +492,24 @@ export default function AdminConsole({
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 pb-4">
                   <div>
                     <h3 className="font-bold text-stone-800 text-lg">今日排班人名單</h3>
-                    <p className="text-xs text-stone-500">在此設定今日上班的員工工時。確認後可點擊自動排程按鈕進行自動分派。</p>
+                    <p className="text-xs text-stone-500">
+                      在此設定今日上班的員工工時。您可以使用智能按鈕一鍵導入 HR 系統中已排好的今日班表。
+                    </p>
                   </div>
-                  <button
-                    onClick={handleAutoSchedule}
-                    className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition shadow-md shadow-blue-200/50"
-                  >
-                    ⚙️ 自動分派生產排程
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={onImportHR}
+                      className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition flex items-center gap-1.5 shadow-sm active:scale-95"
+                    >
+                      <Database className="w-4 h-4" /> 匯入 taidu-HR 班表
+                    </button>
+                    <button
+                      onClick={handleAutoSchedule}
+                      className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition shadow-md shadow-blue-200/50"
+                    >
+                      ⚙️ 自動分派生產排程
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -504,49 +530,6 @@ export default function AdminConsole({
                     </div>
                   ))}
                 </div>
-
-                {/* Add new employee mock form */}
-                <form onSubmit={handleAddEmployee} className="p-4 bg-stone-50 border border-stone-200/60 rounded-2xl flex flex-col sm:flex-row gap-4 items-end">
-                  <div className="flex-grow flex flex-col gap-1.5">
-                    <label className="text-[11px] font-bold text-stone-500">員工姓名</label>
-                    <input
-                      type="text"
-                      placeholder="例如: 阿偉"
-                      value={newEmpName}
-                      onChange={(e) => setNewEmpName(e.target.value)}
-                      className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-blue-500 w-full"
-                    />
-                  </div>
-                  <div className="w-full sm:w-36 flex flex-col gap-1.5">
-                    <label className="text-[11px] font-bold text-stone-500">角色分配</label>
-                    <select
-                      value={newEmpRole}
-                      onChange={(e) => setNewEmpRole(e.target.value)}
-                      className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-blue-500 w-full"
-                    >
-                      <option value="正職主廚">正職主廚</option>
-                      <option value="烘焙助手">烘焙助手</option>
-                      <option value="兼職實習生">兼職實習生</option>
-                    </select>
-                  </div>
-                  <div className="w-full sm:w-24 flex flex-col gap-1.5">
-                    <label className="text-[11px] font-bold text-stone-500">排班工時</label>
-                    <input
-                      type="number"
-                      min="1"
-                      max="12"
-                      value={newEmpHours}
-                      onChange={(e) => setNewEmpHours(Number(e.target.value))}
-                      className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-blue-500 w-full"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="px-4 py-2.5 bg-stone-800 text-white rounded-xl text-xs font-bold hover:bg-stone-900 shadow-sm transition flex items-center justify-center gap-1.5 shrink-0"
-                  >
-                    <Plus className="w-4 h-4" /> 新增排班
-                  </button>
-                </form>
               </div>
             </div>
           )}
@@ -593,7 +576,6 @@ export default function AdminConsole({
           {/* TAB 3: WEEKLY SAFETY STOCK TEMPLATE */}
           {activeTab === 'inventory' && (
             <div className="flex flex-col gap-6">
-              {/* Intelligent order and template description */}
               <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h3 className="font-bold text-stone-800 text-lg">週安全水位範本 (Weekly Safety Stocks)</h3>
@@ -744,7 +726,127 @@ export default function AdminConsole({
             </div>
           )}
 
-          {/* TAB 4: HISTORICAL PURCHASE ORDERS HISTORY LOG */}
+          {/* TAB 4: ACCOUNTS & CREDENTIALS MANAGEMENT */}
+          {activeTab === 'accounts' && (
+            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
+              <div className="border-b border-stone-100 pb-4">
+                <h3 className="font-bold text-stone-800 text-lg">系統帳號與權限設定</h3>
+                <p className="text-xs text-stone-500">管理甜點工坊所有員工之系統登入帳號、角色、前後台權限及叫貨權限。</p>
+              </div>
+
+              <div className="flex flex-col gap-3">
+                {employees.map(emp => (
+                  <div key={emp.id} className="p-4 bg-stone-50/50 border border-stone-200/80 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-blue-100 text-blue-600 flex items-center justify-center font-bold text-sm">
+                        {emp.name[0]}
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-stone-800 text-sm">{emp.name}</h4>
+                        <p className="text-xs text-stone-400">{emp.role}</p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-6">
+                      {/* Permission Badges */}
+                      <div className="flex gap-2">
+                        <span className={`px-2.5 py-1 rounded text-[10px] font-bold ${
+                          emp.canAccessAdmin ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-stone-100 text-stone-400'
+                        }`}>
+                          後台權限: {emp.canAccessAdmin ? '有' : '無'}
+                        </span>
+                        <span className={`px-2.5 py-1 rounded text-[10px] font-bold ${
+                          emp.canOrder ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-stone-100 text-stone-400'
+                        }`}>
+                          叫貨權限: {emp.canOrder ? '有' : '無'}
+                        </span>
+                      </div>
+
+                      <button
+                        onClick={() => handleDeleteEmployee(emp.id)}
+                        className="p-2 text-stone-400 hover:text-rose-500 rounded-lg transition"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Add Account form */}
+              <form onSubmit={handleAddEmployee} className="p-5 bg-stone-50 border border-stone-200/60 rounded-2xl flex flex-col gap-4">
+                <h4 className="text-xs font-bold text-stone-600">➕ 新增員工系統帳號</h4>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] font-bold text-stone-400">員工姓名</label>
+                    <input
+                      type="text"
+                      placeholder="例如: 小陳"
+                      value={newEmpName}
+                      onChange={(e) => setNewEmpName(e.target.value)}
+                      className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-blue-500 w-full"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] font-bold text-stone-400">系統角色</label>
+                    <select
+                      value={newEmpRole}
+                      onChange={(e) => setNewEmpRole(e.target.value)}
+                      className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-blue-500 w-full"
+                    >
+                      <option value="正職主廚">正職主廚</option>
+                      <option value="烘焙助手">烘焙助手</option>
+                      <option value="兼職實習生">兼職實習生</option>
+                    </select>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] font-bold text-stone-400">每日基礎工時 (小時)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="12"
+                      value={newEmpHours}
+                      onChange={(e) => setNewEmpHours(Number(e.target.value))}
+                      className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-blue-500 w-full"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-6 bg-white p-3.5 rounded-xl border border-stone-200/50">
+                  <label className="flex items-center gap-2 text-xs text-stone-700 font-medium cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newEmpCanAdmin}
+                      onChange={(e) => setNewEmpCanAdmin(e.target.checked)}
+                      className="rounded accent-blue-500"
+                    />
+                    開啟後台管理權限
+                  </label>
+                  
+                  <label className="flex items-center gap-2 text-xs text-stone-700 font-medium cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newEmpCanOrder}
+                      onChange={(e) => setNewEmpCanOrder(e.target.checked)}
+                      className="rounded accent-blue-500"
+                    />
+                    開啟採購叫貨權限
+                  </label>
+                </div>
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 bg-stone-800 text-white rounded-xl text-xs font-bold hover:bg-stone-900 shadow-sm transition flex items-center gap-1.5"
+                  >
+                    <UserPlus className="w-4 h-4" /> 建立帳號
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* TAB 5: HISTORICAL PURCHASE ORDERS HISTORY LOG */}
           {activeTab === 'history' && (
             <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
               <h3 className="font-bold text-stone-800 text-lg">歷史叫貨單記錄簿</h3>
@@ -781,7 +883,7 @@ export default function AdminConsole({
             </div>
           )}
 
-          {/* TAB 5: FINANCIAL AP LEDGER */}
+          {/* TAB 6: FINANCIAL AP LEDGER */}
           {activeTab === 'finance' && (
             <div className="flex flex-col gap-6">
               {/* Financial stats */}
