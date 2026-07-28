@@ -637,15 +637,19 @@ export default function StaffPortal({
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
                             {recipe.bom.map(bomItem => {
                               const currentStock = materials.find(m => m.id === bomItem.materialId)?.qty || 0;
+                              const resolvedName = (bomItem.name && bomItem.name.length <= 15 && !/^[a-zA-Z0-9]+$/.test(bomItem.name))
+                                ? bomItem.name
+                                : (materials.find(m => m.id === bomItem.materialId)?.name || recipes.find(r => r.id === bomItem.materialId)?.name || bomItem.name || bomItem.materialId);
+                              const resolvedUnit = bomItem.unit && bomItem.unit.length <= 8 ? bomItem.unit : (materials.find(m => m.id === bomItem.materialId)?.unit || '');
                               return (
                                 <div key={bomItem.materialId} className="flex justify-between items-center p-3 bg-stone-50 rounded-xl border border-stone-200/40 text-xs">
-                                  <span className="font-medium text-stone-600">{bomItem.name}</span>
+                                  <span className="font-medium text-stone-600">{resolvedName}</span>
                                   <div className="flex items-center gap-2">
                                     <span className="font-mono text-stone-700 bg-stone-200/50 px-2 py-0.5 rounded font-bold">
-                                      單個用量: {bomItem.qty} {bomItem.unit}
+                                      單個用量: {bomItem.qty} {resolvedUnit}
                                     </span>
                                     <span className="text-[10px] text-stone-400">
-                                      (庫存: {currentStock} {bomItem.unit})
+                                      (庫存: {currentStock} {resolvedUnit})
                                     </span>
                                   </div>
                                 </div>

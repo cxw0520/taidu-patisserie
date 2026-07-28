@@ -57,6 +57,12 @@ export default function AdminConsole({
   // Editing state for weekly safety stocks
   const [editingMatId, setEditingMatId] = useState<string | null>(null);
 
+  // Recipe editing states
+  const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
+  const [editRecipeName, setEditRecipeName] = useState('');
+  const [editRecipeThreshold, setEditRecipeThreshold] = useState(50);
+  const [editRecipeSop, setEditRecipeSop] = useState<string[]>([]);
+
   // Selected employee in back-end card to grade/mentor
   const [selectedGradingEmpId, setSelectedGradingEmpId] = useState<string>(employees[0]?.id || '');
 
@@ -618,32 +624,179 @@ export default function AdminConsole({
               </div>
 
               <div className="flex flex-col gap-4">
-                {recipes.map(recipe => (
-                  <div key={recipe.id} className="p-5 border border-stone-200 rounded-2xl bg-stone-50/30 flex flex-col gap-4">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <h4 className="font-bold text-stone-800 text-sm">{recipe.name}</h4>
-                        <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-stone-200 text-stone-600 tracking-wider">
-                          {recipe.type === 'finished' ? '成品' : '半成品'}
-                        </span>
-                      </div>
-                      <span className="text-xs text-stone-500">
-                        最低解鎖技能值: <strong>{recipe.unlockThreshold}%</strong>
-                      </span>
-                    </div>
+                {recipes.map(recipe => {
+                  const isEditing = editingRecipeId === recipe.id;
 
-                    <div>
-                      <h5 className="text-[11px] font-bold text-stone-400 uppercase tracking-wider mb-2">配方用量 (單個/單份)</h5>
-                      <div className="flex flex-wrap gap-2">
-                        {recipe.bom.map((b, i) => (
-                          <span key={i} className="text-xs bg-stone-200/60 text-stone-700 px-3 py-1 rounded-lg border border-stone-200 font-medium">
-                            {b.name}: {b.qty} {b.unit}
+                  if (isEditing) {
+                    return (
+                      <div key={recipe.id} className="p-6 border border-blue-200 rounded-3xl bg-blue-50/10 flex flex-col gap-4 shadow-sm">
+                        <div className="flex justify-between items-center border-b border-stone-200/50 pb-2">
+                          <strong className="text-stone-800 text-sm">📝 編輯配方與 SOP：{recipe.name}</strong>
+                          <button
+                            onClick={() => setEditingRecipeId(null)}
+                            className="text-stone-400 hover:text-stone-605 font-bold text-xs"
+                          >
+                            取消 ✕
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[11px] font-bold text-stone-400">配方名稱</label>
+                            <input
+                              type="text"
+                              value={editRecipeName}
+                              onChange={(e) => setEditRecipeName(e.target.value)}
+                              className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-850 outline-none focus:border-blue-500 w-full"
+                            />
+                          </div>
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[11px] font-bold text-stone-400">最低解鎖技能值 (%)</label>
+                            <input
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={editRecipeThreshold}
+                              onChange={(e) => setEditRecipeThreshold(Number(e.target.value))}
+                              className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-850 outline-none focus:border-blue-500 w-full"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex flex-col gap-2">
+                          <div className="flex justify-between items-center">
+                            <label className="text-[11px] font-bold text-stone-400">SOP 步驟設定</label>
+                            <button
+                              type="button"
+                              onClick={() => setEditRecipeSop(prev => [...prev, ''])}
+                              className="px-2.5 py-1 bg-stone-200 text-stone-700 hover:bg-stone-300 rounded-lg text-[10px] font-bold transition"
+                            >
+                              ➕ 新增步驟
+                            </button>
+                          </div>
+                          
+                          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1">
+                            {editRecipeSop.map((step, sIdx) => (
+                              <div key={sIdx} className="flex items-center gap-2">
+                                <span className="font-mono text-xs text-stone-400 font-bold shrink-0">{sIdx + 1}.</span>
+                                <input
+                                  type="text"
+                                  value={step}
+                                  onChange={(e) => {
+                                    const newSop = [...editRecipeSop];
+                                    newSop[sIdx] = e.target.value;
+                                    setEditRecipeSop(newSop);
+                                  }}
+                                  className="flex-1 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-xs text-stone-850 outline-none focus:border-blue-500"
+                                  placeholder={`輸入步驟 ${sIdx + 1} 的說明...`}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditRecipeSop(prev => prev.filter((_, idx) => idx !== sIdx));
+                                  }}
+                                  className="p-1.5 text-stone-400 hover:text-rose-500 rounded-lg transition"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex justify-end gap-2 pt-2 border-t border-stone-100">
+                          <button
+                            type="button"
+                            onClick={() => setEditingRecipeId(null)}
+                            className="px-4 py-2 bg-stone-200 text-stone-700 rounded-xl text-xs font-bold hover:bg-stone-300 transition"
+                          >
+                            取消
+                          </button>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                const updatedRecipes = recipes.map(r => r.id === recipe.id ? {
+                                  ...r,
+                                  name: editRecipeName,
+                                  unlockThreshold: editRecipeThreshold,
+                                  sop: editRecipeSop.filter(step => step.trim() !== '')
+                                } : r);
+                                
+                                await onUpdateRecipes(updatedRecipes);
+                                setEditingRecipeId(null);
+                                alert("🎉 成功更新配方名稱與 SOP 製作步驟！");
+                              } catch (err: any) {
+                                alert("更新失敗: " + err.message);
+                              }
+                            }}
+                            className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition"
+                          >
+                            儲存配方
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div key={recipe.id} className="p-5 border border-stone-200 rounded-2xl bg-white shadow-sm flex flex-col gap-4">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <h4 className="font-extrabold text-stone-850 text-md">{recipe.name}</h4>
+                          <span className="text-[9px] font-extrabold px-2 py-0.5 rounded-lg bg-stone-100 text-stone-600 tracking-wider">
+                            {recipe.type === 'finished' ? '成品' : '半成品'}
                           </span>
-                        ))}
+                        </div>
+                        <div className="flex items-center gap-4">
+                          <span className="text-xs text-stone-500">
+                            最低解鎖技能值: <strong>{recipe.unlockThreshold}%</strong>
+                          </span>
+                          <button
+                            onClick={() => {
+                              setEditingRecipeId(recipe.id);
+                              setEditRecipeName(recipe.name);
+                              setEditRecipeThreshold(recipe.unlockThreshold);
+                              setEditRecipeSop(recipe.sop || []);
+                            }}
+                            className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold transition flex items-center gap-1"
+                          >
+                            📝 編輯配方 & SOP
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <h5 className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1.5">配方用量 (單個/單份)</h5>
+                        <div className="flex flex-wrap gap-2">
+                          {recipe.bom.map((b, i) => {
+                            const resolvedName = (b.name && b.name.length <= 15 && !/^[a-zA-Z0-9]+$/.test(b.name)) 
+                              ? b.name 
+                              : (materials.find(m => m.id === b.materialId)?.name || recipes.find(r => r.id === b.materialId)?.name || b.name || b.materialId);
+                            const resolvedUnit = b.unit && b.unit.length <= 8 ? b.unit : (materials.find(m => m.id === b.materialId)?.unit || '');
+                            return (
+                              <span key={i} className="text-xs bg-stone-50 text-stone-700 px-3 py-1.5 rounded-xl border border-stone-200/60 font-semibold">
+                                {resolvedName}: {b.qty} {resolvedUnit}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div>
+                        <h5 className="text-[10px] font-bold text-stone-400 uppercase tracking-widest mb-1.5">SOP 製作步驟</h5>
+                        <ol className="list-decimal pl-5 text-xs text-stone-600 space-y-1">
+                          {(recipe.sop || []).map((step, idx) => (
+                            <li key={idx}>{step}</li>
+                          ))}
+                          {(!recipe.sop || recipe.sop.length === 0) && (
+                            <span className="text-stone-400 italic">尚無設定製作步驟</span>
+                          )}
+                        </ol>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
