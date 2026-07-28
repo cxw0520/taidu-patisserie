@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ArrowLeft, Users, Award, ShieldAlert, LogIn, Loader2 } from 'lucide-react';
+import { ArrowLeft, Users, Award, ShieldAlert, LogIn, Loader2, AlertTriangle } from 'lucide-react';
 import StaffPortal from './StaffPortal.tsx';
 import AdminConsole from './AdminConsole.tsx';
 import { motion, AnimatePresence } from 'motion/react';
@@ -18,6 +18,7 @@ export interface Employee {
   apprentices?: string[];          // Apprentices list
   canAccessAdmin?: boolean;        // Permission: Can access back-end Admin Console
   canOrder?: boolean;              // Permission: Can place material orders
+  password?: string;               // Login password
 }
 
 export interface BOMItem {
@@ -104,6 +105,14 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
   const [hrSchedules, setHrSchedules] = useState<any[]>([]);
 
   const [currentEmpId, setCurrentEmpId] = useState<string>('');
+  const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
+  const [loginPasswordInput, setLoginPasswordInput] = useState<string>('');
+  const [loginError, setLoginError] = useState<string>('');
+
+  const [isSwitchingAccount, setIsSwitchingAccount] = useState<boolean>(false);
+  const [switchTargetEmpId, setSwitchTargetEmpId] = useState<string>('');
+  const [switchPasswordInput, setSwitchPasswordInput] = useState<string>('');
+  const [switchError, setSwitchError] = useState<string>('');
   const currentDayOfWeek = new Date().getDay();
 
   const supplierDeliveryDays: Record<string, number[]> = {
@@ -213,9 +222,9 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       if (records.length === 0) {
         // Initialize default mock employees list on first launch
         const defaults: Employee[] = [
-          { id: 'emp-1', name: '小王', role: '正職主廚', hours: 8, progress: { 'rec-1': 95, 'rec-2': 40 }, mentorName: undefined, apprentices: ['阿明', '小芳'], canAccessAdmin: true, canOrder: true },
-          { id: 'emp-2', name: '阿明', role: '烘焙助手', hours: 8, progress: { 'rec-1': 85, 'rec-2': 90 }, mentorName: '小王', apprentices: [], canAccessAdmin: false, canOrder: true },
-          { id: 'emp-3', name: '小芳', role: '兼職實習生', hours: 6, progress: { 'rec-1': 30, 'rec-2': 10 }, mentorName: '小王', apprentices: [], canAccessAdmin: false, canOrder: false },
+          { id: 'emp-1', name: '小王', role: '正職主廚', hours: 8, progress: { 'rec-1': 95, 'rec-2': 40 }, mentorName: undefined, apprentices: ['阿明', '小芳'], canAccessAdmin: true, canOrder: true, password: '1234' },
+          { id: 'emp-2', name: '阿明', role: '烘焙助手', hours: 8, progress: { 'rec-1': 85, 'rec-2': 90 }, mentorName: '小王', apprentices: [], canAccessAdmin: false, canOrder: true, password: '1234' },
+          { id: 'emp-3', name: '小芳', role: '兼職實習生', hours: 6, progress: { 'rec-1': 30, 'rec-2': 10 }, mentorName: '小王', apprentices: [], canAccessAdmin: false, canOrder: false, password: '1234' },
         ];
         defaults.forEach(async (e) => {
           await setDoc(doc(db, 'shops', shopId, 'scheduler_employees', e.id), e);
@@ -574,23 +583,49 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
     }
   };
 
-  const handleResetAdmin = async () => {
-    try {
-      const chef: Employee = {
-        id: 'emp-1',
-        name: '小王',
-        role: '正職主廚',
-        hours: 8,
-        progress: { 'rec-1': 95, 'rec-2': 40 },
-        apprentices: ['阿明', '小芳'],
-        canAccessAdmin: true,
-        canOrder: true
-      };
-      await setDoc(doc(db, 'shops', shopId, 'scheduler_employees', chef.id), chef);
-      setCurrentEmpId('emp-1');
-      alert("🎉 已成功復原「小王 (正職主廚)」為系統管理員帳號！您現在可以模擬切換至小王，並順利切換至後台進行管理。");
-    } catch (err: any) {
-      alert("復原失敗: " + err.message);
+
+
+  const handleLoginSubmit = () => {
+    const emp = employees.find(e => e.id === currentEmpId) || employees[0];
+    if (!emp) {
+      setLoginError('找不到該人員資料！');
+      return;
+    }
+    const correctPassword = emp.password || '1234';
+    if (loginPasswordInput === correctPassword) {
+      setIsLoggedIn(true);
+      setLoginPasswordInput('');
+      setLoginError('');
+      if (!emp.canAccessAdmin) {
+        setCurrentView('staff');
+      } else {
+        setCurrentView('admin');
+      }
+    } else {
+      setLoginError('密碼輸入錯誤，請重新輸入！');
+    }
+  };
+
+  const handleSwitchSubmit = () => {
+    const emp = employees.find(e => e.id === switchTargetEmpId);
+    if (!emp) {
+      setSwitchError('找不到該人員資料！');
+      return;
+    }
+    const correctPassword = emp.password || '1234';
+    if (switchPasswordInput === correctPassword) {
+      setCurrentEmpId(switchTargetEmpId);
+      setIsSwitchingAccount(false);
+      setSwitchPasswordInput('');
+      setSwitchError('');
+      if (!emp.canAccessAdmin) {
+        setCurrentView('staff');
+      } else {
+        setCurrentView('admin');
+      }
+      alert(`🎉 成功切換身份至「${emp.name}」！`);
+    } else {
+      setSwitchError('密碼輸入錯誤，請重新輸入！');
     }
   };
 
@@ -601,6 +636,84 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       <div className="min-h-screen bg-stone-50 text-stone-600 flex flex-col items-center justify-center gap-4">
         <Loader2 className="w-10 h-10 text-amber-500 animate-spin" />
         <span className="text-xs font-bold uppercase tracking-wider text-stone-400">正在加載生產與排程數據...</span>
+      </div>
+    );
+  }
+
+  if (!isLoggedIn) {
+    return (
+      <div className="min-h-screen bg-gradient-to-tr from-[#fbf9f4] via-[#f7f3e9] to-[#ffffff] text-stone-850 flex items-center justify-center p-4">
+        <div className="bg-white/80 backdrop-blur-md p-8 rounded-3xl border border-stone-200/60 shadow-xl max-w-md w-full flex flex-col gap-6 animate-fade-in">
+          <div className="flex flex-col items-center text-center gap-2">
+            <div className="w-12 h-12 rounded-2xl bg-amber-100 flex items-center justify-center text-amber-600 shadow-inner">
+              <LogIn className="w-6 h-6" />
+            </div>
+            <h2 className="text-xl font-bold tracking-wide text-stone-800">生產與排班管理系統</h2>
+            <p className="text-xs text-stone-500">請選擇您的身分並輸入密碼以登入</p>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-stone-500">登入人員</label>
+              <select
+                value={currentEmpId}
+                onChange={(e) => {
+                  setCurrentEmpId(e.target.value);
+                  setLoginPasswordInput('');
+                  setLoginError('');
+                }}
+                className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2.5 text-xs text-stone-800 outline-none focus:border-amber-500 cursor-pointer font-semibold shadow-sm animate-none"
+              >
+                {employees.map(emp => (
+                  <option key={emp.id} value={emp.id}>
+                    {emp.name} ({emp.role})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-bold text-stone-500">登入密碼</label>
+              <input
+                type="password"
+                placeholder="請輸入密碼"
+                value={loginPasswordInput}
+                onChange={(e) => {
+                  setLoginPasswordInput(e.target.value);
+                  setLoginError('');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleLoginSubmit();
+                  }
+                }}
+                className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2.5 text-xs text-stone-800 outline-none focus:border-amber-500 font-mono"
+              />
+            </div>
+
+            {loginError && (
+              <p className="text-xs text-rose-600 font-bold bg-rose-50 border border-rose-100 p-2.5 rounded-xl flex items-center gap-1.5 animate-pulse">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                {loginError}
+              </p>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2 pt-2">
+            <button
+              onClick={handleLoginSubmit}
+              className="w-full py-3 bg-stone-800 hover:bg-stone-900 text-white rounded-xl text-xs font-bold transition shadow-md shadow-stone-800/20 active:scale-98"
+            >
+              確認登入
+            </button>
+            <button
+              onClick={onBack}
+              className="w-full py-3 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-xl text-xs font-bold transition border border-stone-200/60 active:scale-98"
+            >
+              返回主選單
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -623,36 +736,24 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
         </div>
 
         <div className="flex items-center flex-wrap gap-4">
-          {/* Mock Authentication Switcher */}
+          {/* Active Logged-in Account Display and Switcher */}
           {employees.length > 0 && (
-            <div className="flex items-center gap-2 bg-stone-100 px-3 py-1.5 rounded-xl border border-stone-200 text-xs">
-              <LogIn className="w-3.5 h-3.5 text-stone-400" />
-              <span className="font-bold text-stone-600">模擬登入身分:</span>
-              <select
-                value={currentEmpId}
-                onChange={(e) => {
-                  setCurrentEmpId(e.target.value);
-                  const newEmp = employees.find(emp => emp.id === e.target.value);
-                  if (newEmp && !newEmp.canAccessAdmin) {
-                    setCurrentView('staff');
-                  }
-                }}
-                className="bg-transparent font-bold text-stone-800 outline-none cursor-pointer"
-              >
-                {employees.map(emp => (
-                  <option key={emp.id} value={emp.id}>
-                    {emp.name} ({emp.role})
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={handleResetAdmin}
-                className="ml-1 px-2 py-1 bg-white hover:bg-rose-50 text-rose-600 border border-stone-200 rounded-lg font-bold transition flex items-center gap-1 shrink-0"
-                title="復原管理員帳號"
-              >
-                🔑 復原管理員
-              </button>
-            </div>
+            <button
+              onClick={() => {
+                setIsSwitchingAccount(true);
+                setSwitchTargetEmpId(currentEmpId || employees[0].id);
+                setSwitchPasswordInput('');
+                setSwitchError('');
+              }}
+              className="flex items-center gap-2 bg-stone-100 hover:bg-stone-200 border border-stone-200 px-3.5 py-1.5 rounded-xl text-xs text-stone-700 transition font-bold cursor-pointer"
+              title="點擊切換登入帳號"
+            >
+              <LogIn className="w-3.5 h-3.5 text-amber-500" />
+              <span>目前登入帳號:</span>
+              <span className="text-stone-900 underline underline-offset-2">
+                {currentEmployee?.name || '無'} ({currentEmployee?.role || '無'})
+              </span>
+            </button>
           )}
 
           {/* Tab switchers */}
@@ -835,6 +936,90 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
           )}
         </AnimatePresence>
       </div>
+
+      {/* Account Switching Modal */}
+      {isSwitchingAccount && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-xl max-w-sm w-full flex flex-col gap-4 animate-scale-up">
+            <div className="border-b border-stone-100 pb-3 flex justify-between items-center">
+              <h3 className="font-bold text-stone-800 text-sm flex items-center gap-1.5">
+                <LogIn className="w-4 h-4 text-amber-500" />
+                切換登入帳號
+              </h3>
+              <button
+                onClick={() => setIsSwitchingAccount(false)}
+                className="text-stone-400 hover:text-stone-600 font-bold text-xs"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-stone-400">選擇切換對象</label>
+                <select
+                  value={switchTargetEmpId}
+                  onChange={(e) => {
+                    setSwitchTargetEmpId(e.target.value);
+                    setSwitchPasswordInput('');
+                    setSwitchError('');
+                  }}
+                  className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-amber-500 w-full cursor-pointer font-semibold"
+                >
+                  {employees.map(emp => (
+                    <option key={emp.id} value={emp.id}>
+                      {emp.name} ({emp.role})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex flex-col gap-1">
+                <label className="text-[11px] font-bold text-stone-400">輸入該帳號密碼</label>
+                <input
+                  type="password"
+                  placeholder="請輸入密碼"
+                  value={switchPasswordInput}
+                  onChange={(e) => {
+                    setSwitchPasswordInput(e.target.value);
+                    setSwitchError('');
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleSwitchSubmit();
+                    }
+                  }}
+                  className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-amber-500 w-full font-mono"
+                />
+              </div>
+
+              {switchError && (
+                <p className="text-xs text-rose-600 font-bold bg-rose-50 border border-rose-100 p-2 rounded-lg flex items-center gap-1 animate-pulse">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  {switchError}
+                </p>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-stone-100">
+              <button
+                type="button"
+                onClick={() => setIsSwitchingAccount(false)}
+                className="px-4 py-2 bg-stone-100 text-stone-600 rounded-xl text-xs font-bold hover:bg-stone-200 transition border border-stone-200/40"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleSwitchSubmit}
+                className="px-4 py-2 bg-stone-800 text-white rounded-xl text-xs font-bold hover:bg-stone-900 transition shadow-sm"
+              >
+                確認切換
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

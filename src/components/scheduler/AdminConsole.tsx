@@ -47,6 +47,7 @@ export default function AdminConsole({
   const [newEmpRole, setNewEmpRole] = useState('烘焙助手');
   const [newEmpCanAdmin, setNewEmpCanAdmin] = useState(false);
   const [newEmpCanOrder, setNewEmpCanOrder] = useState(false);
+  const [newEmpPassword, setNewEmpPassword] = useState('1234');
 
   const [newMatName, setNewMatName] = useState('');
   const [newMatQty, setNewMatQty] = useState(10);
@@ -249,13 +250,15 @@ export default function AdminConsole({
       mentorName: undefined,
       apprentices: [],
       canAccessAdmin: newEmpCanAdmin,
-      canOrder: newEmpCanOrder
+      canOrder: newEmpCanOrder,
+      password: newEmpPassword || '1234'
     };
 
     onUpdateEmployees(prev => [...prev, newEmp]);
     setNewEmpName('');
     setNewEmpCanAdmin(false);
     setNewEmpCanOrder(false);
+    setNewEmpPassword('1234');
   };
 
   const handleDeleteEmployee = (id: string) => {
@@ -1146,6 +1149,20 @@ export default function AdminConsole({
                           ))}
                         </select>
                       </div>
+ 
+                      {/* Password input / editor */}
+                      <div className="flex items-center gap-1.5 bg-stone-100/50 px-2 py-1.5 rounded-xl border border-stone-200/40">
+                        <span className="text-[11px] text-stone-500 font-bold shrink-0">登入密碼:</span>
+                        <input
+                          type="text"
+                          value={emp.password || '1234'}
+                          placeholder="密碼"
+                          onChange={(e) => {
+                            onUpdateEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, password: e.target.value } : x));
+                          }}
+                          className="bg-white border border-stone-200 rounded px-2 py-0.5 text-xs text-stone-700 outline-none focus:border-blue-500 font-mono font-semibold w-20 text-center"
+                        />
+                      </div>
 
                       {/* Permission Toggles */}
                       <div className="flex items-center gap-4 border-l border-stone-200 pl-4 py-1">
@@ -1188,7 +1205,7 @@ export default function AdminConsole({
               {/* Add Account form */}
               <form onSubmit={handleAddEmployee} className="p-5 bg-stone-50 border border-stone-200/60 rounded-2xl flex flex-col gap-4">
                 <h4 className="text-xs font-bold text-stone-600">➕ 新增員工系統帳號</h4>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                   <div className="flex flex-col gap-1.5">
                     <label className="text-[11px] font-bold text-stone-400">員工姓名</label>
                     <input
@@ -1220,6 +1237,16 @@ export default function AdminConsole({
                       value={newEmpHours}
                       onChange={(e) => setNewEmpHours(Number(e.target.value))}
                       className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-blue-500 w-full"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-[11px] font-bold text-stone-400">登入密碼 (預設 1234)</label>
+                    <input
+                      type="password"
+                      placeholder="如: 1234"
+                      value={newEmpPassword}
+                      onChange={(e) => setNewEmpPassword(e.target.value)}
+                      className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-blue-500 w-full font-mono"
                     />
                   </div>
                 </div>
