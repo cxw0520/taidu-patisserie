@@ -101,6 +101,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
   const [tasks, setTasks] = useState<ProductionTask[]>([]);
   const [purchases, setPurchases] = useState<PurchaseRecord[]>([]);
   const [orderHistory, setOrderHistory] = useState<HistoricalOrder[]>([]);
+  const [hrSchedules, setHrSchedules] = useState<any[]>([]);
 
   const [currentEmpId, setCurrentEmpId] = useState<string>('');
   const currentDayOfWeek = new Date().getDay();
@@ -248,6 +249,11 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       setLoading(false);
     });
 
+    const unsubHrSchedules = onSnapshot(collection(db, 'shops', shopId, 'scheduler_hr_schedules'), (snap) => {
+      const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setHrSchedules(records);
+    });
+
     return () => {
       unsubMats();
       unsubRecipes();
@@ -255,6 +261,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       unsubTasks();
       unsubPurchases();
       unsubHistory();
+      unsubHrSchedules();
     };
   }, [shopId]);
 
@@ -471,36 +478,61 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
   // Real-time integration: Import actual schedule from taidu-HR (default database)
   const handleImportHRSchedules = async () => {
     try {
-      const todayStr = new Date().toISOString().split('T')[0];
+      const today = new Date();
+      const year = today.getFullYear();
+      const month = (today.getMonth() + 1).toString().padStart(2, '0');
+      const monthPrefix = `${year}-${month}`; // e.g. "2026-07"
+      
       const q = query(
         collection(hrDb, 'schedules'),
-        where('date', '==', todayStr),
+        where('date', '>=', `${monthPrefix}-01`),
+        where('date', '<=', `${monthPrefix}-31`),
         where('status', '==', '已確認')
       );
 
       const snap = await getDocs(q);
-      const importedRecords = snap.docs.map(docSnap => docSnap.data());
+      const importedRecords = snap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
 
       if (importedRecords.length === 0) {
-        alert("ℹ️ taidu-HR 資料庫中，今日尚未排定已確認之班表。系統將改為自動模擬載入班表！");
-        // Fallback simulated update
+        alert(`ℹ️ taidu-HR 資料庫中，${monthPrefix} 月份尚未排定已確認之班表。系統將自動導入模擬月份班表進行展示！`);
+        // Fallback simulated updates
         const batch = writeBatch(db);
+        const mockSchedules = [
+          { id: 'hr-mock-1', empName: '小王', date: `${monthPrefix}-28`, shift: '早班 (09:00 - 18:00)' },
+          { id: 'hr-mock-2', empName: '阿明', date: `${monthPrefix}-28`, shift: '早班 (09:00 - 18:00)' },
+          { id: 'hr-mock-3', empName: '小芳', date: `${monthPrefix}-28`, shift: '兼職 (12:00 - 18:00)' },
+          { id: 'hr-mock-4', empName: '小王', date: `${monthPrefix}-29`, shift: '早班 (09:00 - 18:00)' },
+          { id: 'hr-mock-5', empName: '阿明', date: `${monthPrefix}-29`, shift: '早班 (09:00 - 18:00)' }
+        ];
+        mockSchedules.forEach(ms => {
+          batch.set(doc(db, 'shops', shopId, 'scheduler_hr_schedules', ms.id), ms);
+        });
+        // Set today's hours defaults
         employees.forEach(emp => {
-          batch.update(doc(db, 'shops', shopId, 'scheduler_employees', emp.id), { hours: 8 });
+          batch.update(doc(db, 'shops', shopId, 'scheduler_employees', emp.id), { hours: emp.name === '小芳' ? 6 : 8 });
         });
         await batch.commit();
         return;
       }
 
       const batch = writeBatch(db);
-      let count = 0;
+      
+      // Update the scheduler_hr_schedules cache in Firestore
+      importedRecords.forEach(rec => {
+        batch.set(doc(db, 'shops', shopId, 'scheduler_hr_schedules', rec.id), {
+          id: rec.id,
+          empName: (rec as any).empName || '',
+          date: (rec as any).date || '',
+          shift: (rec as any).shift || ''
+        });
+      });
 
+      // Update today's employee working hours based on imported month's records matching today's date
+      const todayStr = today.toISOString().split('T')[0];
       employees.forEach(emp => {
-        // Find if this employee has a scheduled shift today in the imported records
-        const hrSched = importedRecords.find(r => r.empName === emp.name || r.employeeId === emp.id);
-        if (hrSched) {
-          // Parse shift string, e.g. "早班 (09:00 - 18:00)"
-          const shiftStr = hrSched.shift || '';
+        const todaySched = importedRecords.find(r => ((r as any).empName === emp.name || (r as any).employeeId === emp.id) && (r as any).date === todayStr);
+        if (todaySched) {
+          const shiftStr = (todaySched as any).shift || '';
           const match = shiftStr.match(/(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/);
           let hours = 8;
           if (match) {
@@ -515,15 +547,14 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
             hours = parseFloat(calculatedHours.toFixed(1));
           }
           batch.update(doc(db, 'shops', shopId, 'scheduler_employees', emp.id), { hours });
-          count++;
         }
       });
 
       await batch.commit();
-      alert(`🎉 成功！已從 taidu-HR 的 (default) 資料庫讀取今日班表，共載入並同步 ${count} 名值班人員的當日排班工時。`);
+      alert(`🎉 成功！已從 taidu-HR 資料庫讀取並儲存整個月份的排班，共匯入 ${importedRecords.length} 筆月班表資料。今日工時產能已同步完成。`);
     } catch (err: any) {
-      console.error("HR schedules import error:", err);
-      alert(`⚠️ 班表載入失敗，錯誤原因: ${err.message || err}。請確認連網與 Firestore 權限。`);
+      console.error("HR schedules monthly import error:", err);
+      alert(`⚠️ 班表載入失敗，錯誤原因: ${err.message || err}`);
     }
   };
 
@@ -714,6 +745,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                   });
                 }}
                 onImportHR={handleImportHRSchedules}
+                hrSchedules={hrSchedules}
               />
             </motion.div>
           )}

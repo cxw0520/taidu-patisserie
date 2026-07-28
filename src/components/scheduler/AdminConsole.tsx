@@ -18,6 +18,7 @@ interface AdminConsoleProps {
   onUpdatePurchases: React.Dispatch<React.SetStateAction<PurchaseRecord[]>>;
   onUpdateHistory: React.Dispatch<React.SetStateAction<HistoricalOrder[]>>;
   onImportHR: () => void;
+  hrSchedules: any[];
 }
 
 export default function AdminConsole({
@@ -35,7 +36,8 @@ export default function AdminConsole({
   onUpdateTasks,
   onUpdatePurchases,
   onUpdateHistory,
-  onImportHR
+  onImportHR,
+  hrSchedules
 }: AdminConsoleProps) {
   const [activeTab, setActiveTab] = useState<'scheduling' | 'bom' | 'inventory' | 'accounts' | 'history' | 'finance'>('scheduling');
 
@@ -402,89 +404,27 @@ export default function AdminConsole({
                 </div>
               </div>
 
-              {/* Master-Apprentice and Grading Panel */}
-              <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm grid grid-cols-1 md:grid-cols-3 gap-6">
-                
-                {/* Employee select picker */}
-                <div className="md:col-span-1 border-r border-stone-100 pr-0 md:pr-6 flex flex-col gap-4">
-                  <div>
-                    <h4 className="font-bold text-stone-800 text-sm">選擇評分員工</h4>
-                    <p className="text-[11px] text-stone-400 mt-0.5">師傅可為選定之徒弟考核技能</p>
-                  </div>
-                  <div className="flex flex-col gap-2">
-                    {employees.map(emp => (
-                      <button
-                        key={emp.id}
-                        onClick={() => setSelectedGradingEmpId(emp.id)}
-                        className={`text-left p-3 rounded-xl border text-xs transition ${
-                          selectedGradingEmpId === emp.id
-                            ? 'bg-blue-50/60 border-blue-300 font-bold text-blue-800'
-                            : 'bg-stone-50 border-stone-200 hover:bg-stone-100 text-stone-600'
-                        }`}
-                      >
-                        {emp.name} ({emp.role})
-                      </button>
+              {/* Imported Month Schedules List */}
+              <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
+                <div>
+                  <h4 className="font-bold text-stone-800 text-sm">🗓️ 本月已匯入之 HR 班表明細 (月班表)</h4>
+                  <p className="text-[11px] text-stone-400 mt-0.5">顯示本月份從 taidu-HR 資料庫中同步進來的已確認排班紀錄。</p>
+                </div>
+                {hrSchedules.length === 0 ? (
+                  <p className="text-xs text-stone-400 italic">尚未匯入月份班表，請點擊「匯入 taidu-HR 班表」進行整月數據同步。</p>
+                ) : (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 max-h-60 overflow-y-auto pr-1">
+                    {[...hrSchedules].sort((a, b) => a.date.localeCompare(b.date)).map(hs => (
+                      <div key={hs.id} className="p-3 bg-stone-50 border border-stone-200/60 rounded-xl text-xs flex flex-col gap-1">
+                        <div className="flex justify-between font-bold text-stone-700">
+                          <span>{hs.date}</span>
+                          <span className="text-blue-600 font-extrabold">{hs.empName}</span>
+                        </div>
+                        <span className="text-[11px] text-stone-500 font-medium font-mono">{hs.shift}</span>
+                      </div>
                     ))}
                   </div>
-                </div>
-
-                {/* Grading Panel details */}
-                <div className="md:col-span-2 flex flex-col gap-6">
-                  {gradingEmployee ? (
-                    <>
-                      <div className="flex justify-between items-start border-b border-stone-100 pb-3">
-                        <div>
-                          <h4 className="font-bold text-stone-800 text-md">{gradingEmployee.name} • 技能考核與師徒設定</h4>
-                          <p className="text-xs text-stone-400 mt-1">
-                            師徒配對：
-                            <select
-                              value={gradingEmployee.mentorName || ''}
-                              onChange={(e) => handleAssignMentor(gradingEmployee.id, e.target.value)}
-                              className="bg-stone-50 border border-stone-200 rounded px-2 py-0.5 ml-1 text-stone-700 outline-none text-[11px]"
-                            >
-                              <option value="">無指定師父</option>
-                              {employees.filter(e => e.id !== gradingEmployee.id).map(e => (
-                                <option key={e.id} value={e.name}>{e.name} ({e.role})</option>
-                              ))}
-                            </select>
-                          </p>
-                        </div>
-                      </div>
-
-                      {/* Recipe skill sliders */}
-                      <div className="flex flex-col gap-5">
-                        {recipes.map(recipe => {
-                          const score = gradingEmployee.progress[recipe.id] || 0;
-                          return (
-                            <div key={recipe.id} className="flex flex-col gap-1 bg-stone-50/60 p-4 rounded-xl border border-stone-200/40">
-                              <div className="flex justify-between items-center text-xs">
-                                <span className="font-bold text-stone-700">{recipe.name}</span>
-                                <span className="font-bold text-blue-600">{score}%</span>
-                              </div>
-                              <div className="flex items-center gap-4">
-                                <input
-                                  type="range"
-                                  min="0"
-                                  max="100"
-                                  value={score}
-                                  onChange={(e) => handleUpdateEmpProgress(recipe.id, Number(e.target.value))}
-                                  className="w-full h-1.5 bg-stone-200 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                                />
-                                <span className="text-[10px] text-stone-400 shrink-0">
-                                  解鎖需: {recipe.unlockThreshold}%
-                                </span>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="flex items-center justify-center h-full text-stone-400 text-xs">
-                      請選擇一名員工進行考核設定
-                    </div>
-                  )}
-                </div>
+                )}
               </div>
 
               {/* Employees Work Hours List */}
@@ -747,24 +687,52 @@ export default function AdminConsole({
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-6">
-                      {/* Permission Badges */}
-                      <div className="flex gap-2">
-                        <span className={`px-2.5 py-1 rounded text-[10px] font-bold ${
-                          emp.canAccessAdmin ? 'bg-blue-100 text-blue-700 border border-blue-200' : 'bg-stone-100 text-stone-400'
-                        }`}>
-                          後台權限: {emp.canAccessAdmin ? '有' : '無'}
-                        </span>
-                        <span className={`px-2.5 py-1 rounded text-[10px] font-bold ${
-                          emp.canOrder ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-stone-100 text-stone-400'
-                        }`}>
-                          叫貨權限: {emp.canOrder ? '有' : '無'}
-                        </span>
+                    <div className="flex flex-wrap items-center gap-6">
+                      {/* Assign Mentor Dropdown */}
+                      <div className="flex items-center gap-1.5 bg-stone-100/50 px-2 py-1.5 rounded-xl border border-stone-200/40">
+                        <span className="text-[11px] text-stone-500 font-bold shrink-0">指派師父:</span>
+                        <select
+                          value={emp.mentorName || ''}
+                          onChange={(e) => handleAssignMentor(emp.id, e.target.value)}
+                          className="bg-white border border-stone-200 rounded px-2 py-0.5 text-xs text-stone-700 outline-none focus:border-blue-500 font-medium"
+                        >
+                          <option value="">無指定師父</option>
+                          {employees.filter(e => e.id !== emp.id).map(e => (
+                            <option key={e.id} value={e.name}>{e.name}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Permission Toggles */}
+                      <div className="flex items-center gap-4 border-l border-stone-200 pl-4 py-1">
+                        <label className="flex items-center gap-1.5 text-xs text-stone-600 cursor-pointer font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={emp.canAccessAdmin || false}
+                            onChange={(e) => {
+                              onUpdateEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, canAccessAdmin: e.target.checked } : x));
+                            }}
+                            className="rounded accent-blue-500"
+                          />
+                          <span>管理後台</span>
+                        </label>
+                        
+                        <label className="flex items-center gap-1.5 text-xs text-stone-600 cursor-pointer font-semibold">
+                          <input
+                            type="checkbox"
+                            checked={emp.canOrder || false}
+                            onChange={(e) => {
+                              onUpdateEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, canOrder: e.target.checked } : x));
+                            }}
+                            className="rounded accent-blue-500"
+                          />
+                          <span>原料叫貨</span>
+                        </label>
                       </div>
 
                       <button
                         onClick={() => handleDeleteEmployee(emp.id)}
-                        className="p-2 text-stone-400 hover:text-rose-500 rounded-lg transition"
+                        className="p-2 text-stone-400 hover:text-rose-500 rounded-lg transition shrink-0"
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
