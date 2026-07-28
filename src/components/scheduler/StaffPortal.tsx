@@ -40,7 +40,7 @@ export default function StaffPortal({
   onAddHistoricalOrder,
   onUpdateProgress
 }: StaffPortalProps) {
-  const [activeTab, setActiveTab] = useState<'tasks' | 'training' | 'receiving' | 'ordering' | 'mentorship'>('tasks');
+  const [activeTab, setActiveTab] = useState<'tasks' | 'training' | 'receiving' | 'ordering' | 'mentorship' | 'stock'>('tasks');
   const [expandedRecipeId, setExpandedRecipeId] = useState<string | null>(null);
 
   // Suggested orders states
@@ -343,6 +343,17 @@ export default function StaffPortal({
           </button>
 
           <button
+            onClick={() => setActiveTab('stock')}
+            className={`w-full text-left px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-between ${
+              activeTab === 'stock'
+                ? 'bg-amber-50 text-amber-800 border border-amber-200 shadow-sm'
+                : 'text-stone-500 hover:bg-stone-50'
+            }`}
+          >
+            <span>📦 食材庫存檢視</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('receiving')}
             className={`w-full text-left px-4 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all flex items-center justify-between ${
               activeTab === 'receiving'
@@ -430,6 +441,12 @@ export default function StaffPortal({
             <div>
               <h3 className="font-extrabold text-stone-800 text-lg">師徒專屬教學評分區</h3>
               <p className="text-xs text-stone-500 mt-1">師傅可在前台直接勾選確認徒弟是否「已完成學習」。勾選完成後，徒弟即解鎖該項食譜SOP。</p>
+            </div>
+          )}
+          {activeTab === 'stock' && (
+            <div>
+              <h3 className="font-extrabold text-stone-800 text-lg">食材庫存檢視</h3>
+              <p className="text-xs text-stone-500 mt-1">即時同步自原網頁的食材資料庫，列示原物料現有庫存與安全水位警報。</p>
             </div>
           )}
         </div>
@@ -941,6 +958,45 @@ export default function StaffPortal({
                   請選擇一名徒弟進行教學進度調整
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'stock' && (
+            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
+              <div className="overflow-x-auto">
+                <table className="w-full text-left text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-stone-200 text-stone-400 font-bold">
+                      <th className="pb-3">食材名稱</th>
+                      <th className="pb-3">類別</th>
+                      <th className="pb-3 text-right">現有數量</th>
+                      <th className="pb-3 text-right">最低庫存量</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {materials.map(mat => {
+                      const todaySafety = mat.weeklyMinQty[currentDayOfWeek] || 0;
+                      const isLow = mat.qty < todaySafety;
+                      return (
+                        <tr key={mat.id} className="text-stone-700 hover:bg-stone-50/50 transition">
+                          <td className="py-3.5 font-bold text-stone-800">{mat.name}</td>
+                          <td className="py-3.5">
+                            <span className="bg-stone-100 px-2 py-0.5 rounded text-[10px] font-bold text-stone-500">
+                              {mat.type === 'semi' ? '半成品' : '原料食材'}
+                            </span>
+                          </td>
+                          <td className={`py-3.5 text-right font-mono font-bold ${isLow ? 'text-rose-600' : 'text-emerald-600'}`}>
+                            {mat.qty} {mat.unit}
+                          </td>
+                          <td className="py-3.5 text-right font-mono text-stone-500 font-bold">
+                            {todaySafety} {mat.unit}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

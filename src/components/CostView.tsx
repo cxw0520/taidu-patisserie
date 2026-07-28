@@ -119,6 +119,19 @@ export default function CostView({ settings, shopId }: { settings: Settings, sho
     await deleteDoc(doc(db, 'shops', shopId, 'recipes', id));
   };
 
+  const handleAddToProduction = async (r: Recipe) => {
+    try {
+      await setDoc(doc(db, 'shops', shopId, 'recipes', r.id), {
+        unlockThreshold: (r as any).unlockThreshold || 50,
+        sop: (r as any).sop || ['步驟一', '步驟二', '步驟三']
+      }, { merge: true });
+      alert(`🎉 成功！已將《${r.name}》帶入生產排程管理系統。\n請前往生產管理後台設定該配方的技能解鎖門檻及詳細的 SOP 製作步驟。`);
+    } catch (err: any) {
+      console.error("Add to production error:", err);
+      alert('帶入失敗，請檢查網路連線或權限設定！');
+    }
+  };
+
   const addItem = (type: 'material' | 'half') => {
     setFormData(prev => ({
       ...prev,
@@ -173,6 +186,9 @@ export default function CostView({ settings, shopId }: { settings: Settings, sho
             </div>
           </div>
           <div className="flex items-center gap-2" onClick={e => e.stopPropagation()}>
+            <button onClick={() => handleAddToProduction(r)} className="px-2.5 py-1.5 bg-blue-50 text-blue-600 border border-blue-200 rounded-lg hover:bg-blue-100 text-xs font-bold transition flex items-center gap-1">
+              🔧 帶入生產
+            </button>
             <button onClick={() => handleEdit(r)} className="px-3 py-1.5 bg-coffee-100 text-coffee-600 rounded-lg hover:bg-coffee-200 text-xs font-bold font-serif-brand transition flex items-center gap-1 group">
               <Edit2 className="w-3 h-3 group-hover:rotate-12 transition-transform" /> EDIT
             </button>

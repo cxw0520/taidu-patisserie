@@ -152,13 +152,21 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
     const unsubRecipes = onSnapshot(collection(db, 'shops', shopId, 'recipes'), (snap) => {
       const recipesList: Recipe[] = snap.docs.map(docSnap => {
         const data = docSnap.data();
+        const items = data.items || [];
+        const bomList: BOMItem[] = items.map((item: any) => ({
+          materialId: item.itemId || '',
+          name: item.name || '',
+          qty: item.quantity || 0,
+          unit: item.unit || ''
+        }));
+
         return {
           id: docSnap.id,
           name: data.name || '',
           type: data.type === 'half' ? 'semi' : 'finished',
           unlockThreshold: data.unlockThreshold || 50,
           sop: data.sop || ['步驟一', '步驟二', '步驟三'],
-          bom: [], // Resolved later
+          bom: bomList,
           images: data.images || []
         };
       });
@@ -219,6 +227,11 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
         if (!currentEmpId) {
           setCurrentEmpId(records[0].id);
         }
+        // Self-healing: Ensure there is always at least one administrator account in the workspace
+        if (!records.some(e => e.canAccessAdmin)) {
+          const targetId = records[0].id;
+          updateDoc(doc(db, 'shops', shopId, 'scheduler_employees', targetId), { canAccessAdmin: true });
+        }
       }
     });
 
@@ -271,36 +284,39 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       setRecipes(prevRecipes => {
         let changed = false;
         const mapped = prevRecipes.map(r => {
-          // If bom is already resolved, don't overwrite if it contains contents
-          if (r.bom && r.bom.length > 0) return r;
-
-          // Resolve from default BOM templates
-          let bom: BOMItem[] = [];
-          if (r.name === '經典法式草莓塔') {
-            bom = [
-              { materialId: 'mat-semi-1', name: '法式塔皮(半成品)', qty: 1, unit: '個' },
-              { materialId: 'mat-semi-2', name: '卡士達醬(半成品)', qty: 80, unit: 'g' },
-              { materialId: 'mat-3', name: '新鮮草莓', qty: 6, unit: '顆' } // If mat-3 does not match, name can search dynamically
-            ];
-          } else if (r.name === '法式塔皮') {
-            bom = [
-              { materialId: 'mat-1', name: '日本麵粉', qty: 0.05, unit: 'kg' },
-              { materialId: 'mat-2', name: '法國發酵奶油', qty: 0.03, unit: 'kg' }
-            ];
+          let currentBom = r.bom || [];
+          
+          if (currentBom.length === 0) {
+            if (r.name === '經典法式草莓塔') {
+              currentBom = [
+                { materialId: 'mat-semi-1', name: '法式塔皮(半成品)', qty: 1, unit: '個' },
+                { materialId: 'mat-semi-2', name: '卡士達醬(半成品)', qty: 80, unit: 'g' },
+                { materialId: 'mat-3', name: '新鮮草莓', qty: 6, unit: '顆' }
+              ];
+            } else if (r.name === '法式塔皮') {
+              currentBom = [
+                { materialId: 'mat-1', name: '日本麵粉', qty: 0.05, unit: 'kg' },
+                { materialId: 'mat-2', name: '法國發酵奶油', qty: 0.03, unit: 'kg' }
+              ];
+            }
           }
 
-          // Dynamic matching to align material ID
-          const resolvedBom = bom.map(b => {
-            const matchedMat = materials.find(m => m.name === b.name);
+          const resolvedBom = currentBom.map(b => {
+            const matchedMat = materials.find(m => m.id === b.materialId || m.name === b.name);
             return {
-              ...b,
               materialId: matchedMat ? matchedMat.id : b.materialId,
+              name: matchedMat ? matchedMat.name : (prevRecipes.find(rec => rec.id === b.materialId)?.name || b.name),
+              qty: b.qty,
               unit: matchedMat ? matchedMat.unit : b.unit
             };
           });
 
-          changed = true;
-          return { ...r, bom: resolvedBom };
+          const isDifferent = JSON.stringify(r.bom) !== JSON.stringify(resolvedBom);
+          if (isDifferent) {
+            changed = true;
+            return { ...r, bom: resolvedBom };
+          }
+          return r;
         });
 
         return changed ? mapped : prevRecipes;
@@ -558,6 +574,27 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
     }
   };
 
+  const handleResetAdmin = async () => {
+    try {
+      const chef: Employee = {
+        id: 'emp-1',
+        name: '小王',
+        role: '正職主廚',
+        hours: 8,
+        progress: { 'rec-1': 95, 'rec-2': 40 },
+        mentorName: undefined,
+        apprentices: ['阿明', '小芳'],
+        canAccessAdmin: true,
+        canOrder: true
+      };
+      await setDoc(doc(db, 'shops', shopId, 'scheduler_employees', chef.id), chef);
+      setCurrentEmpId('emp-1');
+      alert("🎉 已成功復原「小王 (正職主廚)」為系統管理員帳號！您現在可以模擬切換至小王，並順利切換至後台進行管理。");
+    } catch (err: any) {
+      alert("復原失敗: " + err.message);
+    }
+  };
+
   const currentEmployee = employees.find(e => e.id === currentEmpId) || employees[0];
 
   if (loading) {
@@ -609,6 +646,13 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                   </option>
                 ))}
               </select>
+              <button
+                onClick={handleResetAdmin}
+                className="ml-1 px-2 py-1 bg-white hover:bg-rose-50 text-rose-600 border border-stone-200 rounded-lg font-bold transition flex items-center gap-1 shrink-0"
+                title="復原管理員帳號"
+              >
+                🔑 復原管理員
+              </button>
             </div>
           )}
 
