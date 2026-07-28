@@ -582,7 +582,6 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
         role: '正職主廚',
         hours: 8,
         progress: { 'rec-1': 95, 'rec-2': 40 },
-        mentorName: undefined,
         apprentices: ['阿明', '小芳'],
         canAccessAdmin: true,
         canOrder: true
@@ -758,7 +757,8 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
 
                     // Save / update rest of the documents
                     for (const e of list) {
-                      await setDoc(doc(db, 'shops', shopId, 'scheduler_employees', e.id), e);
+                      const cleanE = JSON.parse(JSON.stringify(e));
+                      await setDoc(doc(db, 'shops', shopId, 'scheduler_employees', e.id), cleanE);
                     }
                   } catch (err: any) {
                     console.error("onUpdateEmployees failed:", err);
