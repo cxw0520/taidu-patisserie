@@ -763,6 +763,21 @@ export default function AdminConsole({
                           >
                             📝 編輯配方 & SOP
                           </button>
+                          <button
+                            onClick={async () => {
+                              if (confirm(`⚠️ 確定要刪除配方「${recipe.name}」嗎？此操作將會從生產管理系統中徹底移除該配方與 SOP，且無法還原！`)) {
+                                try {
+                                  await onUpdateRecipes(prev => prev.filter(r => r.id !== recipe.id));
+                                  alert(`🎉 配方「${recipe.name}」已成功刪除！`);
+                                } catch (err: any) {
+                                  alert(`刪除失敗: ${err.message}`);
+                                }
+                              }
+                            }}
+                            className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold transition flex items-center gap-1"
+                          >
+                            ❌ 刪除配方
+                          </button>
                         </div>
                       </div>
 

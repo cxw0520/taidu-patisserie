@@ -777,12 +777,26 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                   });
                 }}
                 onUpdateRecipes={async (val) => {
-                  const list = typeof val === 'function' ? val(recipes) : val;
-                  list.forEach(async (r) => {
-                    await updateDoc(doc(db, 'shops', shopId, 'recipes', r.id), {
-                      unlockThreshold: r.unlockThreshold
-                    });
-                  });
+                  try {
+                    const list = typeof val === 'function' ? val(recipes) : val;
+                    const idsInNewList = new Set(list.map(r => r.id));
+                    
+                    // Call deleteDoc for any recipe document that was removed in state
+                    for (const r of recipes) {
+                      if (!idsInNewList.has(r.id)) {
+                        await deleteDoc(doc(db, 'shops', shopId, 'recipes', r.id));
+                      }
+                    }
+
+                    // Save / update rest of the documents
+                    for (const r of list) {
+                      const cleanR = JSON.parse(JSON.stringify(r));
+                      await setDoc(doc(db, 'shops', shopId, 'recipes', r.id), cleanR, { merge: true });
+                    }
+                  } catch (err: any) {
+                    console.error("onUpdateRecipes failed:", err);
+                    alert("⚠️ 儲存配方或刪除失敗！\n錯誤原因: " + (err.message || err));
+                  }
                 }}
                 onUpdateTasks={async (val) => {
                   const list = typeof val === 'function' ? val(tasks) : val;
