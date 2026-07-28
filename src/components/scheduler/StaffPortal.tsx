@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { CheckCircle, Circle, BookOpen, Clock, Award, ChevronDown, ChevronUp, Check, Truck, AlertTriangle, Play, ShieldAlert, ShoppingBag, Plus, Trash2, UserCheck, Users, BookMarked } from 'lucide-react';
+import { CheckCircle, Circle, BookOpen, Clock, Award, ChevronDown, ChevronUp, Check, Truck, AlertTriangle, Play, ShieldAlert, ShoppingBag, Plus, Trash2, UserCheck, Users, BookMarked, BadgeCheck, ClipboardList } from 'lucide-react';
 import { Employee, ProductionTask, Recipe, PurchaseRecord, Material, HistoricalOrder } from './SchedulerApp';
 
 interface StaffPortalProps {
@@ -8,9 +8,10 @@ interface StaffPortalProps {
   recipes: Recipe[];
   purchases: PurchaseRecord[];
   materials: Material[];
+  vendors: any[];
   onStartTask: (taskId: string, operatorName: string) => void;
   onCompleteTask: (taskId: string, actualHours?: number, shortageOption?: 'deconstruct' | 'negative') => void;
-  onReceivePurchase: (purchaseId: string, signedByName: string) => void;
+  onReceivePurchase: (purchaseId: string, signedByName: string, actualQty?: number) => void;
   currentLoggedInEmpId: string;
   onAddPurchaseOrders: (newPOs: PurchaseRecord[]) => void;
   onAddHistoricalOrder: (newHist: HistoricalOrder) => void;
@@ -32,6 +33,7 @@ export default function StaffPortal({
   recipes,
   purchases,
   materials,
+  vendors,
   onStartTask,
   onCompleteTask,
   onReceivePurchase,
@@ -45,8 +47,10 @@ export default function StaffPortal({
 
   // Suggested orders states
   const [orderItems, setOrderItems] = useState<SuggestedOrderItem[]>([]);
-  const [paymentMethod, setPaymentMethod] = useState<'monthly' | 'cash'>('cash');
   const [isOrderInitiated, setIsOrderInitiated] = useState(false);
+  const [isOrderPreviewOpen, setIsOrderPreviewOpen] = useState(false);
+  const [previewOrders, setPreviewOrders] = useState<any[]>([]);
+  const [receivedQtys, setReceivedQtys] = useState<Record<string, number>>({});
 
   // Mentor Tab states
   const [selectedApprenticeId, setSelectedApprenticeId] = useState<string>('');
@@ -63,6 +67,29 @@ export default function StaffPortal({
   const currentDayOfWeek = today.getDay();
   const todayISOStr = today.toISOString().split('T')[0];
   const daysName = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
+
+  const supplierDeliveryDays: Record<string, number[]> = {
+    '德麥食品': [2, 5],
+    '豐盟麵粉': [1, 4],
+    '大湖草莓農場': [0, 3, 5],
+    '自家生產': [0, 1, 2, 3, 4, 5, 6]
+  };
+
+  const calculateExpectedDeliveryDate = (supplier: string): string => {
+    const deliveryDays = supplierDeliveryDays[supplier] || [0, 1, 2, 3, 4, 5, 6];
+    const targetDate = new Date();
+    
+    // Find the next delivery day starting tomorrow
+    for (let i = 1; i <= 7; i++) {
+      const nextDate = new Date(targetDate);
+      nextDate.setDate(targetDate.getDate() + i);
+      const dayOfWeek = nextDate.getDay();
+      if (deliveryDays.includes(dayOfWeek)) {
+        return nextDate.toISOString().split('T')[0];
+      }
+    }
+    return targetDate.toISOString().split('T')[0];
+  };
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -193,61 +220,79 @@ export default function StaffPortal({
   const progressSum = recipes.reduce((sum, r) => sum + (currentEmployee.progress[r.id] || 0), 0);
   const overallProgress = totalRecipeCount > 0 ? Math.round(progressSum / totalRecipeCount) : 0;
 
-  // Submit generated purchase orders (Grouped by supplier!)
-  const handleSubmitOrders = () => {
+  // Open the purchase orders preview dialog modal
+  const handleOpenPreviewModal = () => {
     if (orderItems.length === 0) {
       alert('請先填載欲叫貨的物料項目！');
       return;
     }
 
-    const newPOs: PurchaseRecord[] = [];
-    const groupedBySupplier: Record<string, typeof orderItems> = {};
-
-    orderItems.forEach(item => {
-      if (!groupedBySupplier[item.supplier]) {
-        groupedBySupplier[item.supplier] = [];
-      }
-      groupedBySupplier[item.supplier].push(item);
+    const uniqueSuppliers = Array.from(new Set(orderItems.map(item => item.supplier))) as string[];
+    const grouped = uniqueSuppliers.map(supplierName => {
+      const items = orderItems.filter(item => item.supplier === supplierName);
+      
+      // Look up vendor default payment method in the vendors collection
+      const vendorDoc = vendors.find(v => v.name === supplierName);
+      const defaultPayment = vendorDoc?.defaultPaymentType === '月結' ? 'monthly' : 'cash';
+      
+      // Calculate next expected delivery date based on delivery calendar
+      const expectedDate = calculateExpectedDeliveryDate(supplierName);
+      
+      return {
+        supplier: supplierName,
+        paymentMethod: defaultPayment,
+        expectedDate: expectedDate,
+        items: items.map(it => ({ ...it }))
+      };
     });
 
+    setPreviewOrders(grouped);
+    setIsOrderPreviewOpen(true);
+  };
+
+  // Submit generated purchase orders
+  const confirmSubmitOrders = () => {
+    if (previewOrders.length === 0) return;
+
+    const newPOs: PurchaseRecord[] = [];
     const currentOrderDate = new Date().toISOString().replace('T', ' ').slice(0, 16);
 
-    Object.keys(groupedBySupplier).forEach(supplier => {
-      const supplierItems = groupedBySupplier[supplier];
-      
+    previewOrders.forEach(group => {
       // Save individual purchase records
-      supplierItems.forEach((item, idx) => {
+      group.items.forEach((item: any, idx: number) => {
         newPOs.push({
-          id: `pur-staff-${Date.now()}-${idx}-${supplier}`,
+          id: `pur-staff-${Date.now()}-${idx}-${group.supplier}`,
           materialName: item.name,
           qty: item.suggestedQty,
           cost: Math.round(item.suggestedQty * item.cost),
-          supplier: item.supplier,
+          supplier: group.supplier,
           status: 'pending',
           date: todayISOStr,
-          expectedDate: todayISOStr, // Standard Mock: Delivered today
-          paymentMethod: paymentMethod,
+          expectedDate: group.expectedDate,
+          paymentMethod: group.paymentMethod,
           signedBy: null
         });
       });
 
       // Save to history log
       onAddHistoricalOrder({
-        id: `hist-staff-${Date.now()}-${supplier}`,
+        id: `hist-staff-${Date.now()}-${group.supplier}`,
         date: currentOrderDate,
-        supplier: supplier,
-        items: supplierItems.map(item => ({
+        supplier: group.supplier,
+        items: group.items.map((item: any) => ({
           name: item.name,
           qty: item.suggestedQty,
           cost: Math.round(item.suggestedQty * item.cost)
         })),
-        orderedBy: currentEmployee.name
+        orderedBy: currentEmployee?.name || '未知'
       });
     });
 
     onAddPurchaseOrders(newPOs);
     alert(`已為您成功生成並保存叫貨單！已依廠商分類拆分生成採購單，並妥善記錄到後台歷史叫貨單中。`);
     setOrderItems([]);
+    setPreviewOrders([]);
+    setIsOrderPreviewOpen(false);
     setActiveTab('tasks');
   };
 
@@ -694,52 +739,116 @@ export default function StaffPortal({
 
           {/* TAB 3: RECEIVING DELIVERIES */}
           {activeTab === 'receiving' && (
-            <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
+            <div className="flex flex-col gap-6">
               {todayPurchases.filter(p => p.status === 'pending').length === 0 ? (
-                <div className="py-16 text-center flex flex-col items-center justify-center gap-3 text-stone-400">
+                <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm py-16 text-center flex flex-col items-center justify-center gap-3 text-stone-400">
                   <Truck className="w-12 h-12 text-stone-300 animate-bounce" />
                   <p className="font-bold text-stone-600 text-sm">今日沒有待簽收的物料</p>
                 </div>
               ) : (
-                todayPurchases.filter(p => p.status === 'pending').map(purchase => (
-                  <div
-                    key={purchase.id}
-                    className="p-5 bg-stone-50/50 border border-stone-200/85 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-amber-100/50 text-amber-600 rounded-xl">
-                        <Truck className="w-5 h-5" />
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <h4 className="font-bold text-stone-800 text-sm">{purchase.materialName}</h4>
-                          <span className={`text-[9px] font-extrabold px-1.5 py-0.2 rounded ${
-                            purchase.paymentMethod === 'monthly' ? 'bg-blue-100 text-blue-700' : 'bg-emerald-100 text-amber-700'
-                          }`}>
-                            {purchase.paymentMethod === 'monthly' ? '月結' : '現結'}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 mt-1">
-                          <span className="text-[11px] font-bold text-stone-500 bg-stone-200/50 px-2 py-0.5 rounded">
-                            應收數量: {purchase.qty}
-                          </span>
-                          <span className="text-[11px] font-medium text-stone-400">
-                            廠牌: {purchase.supplier}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
+                (() => {
+                  const pendingPOs = todayPurchases.filter(p => p.status === 'pending');
+                  const suppliers = Array.from(new Set(pendingPOs.map(p => p.supplier))) as string[];
+                  
+                  return suppliers.map(supplierName => {
+                    const supplierPOs = pendingPOs.filter(p => p.supplier === supplierName);
+                    const isMonthly = supplierPOs[0]?.paymentMethod === 'monthly';
 
-                    <div>
-                      <button
-                        onClick={() => onReceivePurchase(purchase.id, currentEmployee.name)}
-                        className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-sm transition active:scale-95 flex items-center gap-1"
-                      >
-                        <Check className="w-4 h-4" /> 確認無誤並簽收
-                      </button>
-                    </div>
-                  </div>
-                ))
+                    // Handler for receiving all items from this supplier
+                    const handleReceiveAllForSupplier = async () => {
+                      if (!window.confirm(`是否確認一鍵簽收「${supplierName}」的所有待簽收物料？`)) return;
+                      for (const po of supplierPOs) {
+                        const finalQty = receivedQtys[po.id] !== undefined ? receivedQtys[po.id] : po.qty;
+                        await onReceivePurchase(po.id, currentEmployee.name, finalQty);
+                      }
+                      alert(`🎉 已成功完成「${supplierName}」之所有物料簽收核銷！`);
+                    };
+
+                    return (
+                      <div key={supplierName} className="bg-white rounded-3xl border border-stone-200/60 shadow-sm overflow-hidden animate-fade-in">
+                        <div className="bg-stone-50 px-5 py-4 border-b border-stone-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="flex items-center gap-2.5">
+                            <div className="p-2.5 bg-amber-100/60 text-amber-600 rounded-xl">
+                              <Truck className="w-4 h-4" />
+                            </div>
+                            <div>
+                              <h4 className="font-extrabold text-stone-800 text-sm">{supplierName}</h4>
+                              <p className="text-[10px] text-stone-400 mt-0.5">共有 {supplierPOs.length} 項待簽收物料</p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-3">
+                            {/* Payment type badge */}
+                            <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-xl shadow-sm border ${
+                              isMonthly 
+                                ? 'bg-blue-50 text-blue-700 border-blue-100' 
+                                : 'bg-rose-50 text-rose-700 border-rose-100 animate-pulse'
+                            }`}>
+                              {isMonthly ? '💳 帳款模式: 月結' : '💵 警告: 現場付現 (現結)'}
+                            </span>
+                            
+                            <button
+                              onClick={handleReceiveAllForSupplier}
+                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition active:scale-95 flex items-center gap-1 cursor-pointer"
+                            >
+                              <BadgeCheck className="w-3.5 h-3.5" /> 一鍵簽收全部
+                            </button>
+                          </div>
+                        </div>
+
+                        <div className="p-5 flex flex-col gap-4">
+                          {supplierPOs.map(purchase => {
+                            const currentInputQty = receivedQtys[purchase.id] !== undefined ? receivedQtys[purchase.id] : purchase.qty;
+                            return (
+                              <div
+                                key={purchase.id}
+                                className="p-4 bg-stone-50/40 hover:bg-stone-50 border border-stone-200/50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all"
+                              >
+                                <div className="flex items-center gap-3">
+                                  <div className="w-8 h-8 rounded-lg bg-stone-200/60 flex items-center justify-center font-bold text-xs text-stone-600">
+                                    {purchase.materialName[0]}
+                                  </div>
+                                  <div>
+                                    <h5 className="font-bold text-stone-800 text-xs">{purchase.materialName}</h5>
+                                    <p className="text-[10px] text-stone-400 mt-0.5">原叫貨數量: {purchase.qty} {purchase.materialName.includes('紙箱') || purchase.materialName.includes('盒') ? '個' : 'kg'}</p>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-4 self-end sm:self-auto">
+                                  {/* Qty edit input */}
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[11px] text-stone-500 font-bold shrink-0">實際到貨:</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={currentInputQty}
+                                      onChange={(e) => {
+                                        const val = parseFloat(e.target.value);
+                                        setReceivedQtys(prev => ({ ...prev, [purchase.id]: isNaN(val) ? 0 : val }));
+                                      }}
+                                      className="w-20 bg-white border border-stone-200 rounded-xl px-2 py-1 text-center text-xs font-mono font-bold text-stone-850 focus:border-amber-500 outline-none"
+                                    />
+                                    <span className="text-xs text-stone-400 font-bold">
+                                      {purchase.materialName.includes('紙箱') || purchase.materialName.includes('盒') ? '個' : 'kg'}
+                                    </span>
+                                  </div>
+
+                                  <button
+                                    onClick={() => onReceivePurchase(purchase.id, currentEmployee.name, currentInputQty)}
+                                    className="px-3.5 py-2 bg-stone-800 hover:bg-stone-900 text-white rounded-xl text-xs font-bold transition active:scale-95 flex items-center gap-1 shrink-0 cursor-pointer"
+                                  >
+                                    <Check className="w-3.5 h-3.5 text-emerald-400" /> 簽收
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  });
+                })()
               )}
             </div>
           )}
@@ -760,17 +869,6 @@ export default function StaffPortal({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-3">
-                  <span className="text-xs font-bold text-stone-500">付款設定:</span>
-                  <select
-                    value={paymentMethod}
-                    onChange={(e: any) => setPaymentMethod(e.target.value)}
-                    className="bg-stone-50 border border-stone-200 rounded px-2.5 py-1 text-xs outline-none font-bold text-stone-700"
-                  >
-                    <option value="cash">現結 (貨到付現)</option>
-                    <option value="monthly">月結 (定期請款)</option>
-                  </select>
-                </div>
               </div>
 
               {orderItems.length === 0 ? (
@@ -796,7 +894,7 @@ export default function StaffPortal({
               ) : (
                 <div className="flex flex-col gap-6">
                   {/* Group items by supplier */}
-                  {Array.from(new Set(orderItems.map(item => item.supplier))).map(supplier => {
+                  {(Array.from(new Set(orderItems.map(item => item.supplier))) as string[]).map(supplier => {
                     const supplierItems = orderItems.filter(item => item.supplier === supplier);
                     return (
                       <div key={supplier} className="border border-stone-200/80 rounded-2xl overflow-hidden shadow-sm">
@@ -864,10 +962,11 @@ export default function StaffPortal({
 
                   <div className="flex justify-end pt-4 border-t border-stone-100">
                     <button
-                      onClick={handleSubmitOrders}
-                      className="px-6 py-2.5 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 shadow-md shadow-blue-200/50 transition active:scale-95"
+                      onClick={handleOpenPreviewModal}
+                      className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md shadow-blue-200/50 transition active:scale-95 flex items-center gap-1.5"
                     >
-                      送出叫貨並生成採購單
+                      <ClipboardList className="w-4 h-4" />
+                      預覽叫貨單並確認
                     </button>
                   </div>
                 </div>
@@ -1074,6 +1173,111 @@ export default function StaffPortal({
             >
               取消，暫不完成
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Purchase Order Preview Modal */}
+      {isOrderPreviewOpen && (
+        <div className="fixed inset-0 bg-stone-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-xl max-w-2xl w-full flex flex-col gap-5 max-h-[85vh]">
+            <div className="border-b border-stone-100 pb-3 flex justify-between items-center">
+              <h3 className="font-extrabold text-stone-800 text-base flex items-center gap-1.5">
+                <ClipboardList className="w-5 h-5 text-amber-500" />
+                採購叫貨單確認預覽
+              </h3>
+              <button
+                onClick={() => setIsOrderPreviewOpen(false)}
+                className="text-stone-400 hover:text-stone-600 font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1 flex flex-col gap-4">
+              {previewOrders.map((group) => {
+                const groupTotal = group.items.reduce((sum: number, it: any) => sum + Math.round(it.suggestedQty * it.cost), 0);
+                return (
+                  <div key={group.supplier} className="border border-stone-200/80 rounded-2xl overflow-hidden shadow-sm">
+                    <div className="bg-stone-50 px-4 py-3 border-b border-stone-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                      <span className="font-extrabold text-stone-850 flex items-center gap-1">
+                        🏢 供應商：{group.supplier}
+                      </span>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-lg flex items-center gap-1">
+                          🚚 預期到貨: {group.expectedDate}
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[11px] font-bold text-stone-500">付款方式:</span>
+                          <select
+                            value={group.paymentMethod}
+                            onChange={(e) => {
+                              const val = e.target.value as 'monthly' | 'cash';
+                              setPreviewOrders(prev => prev.map(p => p.supplier === group.supplier ? { ...p, paymentMethod: val } : p));
+                            }}
+                            className="bg-white border border-stone-200 rounded-lg px-2 py-0.5 text-xs outline-none text-stone-700 font-bold cursor-pointer"
+                          >
+                            <option value="cash">現結 (現付)</option>
+                            <option value="monthly">月結 (定期)</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="p-4 flex flex-col gap-2.5 bg-white">
+                      <table className="w-full text-left text-xs">
+                        <thead>
+                          <tr className="border-b border-stone-100 text-stone-400 font-bold text-[10px]">
+                            <th className="pb-2">物料項目</th>
+                            <th className="pb-2 text-center">單價</th>
+                            <th className="pb-2 text-center">叫貨數量</th>
+                            <th className="pb-2 text-right">預估金額</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {group.items.map((item: any) => (
+                            <tr key={item.materialId} className="border-b border-stone-50 last:border-b-0 text-stone-700">
+                              <td className="py-2 font-bold">{item.name}</td>
+                              <td className="py-2 text-center text-stone-500">${item.cost} / {item.unit}</td>
+                              <td className="py-2 text-center font-semibold">{item.suggestedQty} {item.unit}</td>
+                              <td className="py-2 text-right font-bold text-stone-800">${Math.round(item.suggestedQty * item.cost)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <div className="border-t border-stone-100/60 pt-2.5 flex justify-end text-xs text-stone-500">
+                        <span>該廠商小計: <strong className="text-stone-800 text-sm font-bold ml-1">${groupTotal}</strong></span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="border-t border-stone-100 pt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="text-sm font-bold text-stone-700">
+                叫貨廠商數: <span className="text-stone-900 font-extrabold font-mono">{previewOrders.length}</span> 家，
+                預估總採購額: <span className="text-blue-600 font-extrabold text-lg font-mono ml-1">
+                  ${previewOrders.reduce((sum, g) => sum + g.items.reduce((s: number, it: any) => s + Math.round(it.suggestedQty * it.cost), 0), 0)}
+                </span>
+              </div>
+              <div className="flex gap-2.5 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setIsOrderPreviewOpen(false)}
+                  className="flex-1 sm:flex-none px-4 py-2.5 bg-stone-100 hover:bg-stone-200 text-stone-600 rounded-xl text-xs font-bold transition border border-stone-200/40 active:scale-98"
+                >
+                  返回修改
+                </button>
+                <button
+                  type="button"
+                  onClick={confirmSubmitOrders}
+                  className="flex-1 sm:flex-none px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-md shadow-blue-200/50 active:scale-98"
+                >
+                  確認送出叫貨
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}

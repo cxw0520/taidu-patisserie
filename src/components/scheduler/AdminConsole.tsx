@@ -9,6 +9,7 @@ interface AdminConsoleProps {
   tasks: ProductionTask[];
   purchases: PurchaseRecord[];
   orderHistory: HistoricalOrder[];
+  vendors: any[];
   supplierDeliveryDays: Record<string, number[]>;
   currentDayOfWeek: number;
   onUpdateEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
@@ -28,6 +29,7 @@ export default function AdminConsole({
   tasks,
   purchases,
   orderHistory,
+  vendors,
   supplierDeliveryDays,
   currentDayOfWeek,
   onUpdateEmployees,

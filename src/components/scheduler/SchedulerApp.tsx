@@ -103,6 +103,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
   const [purchases, setPurchases] = useState<PurchaseRecord[]>([]);
   const [orderHistory, setOrderHistory] = useState<HistoricalOrder[]>([]);
   const [hrSchedules, setHrSchedules] = useState<any[]>([]);
+  const [vendors, setVendors] = useState<any[]>([]);
 
   const [currentEmpId, setCurrentEmpId] = useState<string>('');
   const [isLoggedIn, setIsLoggedIn] = useState<boolean>(false);
@@ -276,6 +277,11 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       setHrSchedules(records);
     });
 
+    const unsubVendors = onSnapshot(collection(db, 'shops', shopId, 'vendors'), (snap) => {
+      const records = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      setVendors(records);
+    });
+
     return () => {
       unsubMats();
       unsubRecipes();
@@ -284,6 +290,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       unsubPurchases();
       unsubHistory();
       unsubHrSchedules();
+      unsubVendors();
     };
   }, [shopId]);
 
@@ -475,22 +482,28 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
   };
 
   // Sign off purchase order and increment stock in the materials collection
-  const handleReceivePurchase = async (purchaseId: string, signedByName: string) => {
+  const handleReceivePurchase = async (purchaseId: string, signedByName: string, actualQty?: number) => {
     const purchase = purchases.find(p => p.id === purchaseId);
     if (!purchase || purchase.status === 'received') return;
 
     try {
       const batch = writeBatch(db);
       
+      const finalQty = actualQty !== undefined ? actualQty : purchase.qty;
+      const unitCost = purchase.qty > 0 ? (purchase.cost / purchase.qty) : 0;
+      const finalCost = actualQty !== undefined ? Math.round(actualQty * unitCost) : purchase.cost;
+
       batch.update(doc(db, 'shops', shopId, 'scheduler_purchases', purchaseId), {
         status: 'received',
-        signedBy: signedByName
+        signedBy: signedByName,
+        qty: finalQty,
+        cost: finalCost
       });
 
       const matchedMat = materials.find(m => m.name === purchase.materialName);
       if (matchedMat) {
         batch.update(doc(db, 'shops', shopId, 'materials', matchedMat.id), {
-          stock: parseFloat((matchedMat.qty + purchase.qty).toFixed(2))
+          stock: parseFloat((matchedMat.qty + finalQty).toFixed(2))
         });
       }
 
@@ -808,6 +821,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 recipes={recipes}
                 purchases={purchases}
                 materials={materials}
+                vendors={vendors}
                 onStartTask={handleStartTask}
                 onCompleteTask={handleCompleteTask}
                 onReceivePurchase={handleReceivePurchase}
@@ -842,6 +856,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 tasks={tasks}
                 purchases={purchases}
                 orderHistory={orderHistory}
+                vendors={vendors}
                 supplierDeliveryDays={supplierDeliveryDays}
                 currentDayOfWeek={currentDayOfWeek}
                 onUpdateEmployees={async (val) => {
