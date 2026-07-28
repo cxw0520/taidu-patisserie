@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Clock, Plus, Trash2, AlertTriangle, TrendingUp, DollarSign, Truck, ClipboardList, Check, UserCheck, HelpCircle, UserPlus, Database } from 'lucide-react';
-import { Employee, Material, Recipe, ProductionTask, PurchaseRecord, HistoricalOrder } from './SchedulerApp';
+import { Employee, Material, Recipe, ProductionTask, PurchaseRecord, HistoricalOrder, BOMItem } from './SchedulerApp';
 
 interface AdminConsoleProps {
   employees: Employee[];
@@ -62,6 +62,7 @@ export default function AdminConsole({
   const [editRecipeName, setEditRecipeName] = useState('');
   const [editRecipeThreshold, setEditRecipeThreshold] = useState(50);
   const [editRecipeSop, setEditRecipeSop] = useState<string[]>([]);
+  const [editRecipeBom, setEditRecipeBom] = useState<BOMItem[]>([]);
 
   // Selected employee in back-end card to grade/mentor
   const [selectedGradingEmpId, setSelectedGradingEmpId] = useState<string>(employees[0]?.id || '');
@@ -703,6 +704,144 @@ export default function AdminConsole({
                             ))}
                           </div>
                         </div>
+ 
+                        <div className="flex flex-col gap-2">
+                          <label className="text-[11px] font-bold text-stone-400">配方 BOM 清單設定</label>
+                          <div className="flex flex-col gap-2 max-h-60 overflow-y-auto pr-1 bg-stone-50/50 p-3 rounded-2xl border border-stone-200/40">
+                            {editRecipeBom.map((bomItem, bIdx) => {
+                              const resolvedName = bomItem.name || materials.find(m => m.id === bomItem.materialId)?.name || recipes.find(r => r.id === bomItem.materialId)?.name || bomItem.materialId;
+                              const resolvedUnit = bomItem.unit || materials.find(m => m.id === bomItem.materialId)?.unit || '';
+                              return (
+                                <div key={bIdx} className="flex items-center justify-between gap-2 bg-white p-2 rounded-xl border border-stone-200/50">
+                                  <span className="text-xs text-stone-700 font-bold flex-1">{resolvedName}</span>
+                                  <div className="flex items-center gap-1.5 shrink-0">
+                                    <span className="text-[10px] text-stone-400 font-bold">用量:</span>
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      value={bomItem.qty}
+                                      onChange={(e) => {
+                                        const newBom = [...editRecipeBom];
+                                        newBom[bIdx] = { ...bomItem, qty: Number(e.target.value) };
+                                        setEditRecipeBom(newBom);
+                                      }}
+                                      className="w-16 bg-stone-50 border border-stone-200 rounded-lg px-1.5 py-1 text-xs text-stone-850 outline-none focus:border-blue-500 text-center font-mono font-semibold"
+                                    />
+                                    <span className="text-xs text-stone-500 font-medium w-8 shrink-0">{resolvedUnit}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditRecipeBom(prev => prev.filter((_, idx) => idx !== bIdx));
+                                      }}
+                                      className="p-1 text-stone-400 hover:text-rose-500 rounded transition"
+                                      title="刪除此用量品項"
+                                    >
+                                      <Trash2 className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                            
+                            {editRecipeBom.length === 0 && (
+                              <span className="text-stone-400 italic text-xs text-center py-2">目前無設定任何材料</span>
+                            )}
+                          </div>
+
+                          {/* Add New BOM Item Section */}
+                          <div className="flex flex-col sm:flex-row gap-2 bg-stone-50/30 p-2.5 rounded-xl border border-dashed border-stone-200">
+                            <select
+                              id="add-bom-material-select"
+                              className="flex-1 bg-white border border-stone-200 rounded-lg px-2.5 py-1.5 text-xs text-stone-700 outline-none focus:border-blue-500"
+                              defaultValue=""
+                            >
+                              <option value="">選擇原料或半成品...</option>
+                              <optgroup label="原料 (Materials)">
+                                {materials.map(m => (
+                                  <option key={m.id} value={`mat:${m.id}`}>
+                                    {m.name} ({m.unit})
+                                  </option>
+                                ))}
+                              </optgroup>
+                              <optgroup label="半成品 (Semi-finished Recipes)">
+                                {recipes
+                                  .filter(r => r.id !== recipe.id && r.type === 'semi')
+                                  .map(r => (
+                                    <option key={r.id} value={`rec:${r.id}`}>
+                                      {r.name} (個)
+                                    </option>
+                                  ))}
+                              </optgroup>
+                            </select>
+
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="number"
+                                step="any"
+                                placeholder="用量"
+                                id="add-bom-qty-input"
+                                className="w-20 bg-white border border-stone-200 rounded-lg px-2 py-1.5 text-xs text-stone-850 outline-none focus:border-blue-500 text-center font-mono"
+                              />
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  const selectEl = document.getElementById('add-bom-material-select') as HTMLSelectElement;
+                                  const qtyEl = document.getElementById('add-bom-qty-input') as HTMLInputElement;
+                                  if (!selectEl || !qtyEl) return;
+                                  
+                                  const val = selectEl.value;
+                                  const qty = Number(qtyEl.value);
+                                  if (!val) {
+                                    alert("請先選擇原料或半成品！");
+                                    return;
+                                  }
+                                  if (isNaN(qty) || qty <= 0) {
+                                    alert("請輸入有效的用量數值！");
+                                    return;
+                                  }
+
+                                  const [type, id] = val.split(':');
+                                  let name = '';
+                                  let unit = '';
+                                  if (type === 'mat') {
+                                    const mat = materials.find(m => m.id === id);
+                                    if (mat) {
+                                      name = mat.name;
+                                      unit = mat.unit;
+                                    }
+                                  } else if (type === 'rec') {
+                                    const rec = recipes.find(r => r.id === id);
+                                    if (rec) {
+                                      name = rec.name;
+                                      unit = '個';
+                                    }
+                                  }
+
+                                  // Check if already exists
+                                  if (editRecipeBom.some(b => b.materialId === id)) {
+                                    alert("該材料已存在於配方中！");
+                                    return;
+                                  }
+
+                                  setEditRecipeBom(prev => [...prev, {
+                                    materialId: id,
+                                    name: name,
+                                    qty: qty,
+                                    unit: unit
+                                  }]);
+
+                                  // Clear inputs
+                                  selectEl.value = "";
+                                  qtyEl.value = "";
+                                }}
+                                className="flex-1 sm:flex-initial px-4 py-1.5 bg-stone-800 hover:bg-stone-900 text-white rounded-lg text-xs font-bold transition whitespace-nowrap"
+                              >
+                                ➕ 加入材料
+                              </button>
+                            </div>
+                          </div>
+                        </div>
 
                         <div className="flex justify-end gap-2 pt-2 border-t border-stone-100">
                           <button
@@ -720,12 +859,13 @@ export default function AdminConsole({
                                   ...r,
                                   name: editRecipeName,
                                   unlockThreshold: editRecipeThreshold,
-                                  sop: editRecipeSop.filter(step => step.trim() !== '')
+                                  sop: editRecipeSop.filter(step => step.trim() !== ''),
+                                  bom: editRecipeBom
                                 } : r);
                                 
                                 await onUpdateRecipes(updatedRecipes);
                                 setEditingRecipeId(null);
-                                alert("🎉 成功更新配方名稱與 SOP 製作步驟！");
+                                alert("🎉 成功更新配方名稱、SOP 與 BOM 用量清單！");
                               } catch (err: any) {
                                 alert("更新失敗: " + err.message);
                               }
@@ -758,6 +898,7 @@ export default function AdminConsole({
                               setEditRecipeName(recipe.name);
                               setEditRecipeThreshold(recipe.unlockThreshold);
                               setEditRecipeSop(recipe.sop || []);
+                              setEditRecipeBom(recipe.bom || []);
                             }}
                             className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold transition flex items-center gap-1"
                           >

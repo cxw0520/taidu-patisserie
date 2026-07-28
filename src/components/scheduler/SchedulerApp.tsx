@@ -790,7 +790,19 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
 
                     // Save / update rest of the documents
                     for (const r of list) {
-                      const cleanR = JSON.parse(JSON.stringify(r));
+                      const cleanR = {
+                        name: r.name || '',
+                        type: r.type === 'semi' ? 'half' : 'finished',
+                        unlockThreshold: r.unlockThreshold || 50,
+                        sop: r.sop || [],
+                        images: r.images || [],
+                        items: (r.bom || []).map(b => ({
+                          itemId: b.materialId,
+                          name: b.name,
+                          quantity: b.qty,
+                          unit: b.unit
+                        }))
+                      };
                       await setDoc(doc(db, 'shops', shopId, 'recipes', r.id), cleanR, { merge: true });
                     }
                   } catch (err: any) {
