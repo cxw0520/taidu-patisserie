@@ -745,11 +745,25 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 supplierDeliveryDays={supplierDeliveryDays}
                 currentDayOfWeek={currentDayOfWeek}
                 onUpdateEmployees={async (val) => {
-                  // In callback, update changes individually in Firestore
-                  const list = typeof val === 'function' ? val(employees) : val;
-                  list.forEach(async (e) => {
-                    await setDoc(doc(db, 'shops', shopId, 'scheduler_employees', e.id), e);
-                  });
+                  try {
+                    const list = typeof val === 'function' ? val(employees) : val;
+                    const idsInNewList = new Set(list.map(e => e.id));
+                    
+                    // Call deleteDoc for any employee document that was removed in state
+                    for (const emp of employees) {
+                      if (!idsInNewList.has(emp.id)) {
+                        await deleteDoc(doc(db, 'shops', shopId, 'scheduler_employees', emp.id));
+                      }
+                    }
+
+                    // Save / update rest of the documents
+                    for (const e of list) {
+                      await setDoc(doc(db, 'shops', shopId, 'scheduler_employees', e.id), e);
+                    }
+                  } catch (err: any) {
+                    console.error("onUpdateEmployees failed:", err);
+                    alert("⚠️ 帳號操作失敗！請確認您已登入 Google 帳號，且擁有該店鋪的管理或寫入權限。\n錯誤原因: " + (err.message || err));
+                  }
                 }}
                 onUpdateMaterials={async (val) => {
                   const list = typeof val === 'function' ? val(materials) : val;

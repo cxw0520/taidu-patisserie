@@ -61,6 +61,25 @@ export default function AdminConsole({
   const [selectedGradingEmpId, setSelectedGradingEmpId] = useState<string>(employees[0]?.id || '');
 
   const today = new Date();
+  const [viewYear, setViewYear] = useState<number>(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState<number>(today.getMonth() + 1);
+  const [selectedCalendarDate, setSelectedCalendarDate] = useState<string | null>(null);
+
+  const getDaysInMonth = (year: number, month: number) => {
+    const date = new Date(year, month - 1, 1);
+    const startDayOfWeek = date.getDay(); // 0 (Sun) to 6 (Sat)
+    const totalDays = new Date(year, month, 0).getDate();
+    
+    const cells: { dateStr: string | null; dayNum: number | null }[] = [];
+    for (let i = 0; i < startDayOfWeek; i++) {
+      cells.push({ dateStr: null, dayNum: null });
+    }
+    for (let day = 1; day <= totalDays; day++) {
+      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      cells.push({ dateStr, dayNum: day });
+    }
+    return cells;
+  };
   const daysName = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 
   // Calculate totals for scheduling
@@ -404,25 +423,141 @@ export default function AdminConsole({
                 </div>
               </div>
 
-              {/* Imported Month Schedules List */}
+              {/* Calendar Grid Shift View (日曆型班表) */}
               <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-4">
-                <div>
-                  <h4 className="font-bold text-stone-800 text-sm">🗓️ 本月已匯入之 HR 班表明細 (月班表)</h4>
-                  <p className="text-[11px] text-stone-400 mt-0.5">顯示本月份從 taidu-HR 資料庫中同步進來的已確認排班紀錄。</p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-stone-100 pb-3">
+                  <div>
+                    <h4 className="font-bold text-stone-800 text-sm">🗓️ 已匯入之月曆型班表 (Calendar Shift Schedule)</h4>
+                    <p className="text-[11px] text-stone-400 mt-0.5">顯示本月份從 taidu-HR 資料庫中同步進來的排班網格。點擊特定日期可於下方展開明細。</p>
+                  </div>
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <button
+                      onClick={() => {
+                        setViewMonth(m => {
+                          if (m === 1) {
+                            setViewYear(y => y - 1);
+                            return 12;
+                          }
+                          return m - 1;
+                        });
+                      }}
+                      className="p-1.5 px-3 bg-stone-100 text-stone-700 rounded-xl text-xs font-bold hover:bg-stone-200 transition"
+                    >
+                      ◀ 上個月
+                    </button>
+                    <span className="text-xs font-bold text-stone-800 font-mono bg-stone-50 px-3 py-1.5 rounded-xl border border-stone-200/50">
+                      {viewYear} 年 {viewMonth} 月
+                    </span>
+                    <button
+                      onClick={() => {
+                        setViewMonth(m => {
+                          if (m === 12) {
+                            setViewYear(y => y + 1);
+                            return 1;
+                          }
+                          return m + 1;
+                        });
+                      }}
+                      className="p-1.5 px-3 bg-stone-100 text-stone-700 rounded-xl text-xs font-bold hover:bg-stone-200 transition"
+                    >
+                      下個月 ▶
+                    </button>
+                  </div>
                 </div>
+
                 {hrSchedules.length === 0 ? (
-                  <p className="text-xs text-stone-400 italic">尚未匯入月份班表，請點擊「匯入 taidu-HR 班表」進行整月數據同步。</p>
+                  <p className="text-xs text-stone-400 italic py-6 text-center">尚未匯入月份班表，請點擊下方「匯入 taidu-HR 班表」按鈕進行同步。</p>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5 max-h-60 overflow-y-auto pr-1">
-                    {[...hrSchedules].sort((a, b) => a.date.localeCompare(b.date)).map(hs => (
-                      <div key={hs.id} className="p-3 bg-stone-50 border border-stone-200/60 rounded-xl text-xs flex flex-col gap-1">
-                        <div className="flex justify-between font-bold text-stone-700">
-                          <span>{hs.date}</span>
-                          <span className="text-blue-600 font-extrabold">{hs.empName}</span>
+                  <div className="flex flex-col gap-4">
+                    {/* Day Headers */}
+                    <div className="grid grid-cols-7 gap-1 text-center font-bold text-stone-400 text-[10px] uppercase tracking-wider mb-1">
+                      <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+                    </div>
+
+                    {/* Day Cells Grid */}
+                    <div className="grid grid-cols-7 gap-2">
+                      {getDaysInMonth(viewYear, viewMonth).map((cell, idx) => {
+                        if (!cell.dayNum) {
+                          return <div key={`empty-${idx}`} className="bg-stone-50/20 rounded-xl min-h-[85px] border border-transparent" />;
+                        }
+
+                        const isSelected = selectedCalendarDate === cell.dateStr;
+                        const isTodayStr = cell.dateStr === today.toISOString().split('T')[0];
+                        const dayScheds = hrSchedules.filter(hs => hs.date === cell.dateStr);
+
+                        return (
+                          <div
+                            key={cell.dateStr}
+                            onClick={() => setSelectedCalendarDate(cell.dateStr)}
+                            className={`bg-stone-50/50 p-2 rounded-xl min-h-[90px] border transition-all cursor-pointer relative flex flex-col justify-between ${
+                              isSelected
+                                ? 'border-blue-500 bg-blue-50/20 shadow-sm shadow-blue-100/50'
+                                : isTodayStr
+                                  ? 'border-amber-400 bg-amber-50/20 shadow-sm shadow-amber-100/30'
+                                  : 'border-stone-200/60 hover:bg-stone-100/50'
+                            }`}
+                          >
+                            <div className="flex justify-between items-center">
+                              <span className={`font-mono text-[11px] font-bold ${
+                                isTodayStr ? 'text-amber-700 bg-amber-100 px-1 rounded' : isSelected ? 'text-blue-700' : 'text-stone-400'
+                              }`}>
+                                {cell.dayNum}
+                              </span>
+                              {dayScheds.length > 0 && (
+                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                              )}
+                            </div>
+
+                            <div className="mt-1.5 flex flex-col gap-0.5 max-h-[50px] overflow-hidden">
+                              {dayScheds.slice(0, 2).map((hs, sIdx) => (
+                                <div
+                                  key={hs.id || sIdx}
+                                  className="bg-blue-100/60 text-blue-700 rounded px-1.5 py-0.5 text-[9px] font-extrabold truncate"
+                                  title={`${hs.empName}: ${hs.shift}`}
+                                >
+                                  {hs.empName}
+                                </div>
+                              ))}
+                              {dayScheds.length > 2 && (
+                                <span className="text-[8px] text-stone-400 font-extrabold self-end">
+                                  +{dayScheds.length - 2}人
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Day Schedule Detail panel */}
+                    {selectedCalendarDate && (
+                      <div className="bg-blue-50/30 p-4 rounded-2xl border border-blue-100 text-xs flex flex-col gap-2 mt-2">
+                        <div className="flex justify-between items-center border-b border-blue-200/50 pb-1.5">
+                          <strong className="text-blue-800 text-[12px]">📅 {selectedCalendarDate} 排班詳情：</strong>
+                          <button
+                            onClick={() => setSelectedCalendarDate(null)}
+                            className="text-stone-400 hover:text-stone-600 font-bold"
+                          >
+                            關閉詳情 ✕
+                          </button>
                         </div>
-                        <span className="text-[11px] text-stone-500 font-medium font-mono">{hs.shift}</span>
+
+                        {hrSchedules.filter(hs => hs.date === selectedCalendarDate).length === 0 ? (
+                          <p className="text-stone-400 italic">當日尚無排班紀錄。</p>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 mt-1">
+                            {hrSchedules.filter(hs => hs.date === selectedCalendarDate).map(hs => (
+                              <div key={hs.id} className="p-2.5 bg-white border border-blue-100 rounded-xl flex justify-between items-center shadow-sm">
+                                <span className="font-bold text-stone-850">{hs.empName}</span>
+                                <span className="font-mono bg-blue-50 text-blue-700 px-2 py-0.5 rounded text-[10px] font-semibold">
+                                  {hs.shift}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
               </div>
