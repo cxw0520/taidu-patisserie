@@ -33,6 +33,7 @@ export interface Recipe {
   name: string;
   type: 'finished' | 'semi';
   unlockThreshold: number; // required progress level to view recipe (e.g. 80)
+  operationTimeMinutes?: number; // Time (minutes) to complete one batch of this recipe
   bom: BOMItem[];
   sop: string[];
   images?: string[];       // SOP image urls mock
@@ -69,11 +70,13 @@ export interface PurchaseRecord {
   qty: number;
   cost: number;
   supplier: string;
-  status: 'pending' | 'received';
+  status: 'draft' | 'pending' | 'received'; // draft=awaiting confirmation, pending=ordered, received=signed off
   date: string;
   expectedDate: string;             // Expected Delivery Date
   paymentMethod: 'monthly' | 'cash'; // Payment methods: monthly bill or COD cash
   signedBy?: string | null;
+  confirmedBy?: string | null;       // Employee who confirmed the draft order
+  confirmedAt?: string | null;       // ISO timestamp when order was confirmed
 }
 
 export interface HistoricalOrder {
@@ -83,9 +86,13 @@ export interface HistoricalOrder {
   items: Array<{
     name: string;
     qty: number;
+    unit?: string;
     cost: number;
   }>;
-  orderedBy: string;
+  orderedBy: string;        // Employee name who confirmed the order
+  totalCost?: number;       // Sum of all item costs
+  paymentMethod?: string;   // Payment method used
+  expectedDate?: string;    // Expected delivery date
 }
 
 // Access the default database for taidu-HR cross-project schedule imports
@@ -250,7 +257,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       if (records.length === 0) {
         const defaults: ProductionTask[] = [
           { id: 'tsk-1', name: '經典法式草莓塔', qty: 12, unit: '個', assignedTo: '小王', status: 'pending', requiredTimeHours: 2.5, startTime: null, actualTimeHours: null, operator: null },
-          { id: 'tsk-2', name: '法式塔皮(半成品)', qty: 24, unit: '個', assignedTo: '阿明', status: 'pending', requiredTimeHours: 3.5, startTime: null, actualTimeHours: null, operator: null }
+          { id: 'tsk-2', name: '法式塔皮', qty: 24, unit: '個', assignedTo: '阿明', status: 'pending', requiredTimeHours: 3.5, startTime: null, actualTimeHours: null, operator: null }
         ];
         defaults.forEach(async (t) => {
           await setDoc(doc(db, 'shops', shopId, 'scheduler_tasks', t.id), t);
@@ -342,6 +349,13 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
 
   // --- 2. STATE CALLBACK WRITE TO FIRESTORE ---
 
+  // Use recipe.operationTimeMinutes if available, else fall back to hardcoded defaults (in hours)
+  const getRecipeTime = (recipeId: string, fallback: number) => {
+    const r = recipes.find(r => r.id === recipeId);
+    // Convert minutes to hours for scheduling
+    return r?.operationTimeMinutes != null ? r.operationTimeMinutes / 60 : fallback;
+  };
+
   // Start production timer for task
   const handleStartTask = async (taskId: string, operatorName: string) => {
     try {
@@ -378,7 +392,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
         });
 
         // Add deducted ingredients back in materials collection
-        const recipe = recipes.find(r => r.name === targetTask.name || (r.name + '(半成品)') === targetTask.name);
+        const recipe = recipes.find(r => r.name === targetTask.name || r.name === (targetTask.name + '(半成品)'));
         if (recipe) {
           recipe.bom.forEach(bom => {
             const mat = materials.find(m => m.id === bom.materialId);
@@ -392,7 +406,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
         }
 
         // Deduct the finished product quantity that was simulated as produced
-        const matchProd = materials.find(m => m.name === targetTask.name || m.name === (targetTask.name + '(半成品)') || (m.name + '(半成品)') === targetTask.name);
+        const matchProd = materials.find(m => m.name === targetTask.name || m.name === (targetTask.name + '(半成品)'));
         if (matchProd) {
           batch.update(doc(db, 'shops', shopId, 'materials', matchProd.id), {
             stock: Math.max(0, parseFloat((matchProd.qty - targetTask.qty).toFixed(2)))
@@ -413,7 +427,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
         overtimeTriggered: isOvertime
       });
 
-      const recipe = recipes.find(r => r.name === targetTask.name || (r.name + '(半成品)') === targetTask.name);
+      const recipe = recipes.find(r => r.name === targetTask.name || r.name === (targetTask.name + '(半成品)'));
 
       // Determine stock deconstruct options
       let requiresShortageHandling = false;
@@ -442,7 +456,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
             }
 
             if (requiresShortageHandling) {
-              const semiRecipe = recipes.find(r => r.name === bomMatch.name || (r.name + '(半成品)') === bomMatch.name);
+              const semiRecipe = recipes.find(r => r.name === bomMatch.name || r.name === (bomMatch.name + '(半成品)'));
               if (semiRecipe) {
                 const semiBomMatch = semiRecipe.bom.find(sb => sb.materialId === mat.id);
                 if (semiBomMatch) {
@@ -467,7 +481,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
         }
 
         // Increase stock for the produced product
-        const isProducedSemi = mat.name === targetTask.name || mat.name === (targetTask.name + '(半成品)') || (mat.name + '(半成品)') === targetTask.name;
+        const isProducedSemi = mat.name === targetTask.name || mat.name === (targetTask.name + '(半成品)');
         if (isProducedSemi) {
           batch.update(doc(db, 'shops', shopId, 'materials', mat.id), {
             stock: parseFloat((mat.qty + targetTask.qty).toFixed(2))
@@ -508,8 +522,107 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       }
 
       await batch.commit();
+
+      // After receiving, create a "pending-accounting" purchase record in the main ERP
+      try {
+        const erpPurchaseId = `erp-from-sched-${purchaseId}`;
+        const unitCostFinal = purchase.qty > 0 ? (purchase.cost / purchase.qty) : 0;
+        const erpPaymentType = purchase.paymentMethod === 'monthly' ? '月結' : '現結';
+
+        // Map material to main ERP material ID
+        const erpMatSnap = await getDocs(collection(db, 'shops', shopId, 'materials'));
+        const erpMat = erpMatSnap.docs.find(d => d.data().name === purchase.materialName);
+        const erpMatId = erpMat ? erpMat.id : purchase.materialName;
+
+        const erpPurchasePayload = {
+          id: erpPurchaseId,
+          date: new Date().toISOString().split('T')[0],
+          year: new Date().getFullYear(),
+          vendor: purchase.supplier,
+          paymentType: erpPaymentType,
+          totalAmount: finalCost,
+          notes: `來自排班系統簽收 (叫貨單 ${purchaseId})，已入庫，請確認入帳`,
+          fromScheduler: true,
+          accountingStatus: 'pending',
+          lines: [{
+            id: `line-${erpPurchaseId}`,
+            materialId: erpMatId,
+            qty: finalQty,
+            amount: finalCost,
+            purchaseQty: finalQty,
+            purchaseUnit: matchedMat?.unit || ''
+          }]
+        };
+
+        await setDoc(doc(db, 'shops', shopId, 'purchases', erpPurchaseId), erpPurchasePayload);
+      } catch (erpErr) {
+        // Non-critical: log but don't block the receiving flow
+        console.warn('ERP purchase record creation failed (non-critical):', erpErr);
+      }
     } catch (err) {
       console.error("Receive purchase error:", err);
+    }
+  };
+
+  // Confirm a draft purchase order and record it in history
+  const handleConfirmDraftOrder = async (
+    draftIds: string[],
+    confirmedByName: string,
+    updatedDates: Record<string, string> // purchaseId -> new expectedDate
+  ) => {
+    try {
+      const batch = writeBatch(db);
+      const now = new Date().toISOString();
+      const todayStr = now.split('T')[0];
+
+      const draftItems = purchases.filter(p => draftIds.includes(p.id) && p.status === 'draft');
+      if (draftItems.length === 0) return;
+
+      // Group by supplier for history records
+      const bySupplier: Record<string, PurchaseRecord[]> = {};
+      draftItems.forEach(p => {
+        if (!bySupplier[p.supplier]) bySupplier[p.supplier] = [];
+        bySupplier[p.supplier].push(p);
+      });
+
+      // Confirm each draft → pending
+      draftItems.forEach(p => {
+        const newExpectedDate = updatedDates[p.id] || p.expectedDate;
+        batch.update(doc(db, 'shops', shopId, 'scheduler_purchases', p.id), {
+          status: 'pending',
+          confirmedBy: confirmedByName,
+          confirmedAt: now,
+          expectedDate: newExpectedDate
+        });
+      });
+
+      // Write history records grouped by supplier
+      Object.entries(bySupplier).forEach(([supplier, items]) => {
+        const histId = `hist-${Date.now()}-${supplier}`;
+        const totalCost = items.reduce((s, i) => s + i.cost, 0);
+        const histPayload: HistoricalOrder = {
+          id: histId,
+          date: todayStr,
+          supplier,
+          orderedBy: confirmedByName,
+          totalCost,
+          paymentMethod: items[0]?.paymentMethod || 'cash',
+          expectedDate: updatedDates[items[0]?.id] || items[0]?.expectedDate,
+          items: items.map(i => ({
+            name: i.materialName,
+            qty: i.qty,
+            unit: materials.find(m => m.name === i.materialName)?.unit || '',
+            cost: i.cost
+          }))
+        };
+        batch.set(doc(db, 'shops', shopId, 'scheduler_history', histId), histPayload);
+      });
+
+      await batch.commit();
+      alert(`✅ 已確認叫貨！共 ${draftItems.length} 筆訂單將在預計到貨日出現於簽收清單，並已記入歷史叫貨紀錄。`);
+    } catch (err) {
+      console.error('Confirm draft order error:', err);
+      alert('叫貨確認失敗，請重試！');
     }
   };
 
@@ -825,6 +938,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 onStartTask={handleStartTask}
                 onCompleteTask={handleCompleteTask}
                 onReceivePurchase={handleReceivePurchase}
+                onConfirmDraftOrder={handleConfirmDraftOrder}
                 currentLoggedInEmpId={currentEmpId}
                 onAddPurchaseOrders={async (newPOs) => {
                   newPOs.forEach(async (po) => {

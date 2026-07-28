@@ -66,6 +66,8 @@ export interface Purchase {
   totalAmount: number;
   notes?: string;
   paymentType?: '月結' | '現結'; // 付款方式
+  fromScheduler?: boolean;        // Created from the scheduling system after receiving
+  accountingStatus?: 'pending' | 'confirmed'; // pending=goods received but not yet accounted, confirmed=voucher created
 }
 
 export interface PurchaseSettlement {

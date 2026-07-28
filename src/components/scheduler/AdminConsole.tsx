@@ -64,6 +64,7 @@ export default function AdminConsole({
   const [editingRecipeId, setEditingRecipeId] = useState<string | null>(null);
   const [editRecipeName, setEditRecipeName] = useState('');
   const [editRecipeThreshold, setEditRecipeThreshold] = useState(50);
+  const [editRecipeOperationTime, setEditRecipeOperationTime] = useState(1.0);
   const [editRecipeSop, setEditRecipeSop] = useState<string[]>([]);
   const [editRecipeBom, setEditRecipeBom] = useState<BOMItem[]>([]);
 
@@ -112,11 +113,18 @@ export default function AdminConsole({
   // Constraints: check employee unlock levels, enforce available work hours
   const handleAutoSchedule = () => {
     // 1) Define tasks to produce (simulated demands)
+    // Use recipe.operationTimeMinutes if available, else fall back to hardcoded defaults (in hours)
+    const getRecipeTime = (recipeId: string, fallback: number) => {
+      const r = recipes.find(r => r.id === recipeId);
+      // Convert minutes to hours for scheduling
+      return r?.operationTimeMinutes != null ? r.operationTimeMinutes / 60 : fallback;
+    };
+
     const productionPool = [
-      { name: '經典法式草莓塔', qty: 15, unit: '個', time: 3.0, recipeId: 'rec-1', isUrgent: true },
-      { name: '法式塔皮(半成品)', qty: 30, unit: '個', time: 4.5, recipeId: 'rec-2', isUrgent: false },
-      { name: '香草卡士達醬(半成品)', qty: 2000, unit: 'g', time: 2.5, recipeId: 'rec-3', isUrgent: false },
-      { name: '經典法式草莓塔', qty: 6, unit: '個', time: 1.5, recipeId: 'rec-1', isUrgent: false }
+      { name: '經典法式草莓塔', qty: 15, unit: '個', time: getRecipeTime('rec-1', 3.0), recipeId: 'rec-1', isUrgent: true },
+      { name: '法式塔皮(半成品)', qty: 30, unit: '個', time: getRecipeTime('rec-2', 4.5), recipeId: 'rec-2', isUrgent: false },
+      { name: '香草卡士達醬(半成品)', qty: 2000, unit: 'g', time: getRecipeTime('rec-3', 2.5), recipeId: 'rec-3', isUrgent: false },
+      { name: '經典法式草莓塔', qty: 6, unit: '個', time: getRecipeTime('rec-1', 1.5), recipeId: 'rec-1', isUrgent: false }
     ];
 
     // Sort: Urgent first, then check which materials have the lowest stock relative to today's safety stock
@@ -201,6 +209,8 @@ export default function AdminConsole({
   };
 
   // Smart Reorder logic based on dynamic safety thresholds for today
+  // Raw materials: creates draft purchase orders
+  // Semi-finished: creates production tasks instead
   const handleSmartOrder = () => {
     const lowStockMaterials = materials.filter(m => {
       const safetyThreshold = m.weeklyMinQty[currentDayOfWeek] || 0;
@@ -208,34 +218,94 @@ export default function AdminConsole({
     });
 
     if (lowStockMaterials.length === 0) {
-      alert('所有原物料與半成品均高於今日安全水位，目前不需要叫貨！');
+      alert('所有原物料與半成品均高於今日安全水位，目前不需要叫貨或生產！');
       return;
     }
 
-    const newPurchases: PurchaseRecord[] = [];
+    const calculateExpectedDeliveryDate = (supplierName: string): string => {
+      const deliveryDays = supplierDeliveryDays[supplierName] || [0, 1, 2, 3, 4, 5, 6];
+      const targetDate = new Date();
+      
+      // Find the next delivery day starting tomorrow
+      for (let i = 1; i <= 7; i++) {
+        const nextDate = new Date(targetDate);
+        nextDate.setDate(targetDate.getDate() + i);
+        const dayOfWeek = nextDate.getDay();
+        if (deliveryDays.includes(dayOfWeek)) {
+          return nextDate.toISOString().split('T')[0];
+        }
+      }
+      return targetDate.toISOString().split('T')[0];
+    };
+
+    const newDraftPurchases: PurchaseRecord[] = [];
+    const newProductionTasks: ProductionTask[] = [];
+
     lowStockMaterials.forEach(mat => {
       const todaySafety = mat.weeklyMinQty[currentDayOfWeek] || 0;
       const reorderQty = parseFloat((todaySafety * 2 - mat.qty).toFixed(1));
       
       if (reorderQty > 0) {
-        newPurchases.push({
-          id: `pur-auto-${Date.now()}-${mat.id}`,
-          materialName: mat.name,
-          qty: reorderQty,
-          cost: Math.round(reorderQty * mat.cost),
-          supplier: mat.supplier === '自家生產' ? '原料庫房' : mat.supplier,
-          status: 'pending',
-          date: today.toISOString().split('T')[0],
-          expectedDate: today.toISOString().split('T')[0], // Expected today
-          paymentMethod: mat.cost > 1000 ? 'monthly' : 'cash', // High costs as monthly, low as cash
-          signedBy: null
-        });
+        if (mat.type === 'semi') {
+          // Semi-finished: schedule a production task instead of ordering
+          const relatedRecipe = recipes.find(r =>
+            r.name === mat.name ||
+            r.name === mat.name.replace('(半成品)', '') ||
+            (r.name + '(半成品)') === mat.name
+          );
+          const taskHours = relatedRecipe?.operationTimeMinutes != null
+            ? relatedRecipe.operationTimeMinutes / 60
+            : 2.0;
+          newProductionTasks.push({
+            id: `tsk-auto-${Date.now()}-${mat.id}`,
+            name: mat.name.replace('(半成品)', ''),
+            qty: reorderQty,
+            unit: mat.unit,
+            assignedTo: employees[0]?.name || '待指派',
+            status: 'pending',
+            requiredTimeHours: taskHours,
+            startTime: null,
+            actualTimeHours: null,
+            operator: null
+          });
+        } else {
+          // Raw material: create a draft purchase order
+          const supplierName = mat.supplier === '自家生產' ? '原料庫房' : mat.supplier;
+          const vendorDoc = vendors.find(v => v.name === supplierName);
+          const paymentMethod = vendorDoc?.defaultPaymentType === '月結' ? 'monthly' : 'cash';
+          const expectedDate = calculateExpectedDeliveryDate(supplierName);
+
+          newDraftPurchases.push({
+            id: `pur-auto-${Date.now()}-${mat.id}`,
+            materialName: mat.name,
+            qty: reorderQty,
+            cost: Math.round(reorderQty * mat.cost),
+            supplier: supplierName,
+            status: 'draft',
+            date: today.toISOString().split('T')[0],
+            expectedDate: expectedDate,
+            paymentMethod: paymentMethod,
+            signedBy: null,
+            confirmedBy: null,
+            confirmedAt: null
+          });
+        }
       }
     });
 
-    if (newPurchases.length > 0) {
-      onUpdatePurchases(prev => [...newPurchases, ...prev]);
-      alert(`已成功發起智能一鍵叫貨！根據今日(${daysName[currentDayOfWeek]})安全庫存水位生成 ${newPurchases.length} 筆叫貨單。`);
+    let message = '';
+    if (newDraftPurchases.length > 0) {
+      onUpdatePurchases(prev => [...newDraftPurchases, ...prev]);
+      message += `📋 已建立 ${newDraftPurchases.length} 筆草稿叫貨單，請至前台叫貨區確認！`;
+    }
+    if (newProductionTasks.length > 0) {
+      onUpdateTasks(prev => [...newProductionTasks, ...prev]);
+      message += (message ? '\n' : '') + `🍞 已排入 ${newProductionTasks.length} 筆半成品生產任務！`;
+    }
+    if (message) {
+      alert(message);
+    } else {
+      alert('所有庫存均充足，無需建立任何叫貨或生產任務。');
     }
   };
 
@@ -667,6 +737,18 @@ export default function AdminConsole({
                               className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-850 outline-none focus:border-blue-500 w-full"
                             />
                           </div>
+                          <div className="flex flex-col gap-1.5">
+                            <label className="text-[11px] font-bold text-stone-400">⏱ 每批次操作時間 (分鐘)</label>
+                            <input
+                              type="number"
+                              min="1"
+                              max="480"
+                              step="1"
+                              value={editRecipeOperationTime}
+                              onChange={(e) => setEditRecipeOperationTime(Number(e.target.value))}
+                              className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-850 outline-none focus:border-blue-500 w-full"
+                            />
+                          </div>
                         </div>
 
                         <div className="flex flex-col gap-2">
@@ -864,6 +946,7 @@ export default function AdminConsole({
                                   ...r,
                                   name: editRecipeName,
                                   unlockThreshold: editRecipeThreshold,
+                                  operationTimeMinutes: editRecipeOperationTime,
                                   sop: editRecipeSop.filter(step => step.trim() !== ''),
                                   bom: editRecipeBom
                                 } : r);
@@ -897,11 +980,17 @@ export default function AdminConsole({
                           <span className="text-xs text-stone-500">
                             最低解鎖技能值: <strong>{recipe.unlockThreshold}%</strong>
                           </span>
+                          {recipe.operationTimeMinutes != null && (
+                            <span className="text-xs text-stone-500">
+                              ⏱ 操作時間: <strong>{recipe.operationTimeMinutes} 分鐘</strong>
+                            </span>
+                          )}
                           <button
                             onClick={() => {
                               setEditingRecipeId(recipe.id);
                               setEditRecipeName(recipe.name);
                               setEditRecipeThreshold(recipe.unlockThreshold);
+                              setEditRecipeOperationTime(recipe.operationTimeMinutes ?? 60);
                               setEditRecipeSop(recipe.sop || []);
                               setEditRecipeBom(recipe.bom || []);
                             }}

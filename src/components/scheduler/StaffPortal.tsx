@@ -12,6 +12,7 @@ interface StaffPortalProps {
   onStartTask: (taskId: string, operatorName: string) => void;
   onCompleteTask: (taskId: string, actualHours?: number, shortageOption?: 'deconstruct' | 'negative') => void;
   onReceivePurchase: (purchaseId: string, signedByName: string, actualQty?: number) => void;
+  onConfirmDraftOrder: (draftIds: string[], confirmedByName: string, updatedDates: Record<string, string>) => void;
   currentLoggedInEmpId: string;
   onAddPurchaseOrders: (newPOs: PurchaseRecord[]) => void;
   onAddHistoricalOrder: (newHist: HistoricalOrder) => void;
@@ -37,6 +38,7 @@ export default function StaffPortal({
   onStartTask,
   onCompleteTask,
   onReceivePurchase,
+  onConfirmDraftOrder,
   currentLoggedInEmpId,
   onAddPurchaseOrders,
   onAddHistoricalOrder,
@@ -51,6 +53,9 @@ export default function StaffPortal({
   const [isOrderPreviewOpen, setIsOrderPreviewOpen] = useState(false);
   const [previewOrders, setPreviewOrders] = useState<any[]>([]);
   const [receivedQtys, setReceivedQtys] = useState<Record<string, number>>({});
+
+  // Draft order confirmation states
+  const [draftDateOverrides, setDraftDateOverrides] = useState<Record<string, string>>({}); // purchaseId -> edited date
 
   // Mentor Tab states
   const [selectedApprenticeId, setSelectedApprenticeId] = useState<string>('');
@@ -871,6 +876,93 @@ export default function StaffPortal({
 
               </div>
 
+              {/* Draft Orders Confirmation Section */}
+              {(() => {
+                const draftOrders = purchases.filter(p => p.status === 'draft');
+                if (draftOrders.length === 0) return null;
+
+                const draftSuppliers = Array.from(new Set(draftOrders.map(p => p.supplier))) as string[];
+                const allDraftIds = draftOrders.map(p => p.id);
+
+                return (
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col gap-4">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="p-1.5 bg-amber-200 text-amber-700 rounded-lg">
+                          <ClipboardList className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h5 className="font-extrabold text-amber-800 text-xs">⚡ 智能叫貨草稿單 — 待確認</h5>
+                          <p className="text-[10px] text-amber-600 mt-0.5">系統智能分析生成，請確認後正式叫貨，或可修改各廠商預計到貨日。</p>
+                        </div>
+                      </div>
+                      <span className="text-[10px] font-bold text-amber-700 bg-amber-200 px-2 py-0.5 rounded-full">{draftOrders.length} 筆</span>
+                    </div>
+
+                    <div className="flex flex-col gap-3">
+                      {draftSuppliers.map(supplier => {
+                        const supplierDrafts = draftOrders.filter(p => p.supplier === supplier);
+                        const firstDraft = supplierDrafts[0];
+                        const overrideDate = draftDateOverrides[firstDraft.id] || firstDraft.expectedDate;
+                        const totalCost = supplierDrafts.reduce((s, p) => s + p.cost, 0);
+                        return (
+                          <div key={supplier} className="bg-white border border-amber-200/60 rounded-xl overflow-hidden">
+                            <div className="bg-amber-100 px-3 py-2 border-b border-amber-200 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                              <span className="font-extrabold text-amber-800 text-xs">🏢 {supplier}</span>
+                              <div className="flex items-center gap-3 flex-wrap">
+                                <div className="flex items-center gap-1">
+                                  <span className="text-[10px] text-amber-600 font-bold">🚚 預計到貨:</span>
+                                  <input
+                                    type="date"
+                                    value={overrideDate}
+                                    min={todayISOStr}
+                                    onChange={(e) => {
+                                      const newDate = e.target.value;
+                                      // Apply date override to all items from this supplier
+                                      const updates: Record<string, string> = {};
+                                      supplierDrafts.forEach(p => { updates[p.id] = newDate; });
+                                      setDraftDateOverrides(prev => ({ ...prev, ...updates }));
+                                    }}
+                                    className="bg-white border border-amber-300 rounded-lg px-2 py-0.5 text-[10px] font-bold text-amber-700 outline-none cursor-pointer"
+                                  />
+                                </div>
+                                <span className="text-[10px] font-bold text-amber-700">
+                                  {firstDraft.paymentMethod === 'monthly' ? '🔵 月結' : '🔴 現結'} · 小計 ${totalCost.toLocaleString()}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="p-3 flex flex-col gap-2">
+                              {supplierDrafts.map(draft => (
+                                <div key={draft.id} className="flex justify-between items-center text-[11px] py-0.5">
+                                  <span className="text-stone-700 font-semibold">{draft.materialName}</span>
+                                  <span className="text-stone-500">{draft.qty} {materials.find(m => m.name === draft.materialName)?.unit || ''} · ${draft.cost}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        if (!window.confirm(`確認叫貨？共 ${draftOrders.length} 筆訂單將正式送出，並記入歷史叫貨紀錄。`)) return;
+                        const finalDates: Record<string, string> = {};
+                        draftOrders.forEach(p => {
+                          finalDates[p.id] = draftDateOverrides[p.id] || p.expectedDate;
+                        });
+                        onConfirmDraftOrder(allDraftIds, currentEmployee.name, finalDates);
+                        setDraftDateOverrides({});
+                      }}
+                      className="w-full py-2.5 bg-amber-500 hover:bg-amber-600 text-white text-xs font-extrabold rounded-xl transition shadow-md shadow-amber-200 flex items-center justify-center gap-2"
+                    >
+                      <Check className="w-4 h-4" />
+                      確認送出全部草稿叫貨單
+                    </button>
+                  </div>
+                );
+              })()}
+
               {orderItems.length === 0 ? (
                 <div className="py-12 text-center text-stone-400 text-xs flex flex-col items-center justify-center gap-2">
                   <Check className="w-8 h-8 text-emerald-500" />
@@ -1204,9 +1296,19 @@ export default function StaffPortal({
                         🏢 供應商：{group.supplier}
                       </span>
                       <div className="flex items-center gap-3 flex-wrap">
-                        <span className="text-[10px] font-bold text-amber-600 bg-amber-50 border border-amber-100 px-2 py-0.5 rounded-lg flex items-center gap-1">
-                          🚚 預期到貨: {group.expectedDate}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10px] font-bold text-amber-600 flex items-center gap-1">🚚 預期到貨:</span>
+                          <input
+                            type="date"
+                            value={group.expectedDate}
+                            min={todayISOStr}
+                            onChange={(e) => {
+                              const newDate = e.target.value;
+                              setPreviewOrders(prev => prev.map(p => p.supplier === group.supplier ? { ...p, expectedDate: newDate } : p));
+                            }}
+                            className="bg-amber-50 border border-amber-200 rounded-lg px-2 py-0.5 text-[10px] font-bold text-amber-700 outline-none focus:border-amber-400 cursor-pointer"
+                          />
+                        </div>
                         <div className="flex items-center gap-1.5">
                           <span className="text-[11px] font-bold text-stone-500">付款方式:</span>
                           <select
