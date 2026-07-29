@@ -5,7 +5,6 @@ import { Material, Purchase, PurchaseLine, PurchaseSettlement, Vendor } from '..
 import { fmt, uid, cn } from '../../lib/utils';
 import { AlertCircle, BadgeCheck, Eye, Pencil, Plus, Search, Store, Trash2, Users, Phone, Mail, X, CheckCircle2, ClipboardList } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { createPortal } from 'react-dom';
 
 export default function PurchasingTab({
   purchases,
@@ -1003,8 +1002,8 @@ export default function PurchasingTab({
       </AnimatePresence>
 
       <AnimatePresence>
-        {isModalOpen && createPortal(
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+        {isModalOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsModalOpen(false)}
@@ -1012,6 +1011,7 @@ export default function PurchasingTab({
             />
             <motion.div
               initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              onClick={(e) => e.stopPropagation()}
               className="glass-panel w-full max-w-4xl max-h-[90vh] flex flex-col bg-white border-0 shadow-2xl rounded-[32px] overflow-hidden relative z-10"
             >
               <div className="p-6 md:p-8 border-b border-coffee-50 bg-[#faf7f2]/50 flex justify-between items-center">
@@ -1181,16 +1181,15 @@ export default function PurchasingTab({
                 </button>
               </form>
             </motion.div>
-          </div>,
-          document.body
+          </div>
         )}
       </AnimatePresence>
 
       <AnimatePresence>
-        {isMatModalOpen && createPortal(
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+        {isMatModalOpen && (
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsMatModalOpen(false)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel w-full max-w-2xl bg-white border-0 shadow-2xl rounded-3xl relative z-10 overflow-hidden">
+            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} onClick={(e) => e.stopPropagation()} className="glass-panel w-full max-w-2xl bg-white border-0 shadow-2xl rounded-3xl relative z-10 overflow-hidden">
               <div className="bg-coffee-50/50 border-b border-coffee-100 p-4 md:px-6 flex justify-between items-center">
                 <h3 className="font-bold text-coffee-800 text-lg">新增材料資料卡</h3>
                 <button type="button" onClick={() => setIsMatModalOpen(false)} className="text-coffee-400 hover:text-coffee-600"><X className="w-5 h-5"/></button>
@@ -1323,16 +1322,15 @@ export default function PurchasingTab({
                 </form>
               </div>
             </motion.div>
-          </div>,
-          document.body
+          </div>
         )}
       </AnimatePresence>
 
       <AnimatePresence>
-        {isVendorDbOpen && createPortal(
-          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
+        {isVendorDbOpen && (
+          <div className="fixed inset-0 z-[105] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsVendorDbOpen(false)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="glass-panel w-full max-w-4xl h-[85vh] max-h-[85vh] flex flex-col bg-white border-0 shadow-2xl rounded-[32px] overflow-hidden relative z-10">
+            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} onClick={(e) => e.stopPropagation()} className="glass-panel w-full max-w-4xl h-[85vh] max-h-[85vh] flex flex-col bg-white border-0 shadow-2xl rounded-[32px] overflow-hidden relative z-10">
               <div className="p-6 md:p-8 border-b border-coffee-50 bg-[#faf7f2]/50 flex justify-between items-center">
                 <div>
                   <h3 className="text-xl md:text-2xl font-bold font-serif-brand text-coffee-800 flex items-center gap-2"><Users className="w-6 h-6 text-coffee-500" /> 廠商資料庫</h3>
@@ -1372,7 +1370,7 @@ export default function PurchasingTab({
                                )}
                              </div>
                            </div>
-                           <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+                           <div className="flex gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
                              <button onClick={() => setEditingVendor(v)} className="p-1.5 text-coffee-400 hover:text-coffee-600 bg-coffee-50 rounded-md"><Pencil className="w-4 h-4" /></button>
                              <button onClick={() => handleDeleteVendor(v)} className="p-1.5 text-coffee-400 hover:text-rose-600 bg-coffee-50 rounded-md"><Trash2 className="w-4 h-4" /></button>
                            </div>
@@ -1486,8 +1484,7 @@ export default function PurchasingTab({
                 </div>
               </div>
             </motion.div>
-          </div>,
-          document.body
+          </div>
         )}
       </AnimatePresence>
 
