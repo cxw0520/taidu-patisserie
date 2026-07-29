@@ -1338,8 +1338,8 @@ export default function PurchasingTab({
                 <button onClick={() => setIsVendorDbOpen(false)} className="p-2 text-coffee-300 hover:text-coffee-600 bg-white rounded-full"><Plus className="w-6 h-6 rotate-45" /></button>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-4 md:p-8 flex flex-col md:flex-row gap-8">
-                <div className="flex-1">
+              <div className="flex-1 flex flex-col md:flex-row gap-8 p-4 md:p-8 overflow-hidden min-h-0">
+                <div className="flex-1 overflow-y-auto pr-2 min-h-0">
                   <div className="flex justify-between items-center mb-4">
                     <h4 className="font-bold text-coffee-800">廠商列表 ({vendors.length})</h4>
                     <button onClick={() => setEditingVendor({ name: '' })} className="text-xs font-bold bg-coffee-100 text-coffee-700 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-coffee-200 transition">
@@ -1352,9 +1352,24 @@ export default function PurchasingTab({
                          <div className="flex justify-between items-start">
                            <div>
                              <div className="font-bold text-coffee-800">{v.name}</div>
-                             {v.category && <span className="text-[10px] bg-coffee-50 text-coffee-500 px-2 py-0.5 rounded-full mt-1 inline-block">{v.category}</span>}
+                             <div className="flex flex-wrap gap-1 items-center mt-1">
+                               {v.category && <span className="text-[10px] bg-coffee-50 text-coffee-500 px-2 py-0.5 rounded-full inline-block">{v.category}</span>}
+                               {v.defaultPaymentType && (
+                                 <span className={cn(
+                                   "text-[10px] px-2 py-0.5 rounded-full inline-block border font-bold",
+                                   v.defaultPaymentType === '月結' ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-mint-brand/10 text-mint-brand border-mint-brand/20"
+                                 )}>
+                                   {v.defaultPaymentType}
+                                 </span>
+                               )}
+                               {v.deliveryDays && v.deliveryDays.length > 0 && (
+                                 <span className="text-[10px] text-amber-700 font-bold bg-amber-50/60 px-2 py-0.5 rounded-full border border-amber-200 inline-block">
+                                   🚚 週 {v.deliveryDays.map((d: number) => ['日', '一', '二', '三', '四', '五', '六'][d]).join('')}
+                                 </span>
+                               )}
+                             </div>
                            </div>
-                           <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                           <div className="flex gap-1 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
                              <button onClick={() => setEditingVendor(v)} className="p-1.5 text-coffee-400 hover:text-coffee-600 bg-coffee-50 rounded-md"><Pencil className="w-4 h-4" /></button>
                              <button onClick={() => handleDeleteVendor(v)} className="p-1.5 text-coffee-400 hover:text-rose-600 bg-coffee-50 rounded-md"><Trash2 className="w-4 h-4" /></button>
                            </div>
@@ -1372,8 +1387,8 @@ export default function PurchasingTab({
                   </div>
                 </div>
 
-                <div className="w-full md:w-[360px] flex-shrink-0">
-                  <div className="bg-[#faf7f2]/50 p-5 rounded-2xl border border-coffee-100 sticky top-0">
+                <div className="w-full md:w-[360px] flex-shrink-0 overflow-y-auto pr-2 min-h-0">
+                  <div className="bg-[#faf7f2]/50 p-5 rounded-2xl border border-coffee-100">
                     <h4 className="font-bold text-coffee-800 mb-4">{editingVendor?.id ? '編輯廠商資料' : (editingVendor ? '新增廠商' : '點擊列表編輯，或新增廠商')}</h4>
                     {editingVendor ? (
                       <form onSubmit={handleSaveVendor} className="space-y-4">
