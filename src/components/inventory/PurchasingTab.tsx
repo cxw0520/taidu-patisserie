@@ -5,6 +5,7 @@ import { Material, Purchase, PurchaseLine, PurchaseSettlement, Vendor } from '..
 import { fmt, uid, cn } from '../../lib/utils';
 import { AlertCircle, BadgeCheck, Eye, Pencil, Plus, Search, Store, Trash2, Users, Phone, Mail, X, CheckCircle2, ClipboardList } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
+import { createPortal } from 'react-dom';
 
 export default function PurchasingTab({
   purchases,
@@ -1002,8 +1003,8 @@ export default function PurchasingTab({
       </AnimatePresence>
 
       <AnimatePresence>
-        {isModalOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+        {isModalOpen && createPortal(
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               onClick={() => setIsModalOpen(false)}
@@ -1180,13 +1181,14 @@ export default function PurchasingTab({
                 </button>
               </form>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
 
       <AnimatePresence>
-        {isMatModalOpen && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+        {isMatModalOpen && createPortal(
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsMatModalOpen(false)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
             <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="glass-panel w-full max-w-2xl bg-white border-0 shadow-2xl rounded-3xl relative z-10 overflow-hidden">
               <div className="bg-coffee-50/50 border-b border-coffee-100 p-4 md:px-6 flex justify-between items-center">
@@ -1321,15 +1323,16 @@ export default function PurchasingTab({
                 </form>
               </div>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
 
       <AnimatePresence>
-        {isVendorDbOpen && (
-          <div className="fixed inset-0 z-[105] flex items-center justify-center p-4">
+        {isVendorDbOpen && createPortal(
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4">
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsVendorDbOpen(false)} className="absolute inset-0 bg-coffee-950/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="glass-panel w-full max-w-4xl max-h-[90vh] flex flex-col bg-white border-0 shadow-2xl rounded-[32px] overflow-hidden relative z-10">
+            <motion.div initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }} className="glass-panel w-full max-w-4xl h-[85vh] max-h-[85vh] flex flex-col bg-white border-0 shadow-2xl rounded-[32px] overflow-hidden relative z-10">
               <div className="p-6 md:p-8 border-b border-coffee-50 bg-[#faf7f2]/50 flex justify-between items-center">
                 <div>
                   <h3 className="text-xl md:text-2xl font-bold font-serif-brand text-coffee-800 flex items-center gap-2"><Users className="w-6 h-6 text-coffee-500" /> 廠商資料庫</h3>
@@ -1339,7 +1342,7 @@ export default function PurchasingTab({
               </div>
 
               <div className="flex-1 flex flex-col md:flex-row gap-8 p-4 md:p-8 overflow-hidden min-h-0">
-                <div className="flex-1 overflow-y-auto pr-2 min-h-0">
+                <div className={cn("flex-1 overflow-y-auto pr-2 min-h-0", editingVendor ? "hidden md:block" : "block")}>
                   <div className="flex justify-between items-center mb-4">
                     <h4 className="font-bold text-coffee-800">廠商列表 ({vendors.length})</h4>
                     <button onClick={() => setEditingVendor({ name: '' })} className="text-xs font-bold bg-coffee-100 text-coffee-700 px-3 py-1.5 rounded-lg flex items-center gap-1 hover:bg-coffee-200 transition">
@@ -1387,8 +1390,17 @@ export default function PurchasingTab({
                   </div>
                 </div>
 
-                <div className="w-full md:w-[360px] flex-shrink-0 overflow-y-auto pr-2 min-h-0">
+                <div className={cn("w-full md:w-[360px] flex-shrink-0 overflow-y-auto pr-2 min-h-0", editingVendor ? "block" : "hidden md:block")}>
                   <div className="bg-[#faf7f2]/50 p-5 rounded-2xl border border-coffee-100">
+                    {editingVendor && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingVendor(null)}
+                        className="md:hidden mb-4 px-3 py-1.5 bg-coffee-100 border border-coffee-200 text-coffee-700 rounded-lg text-[11px] font-bold flex items-center gap-1 self-start"
+                      >
+                        ← 返回廠商列表
+                      </button>
+                    )}
                     <h4 className="font-bold text-coffee-800 mb-4">{editingVendor?.id ? '編輯廠商資料' : (editingVendor ? '新增廠商' : '點擊列表編輯，或新增廠商')}</h4>
                     {editingVendor ? (
                       <form onSubmit={handleSaveVendor} className="space-y-4">
@@ -1474,7 +1486,8 @@ export default function PurchasingTab({
                 </div>
               </div>
             </motion.div>
-          </div>
+          </div>,
+          document.body
         )}
       </AnimatePresence>
 
