@@ -197,8 +197,18 @@ export default function PurchasingTab({
     try {
       const purchaseId = pendingPurchasePayload.id;
 
-      // 1. 更新庫存平均成本
-      await applyMaterialUpdates(pendingDeltaByMaterial);
+      // Build lastPriceMap
+      const lastPriceMap: Record<string, number> = {};
+      if (pendingPurchasePayload && Array.isArray(pendingPurchasePayload.lines)) {
+        pendingPurchasePayload.lines.forEach((line: any) => {
+          if (line.qty > 0) {
+            lastPriceMap[line.materialId] = line.amount / line.qty;
+          }
+        });
+      }
+
+      // 1. 更新庫存平均成本與上次進貨金額
+      await applyMaterialUpdates(pendingDeltaByMaterial, lastPriceMap);
 
       // 2. 儲存進貨單
       await setDoc(doc(db, 'shops', shopId, 'purchases', purchaseId), pendingPurchasePayload);
@@ -477,7 +487,10 @@ export default function PurchasingTab({
     return deltaByMaterial;
   };
 
-  const applyMaterialUpdates = async (deltaByMaterial: Record<string, { qty: number; amount: number }>) => {
+  const applyMaterialUpdates = async (
+    deltaByMaterial: Record<string, { qty: number; amount: number }>,
+    lastPriceMap?: Record<string, number>
+  ) => {
     const batch = writeBatch(db);
     Object.entries(deltaByMaterial).forEach(([materialId, delta]) => {
       const mat = materialMap[materialId];
@@ -486,9 +499,20 @@ export default function PurchasingTab({
       const currentTotalValue = mat.stock * mat.avgCost;
       const nextTotalValue = Math.max(0, currentTotalValue + delta.amount);
       const nextAvgCost = nextStock > 0 ? nextTotalValue / nextStock : 0;
+      
+      const updateData: any = {
+        ...mat,
+        stock: nextStock,
+        avgCost: Number.isFinite(nextAvgCost) ? nextAvgCost : 0
+      };
+
+      if (lastPriceMap && lastPriceMap[materialId] !== undefined) {
+        updateData.lastPrice = lastPriceMap[materialId];
+      }
+
       batch.set(
         doc(db, 'shops', shopId, 'materials', mat.id),
-        { ...mat, stock: nextStock, avgCost: Number.isFinite(nextAvgCost) ? nextAvgCost : 0 }
+        updateData
       );
     });
     await batch.commit();
@@ -660,7 +684,9 @@ export default function PurchasingTab({
       phone: editingVendor.phone || '',
       email: editingVendor.email || '',
       category: editingVendor.category || '',
-      notes: editingVendor.notes || ''
+      notes: editingVendor.notes || '',
+      defaultPaymentType: editingVendor.defaultPaymentType || '現結',
+      deliveryDays: editingVendor.deliveryDays || []
     };
     await setDoc(doc(db, 'shops', shopId, 'vendors', vId), payloadStart as Vendor);
     setEditingVendor(null);
@@ -1387,6 +1413,35 @@ export default function PurchasingTab({
                                 )}
                               >{type}</button>
                             ))}
+                          </div>
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-coffee-400 block mb-1">每週送貨日</label>
+                          <div className="flex flex-wrap gap-1">
+                            {['日', '一', '二', '三', '四', '五', '六'].map((dayName, idx) => {
+                              const activeDays = editingVendor.deliveryDays || [];
+                              const isSelected = activeDays.includes(idx);
+                              return (
+                                <button
+                                  key={idx}
+                                  type="button"
+                                  onClick={() => {
+                                    const nextDays = isSelected
+                                      ? activeDays.filter(d => d !== idx)
+                                      : [...activeDays, idx].sort((a, b) => a - b);
+                                    setEditingVendor({ ...editingVendor, deliveryDays: nextDays });
+                                  }}
+                                  className={cn(
+                                    "w-9 h-9 rounded-xl font-bold text-xs transition-all border",
+                                    isSelected
+                                      ? "bg-amber-100 text-amber-850 border-amber-300"
+                                      : "bg-white text-coffee-400 border-coffee-200 hover:border-coffee-300"
+                                  )}
+                                >
+                                  {dayName}
+                                </button>
+                              );
+                            })}
                           </div>
                         </div>
                         <div className="flex gap-2 pt-2 border-t border-coffee-100">

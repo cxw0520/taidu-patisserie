@@ -480,6 +480,7 @@ export interface Vendor {
   category?: string;
   notes?: string;
   defaultPaymentType?: '月結' | '現結'; // 預設付款方式
+  deliveryDays?: number[];              // 每週送貨日 (0-6，0=週日, 1=週一...)
 }
 
 export interface MaterialCostRecord {

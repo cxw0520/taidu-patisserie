@@ -11,7 +11,7 @@ interface StaffPortalProps {
   vendors: any[];
   onStartTask: (taskId: string, operatorName: string) => void;
   onCompleteTask: (taskId: string, actualHours?: number, shortageOption?: 'deconstruct' | 'negative') => void;
-  onReceivePurchase: (purchaseId: string, signedByName: string, actualQty?: number) => void;
+  onReceivePurchase: (purchaseId: string, signedByName: string, actualQty?: number, actualCost?: number) => void;
   onConfirmDraftOrder: (draftIds: string[], confirmedByName: string, updatedDates: Record<string, string>) => void;
   currentLoggedInEmpId: string;
   onAddPurchaseOrders: (newPOs: PurchaseRecord[]) => void;
@@ -73,15 +73,11 @@ export default function StaffPortal({
   const todayISOStr = today.toISOString().split('T')[0];
   const daysName = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六'];
 
-  const supplierDeliveryDays: Record<string, number[]> = {
-    '德麥食品': [2, 5],
-    '豐盟麵粉': [1, 4],
-    '大湖草莓農場': [0, 3, 5],
-    '自家生產': [0, 1, 2, 3, 4, 5, 6]
-  };
-
   const calculateExpectedDeliveryDate = (supplier: string): string => {
-    const deliveryDays = supplierDeliveryDays[supplier] || [0, 1, 2, 3, 4, 5, 6];
+    const vendorDoc = vendors.find(v => v.name === supplier);
+    const deliveryDays = (vendorDoc && Array.isArray(vendorDoc.deliveryDays) && vendorDoc.deliveryDays.length > 0)
+      ? vendorDoc.deliveryDays
+      : [0, 1, 2, 3, 4, 5, 6];
     const targetDate = new Date();
     
     // Find the next delivery day starting tomorrow
@@ -761,10 +757,20 @@ export default function StaffPortal({
 
                     // Handler for receiving all items from this supplier
                     const handleReceiveAllForSupplier = async () => {
-                      if (!window.confirm(`是否確認一鍵簽收「${supplierName}」的所有待簽收物料？`)) return;
+                      const totalEstimatedCost = supplierPOs.reduce((sum, po) => sum + po.cost, 0);
+                      const actualAmtStr = window.prompt(
+                        `是否確認一鍵簽收「${supplierName}」的所有待簽收物料？\n請輸入收到貨單的實際總金額（估計總金額為 $${totalEstimatedCost}）：`,
+                        String(totalEstimatedCost)
+                      );
+                      if (actualAmtStr === null) return; // Cancelled
+                      const actualTotalCost = Math.max(0, parseFloat(actualAmtStr) || 0);
+
                       for (const po of supplierPOs) {
                         const finalQty = receivedQtys[po.id] !== undefined ? receivedQtys[po.id] : po.qty;
-                        await onReceivePurchase(po.id, currentEmployee.name, finalQty);
+                        // Distribute total actual cost proportionally based on estimated cost ratio
+                        const proportion = totalEstimatedCost > 0 ? (po.cost / totalEstimatedCost) : (1 / supplierPOs.length);
+                        const finalCost = Math.round(actualTotalCost * proportion);
+                        await onReceivePurchase(po.id, currentEmployee.name, finalQty, finalCost);
                       }
                       alert(`🎉 已成功完成「${supplierName}」之所有物料簽收核銷！`);
                     };
@@ -840,7 +846,15 @@ export default function StaffPortal({
                                   </div>
 
                                   <button
-                                    onClick={() => onReceivePurchase(purchase.id, currentEmployee.name, currentInputQty)}
+                                    onClick={() => {
+                                      const actualAmtStr = window.prompt(
+                                        `是否確認簽收物料「${purchase.materialName}」？\n請輸入收到貨單的實際金額（預估金額為 $${purchase.cost}）：`,
+                                        String(purchase.cost)
+                                      );
+                                      if (actualAmtStr === null) return; // Cancelled
+                                      const actualCost = Math.max(0, parseFloat(actualAmtStr) || 0);
+                                      onReceivePurchase(purchase.id, currentEmployee.name, currentInputQty, actualCost);
+                                    }}
                                     className="px-3.5 py-2 bg-stone-800 hover:bg-stone-900 text-white rounded-xl text-xs font-bold transition active:scale-95 flex items-center gap-1 shrink-0 cursor-pointer"
                                   >
                                     <Check className="w-3.5 h-3.5 text-emerald-400" /> 簽收

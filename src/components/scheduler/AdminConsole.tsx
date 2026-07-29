@@ -10,7 +10,6 @@ interface AdminConsoleProps {
   purchases: PurchaseRecord[];
   orderHistory: HistoricalOrder[];
   vendors: any[];
-  supplierDeliveryDays: Record<string, number[]>;
   currentDayOfWeek: number;
   onUpdateEmployees: React.Dispatch<React.SetStateAction<Employee[]>>;
   onUpdateMaterials: React.Dispatch<React.SetStateAction<Material[]>>;
@@ -30,7 +29,6 @@ export default function AdminConsole({
   purchases,
   orderHistory,
   vendors,
-  supplierDeliveryDays,
   currentDayOfWeek,
   onUpdateEmployees,
   onUpdateMaterials,
@@ -223,7 +221,10 @@ export default function AdminConsole({
     }
 
     const calculateExpectedDeliveryDate = (supplierName: string): string => {
-      const deliveryDays = supplierDeliveryDays[supplierName] || [0, 1, 2, 3, 4, 5, 6];
+      const vendorDoc = vendors.find(v => v.name === supplierName);
+      const deliveryDays = (vendorDoc && Array.isArray(vendorDoc.deliveryDays) && vendorDoc.deliveryDays.length > 0)
+        ? vendorDoc.deliveryDays
+        : [0, 1, 2, 3, 4, 5, 6];
       const targetDate = new Date();
       
       // Find the next delivery day starting tomorrow

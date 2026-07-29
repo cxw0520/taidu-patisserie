@@ -123,12 +123,6 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
   const [switchError, setSwitchError] = useState<string>('');
   const currentDayOfWeek = new Date().getDay();
 
-  const supplierDeliveryDays: Record<string, number[]> = {
-    '德麥食品': [2, 5],
-    '豐盟麵粉': [1, 4],
-    '大湖草莓農場': [0, 3, 5],
-    '自家生產': [0, 1, 2, 3, 4, 5, 6]
-  };
 
   // --- 1. FIRESTORE REAL-TIME SUBSCRIPTION ---
   useEffect(() => {
@@ -496,7 +490,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
   };
 
   // Sign off purchase order and increment stock in the materials collection
-  const handleReceivePurchase = async (purchaseId: string, signedByName: string, actualQty?: number) => {
+  const handleReceivePurchase = async (purchaseId: string, signedByName: string, actualQty?: number, actualCost?: number) => {
     const purchase = purchases.find(p => p.id === purchaseId);
     if (!purchase || purchase.status === 'received') return;
 
@@ -505,7 +499,11 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       
       const finalQty = actualQty !== undefined ? actualQty : purchase.qty;
       const unitCost = purchase.qty > 0 ? (purchase.cost / purchase.qty) : 0;
-      const finalCost = actualQty !== undefined ? Math.round(actualQty * unitCost) : purchase.cost;
+      
+      // If actualCost is specified, use it directly. Otherwise calculate based on unit cost.
+      const finalCost = actualCost !== undefined 
+        ? actualCost 
+        : (actualQty !== undefined ? Math.round(actualQty * unitCost) : purchase.cost);
 
       batch.update(doc(db, 'shops', shopId, 'scheduler_purchases', purchaseId), {
         status: 'received',
@@ -971,7 +969,6 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 purchases={purchases}
                 orderHistory={orderHistory}
                 vendors={vendors}
-                supplierDeliveryDays={supplierDeliveryDays}
                 currentDayOfWeek={currentDayOfWeek}
                 onUpdateEmployees={async (val) => {
                   try {
