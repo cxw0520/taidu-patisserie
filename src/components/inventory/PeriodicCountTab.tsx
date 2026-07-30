@@ -270,8 +270,8 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
       if (!confirm('鎖定後將無法再修改盤點數字，且會同步更新為目前的最新庫存，並生成月底調整傳票草稿，確定要鎖定嗎？')) return;
       
       // Calculate inventory deltas (Ending - Beginning)
-      const foodBeginning = materials.filter(m => m.category === '食材').reduce((s, m) => s + (prevRecord?.items[m.id]?.totalValue || 0), 0);
-      const foodEnding = materials.filter(m => m.category === '食材').reduce((s, m) => s + (data.items[m.id]?.totalValue || 0), 0);
+      const foodBeginning = materials.filter(m => (m.category || '食材') === '食材').reduce((s, m) => s + (prevRecord?.items[m.id]?.totalValue || 0), 0);
+      const foodEnding = materials.filter(m => (m.category || '食材') === '食材').reduce((s, m) => s + (data.items[m.id]?.totalValue || 0), 0);
       const foodDelta = foodEnding - foodBeginning;
 
       const pkgBeginning = materials.filter(m => m.category === '包材').reduce((s, m) => s + (prevRecord?.items[m.id]?.totalValue || 0), 0);

@@ -361,6 +361,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                   stock: r.qty || 0,
                   unit: r.unit || '個',
                   vendor: '自製半成品',
+                  category: '食材',
                   minStockMode: 'fixed',
                   fixedMinQty: 5,
                   weeklyMinQty: r.weeklyMinQty || [0, 0, 0, 0, 0, 0, 0],
