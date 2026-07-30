@@ -224,6 +224,26 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
     setData(prev => ({ ...prev, items: newItems }));
   }, [materials]);
 
+  // Report deleted/zombie materials to local temp_server for analysis
+  useEffect(() => {
+    if (materials.length > 0 && data && data.items) {
+      const deletedIds: string[] = [];
+      Object.keys(data.items).forEach(id => {
+        const exists = materials.some(m => m.id === id);
+        if (!exists) {
+          deletedIds.push(id);
+        }
+      });
+      if (deletedIds.length > 0) {
+        fetch('http://localhost:3001/debug_deleted', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deletedIds, month: data.yearMonth, totalVal: data.totalInventoryValue })
+        }).catch(err => console.warn("Temp server might not be running yet:", err));
+      }
+    }
+  }, [materials, data]);
+
   const handleUpdateQty = (m: Material, tier: 1 | 2 | 3, value: number) => {
     const currentItem = data.items[m.id];
     let t1 = tier === 1 ? value : (currentItem.tier1Qty || 0);
@@ -254,14 +274,23 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
   const handleSave = async (isLocked: boolean = false) => {
     if (!data.yearMonth) return alert('請填寫盤點月份');
 
+    // Only sum up and save active materials to prevent deleted/zombie items from inflating inventory value
     let totalVal = 0;
-    Object.keys(data.items).forEach(k => { totalVal += data.items[k].totalValue; });
+    const cleanedItems: Record<string, any> = {};
+    
+    materials.forEach(m => {
+      if (data.items[m.id]) {
+        cleanedItems[m.id] = data.items[m.id];
+        totalVal += data.items[m.id].totalValue;
+      }
+    });
 
     const id = data.id || uid();
     const payload: PhysicalCountRecord = {
       ...data,
       id,
       status: isLocked ? 'locked' : 'draft',
+      items: cleanedItems,
       totalInventoryValue: totalVal,
       updatedAt: new Date().toISOString()
     };

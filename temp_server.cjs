@@ -24,6 +24,14 @@ app.post('/data', (req, res) => {
   res.json({ status: 'ok' });
 });
 
+app.post('/debug_deleted', (req, res) => {
+  console.log('Received deleted materials list:', req.body);
+  const targetPath = path.resolve(__dirname, 'deleted_materials.json');
+  fs.writeFileSync(targetPath, JSON.stringify(req.body, null, 2), 'utf8');
+  console.log('Saved to', targetPath);
+  res.json({ status: 'ok' });
+});
+
 app.listen(3001, () => {
   console.log('Temp server listening on port 3001');
 });
