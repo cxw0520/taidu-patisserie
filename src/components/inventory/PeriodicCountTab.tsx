@@ -236,9 +236,21 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
     const newItems = { ...data.items };
     materials.forEach(m => {
       if (!newItems[m.id]) {
-        newItems[m.id] = { name: m.name, actualQty: 0, unitCost: m.avgCost || 0, totalValue: 0 };
+        // Use current database stock if it's new
+        const initialQty = m.stock || 0;
+        newItems[m.id] = { 
+          name: m.name, 
+          actualQty: initialQty, 
+          unitCost: m.avgCost || 0, 
+          totalValue: initialQty * (m.avgCost || 0),
+          tier1Qty: undefined,
+          tier2Qty: undefined,
+          tier3Qty: undefined
+        };
       } else {
         newItems[m.id].name = m.name;
+        // Update unitCost to latest database avgCost
+        newItems[m.id].unitCost = m.avgCost || 0;
       }
       
       const item = newItems[m.id];
@@ -261,6 +273,13 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
         item.tier2Qty = initialMid;
         item.tier3Qty = initialSmall;
       }
+
+      // ALWAYS recalculate actualQty and totalValue to ensure mathematical consistency
+      const t1 = item.tier1Qty || 0;
+      const t2 = item.tier2Qty || 0;
+      const t3 = item.tier3Qty || 0;
+      item.actualQty = t1 * (m.purchaseUnitRate || 0) + t2 * (m.midUnitRate || 0) + t3;
+      item.totalValue = Math.round(item.actualQty * item.unitCost * 100) / 100;
     });
     setData(prev => ({ ...prev, items: newItems }));
   }, [materials]);
