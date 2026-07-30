@@ -663,7 +663,9 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
               {(totalsByCategory['裝飾品'] || 0) > 0 && (
                 <span className="bg-amber-50 text-amber-700 px-3 py-1 rounded-xl border border-amber-100/50">裝飾品: ${fmt(totalsByCategory['裝飾品'] || 0)}</span>
               )}
-              <span className="bg-coffee-100 text-coffee-800 px-3 py-1 rounded-xl shadow-sm border border-coffee-200/50">總計: ${fmt(Object.values(data.items).reduce<number>((s: number, k: any) => s + (Number(k?.totalValue) || 0), 0))}</span>
+              <span className="bg-coffee-100 text-coffee-800 px-3 py-1 rounded-xl shadow-sm border border-coffee-200/50">
+                總計: ${fmt(materials.reduce<number>((s, m) => s + (Number(data.items[m.id]?.totalValue) || 0), 0))}
+              </span>
             </div>
           </div>
           <div className="flex gap-3 self-end md:self-auto">
