@@ -181,14 +181,53 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
     return totals;
   }, [data.items, materials]);
 
-  const groupedMaterials = React.useMemo(() => {
-    const groups: Record<string, Material[]> = {};
-    materials.forEach(m => {
-      if (!groups[m.name]) groups[m.name] = [];
-      groups[m.name].push(m);
+  const countRows = React.useMemo(() => {
+    const list: { id: string; name: string; vendor: string; unit: string; purchaseUnit?: string; purchaseUnitRate?: number; midUnit?: string; midUnitRate?: number; category: string }[] = [];
+    
+    if (data.status === 'draft') {
+      materials.forEach(m => {
+        list.push({
+          id: m.id,
+          name: m.name,
+          vendor: m.vendor || '無',
+          unit: m.unit,
+          purchaseUnit: m.purchaseUnit,
+          purchaseUnitRate: m.purchaseUnitRate,
+          midUnit: m.midUnit,
+          midUnitRate: m.midUnitRate,
+          category: m.category || '食材'
+        });
+      });
+    } else {
+      // Locked view: show what was actually in data.items
+      Object.keys(data.items).forEach(id => {
+        const matchedMat = materials.find(m => m.id === id);
+        const item = data.items[id];
+        list.push({
+          id,
+          name: item.name || matchedMat?.name || `已刪除物料 (${id})`,
+          vendor: matchedMat?.vendor || '無',
+          unit: matchedMat?.unit || '個',
+          purchaseUnit: matchedMat?.purchaseUnit,
+          purchaseUnitRate: matchedMat?.purchaseUnitRate,
+          midUnit: matchedMat?.midUnit,
+          midUnitRate: matchedMat?.midUnitRate,
+          category: matchedMat?.category || '食材'
+        });
+      });
+    }
+    
+    return list.sort((a, b) => a.name.localeCompare(b.name));
+  }, [materials, data]);
+
+  const groupedCountRows = React.useMemo(() => {
+    const groups: Record<string, typeof countRows> = {};
+    countRows.forEach(row => {
+      if (!groups[row.name]) groups[row.name] = [];
+      groups[row.name].push(row);
     });
-    return Object.entries(groups).sort((a,b) => a[0].localeCompare(b[0]));
-  }, [materials]);
+    return Object.entries(groups).sort((a, b) => a[0].localeCompare(b[0]));
+  }, [countRows]);
 
   // 初始化單位輸入值
   useEffect(() => {
@@ -197,7 +236,9 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
     const newItems = { ...data.items };
     materials.forEach(m => {
       if (!newItems[m.id]) {
-        newItems[m.id] = { actualQty: 0, unitCost: m.avgCost || 0, totalValue: 0 };
+        newItems[m.id] = { name: m.name, actualQty: 0, unitCost: m.avgCost || 0, totalValue: 0 };
+      } else {
+        newItems[m.id].name = m.name;
       }
       
       const item = newItems[m.id];
@@ -525,73 +566,75 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
                 </tr>
               </thead>
               <tbody>
-                {groupedMaterials.map(([name, mats]) => {
+                {groupedCountRows.map(([name, rows]) => {
                   let beginningSum = 0;
-                  mats.forEach(m => {
+                  rows.forEach(row => {
                     if (data.isOpeningBalance) {
-                      beginningSum += m.stock;
-                    } else if (prevRecord && prevRecord.items[m.id]) {
-                      beginningSum += prevRecord.items[m.id].actualQty;
+                      const matchedMat = materials.find(m => m.id === row.id);
+                      beginningSum += matchedMat ? matchedMat.stock : 0;
+                    } else if (prevRecord && prevRecord.items[row.id]) {
+                      beginningSum += prevRecord.items[row.id].actualQty;
                     }
                   });
 
                   return (
                     <React.Fragment key={name}>
-                      {mats.map((m, idx) => {
-                        const item = data.items[m.id];
+                      {rows.map((row, idx) => {
+                        const item = data.items[row.id];
                         if (!item) return null;
 
+                        const matchedMat = materials.find(m => m.id === row.id);
                         let purchaseQty = 0;
                         purchases.filter(p => p.date.startsWith(data.yearMonth)).forEach(p => {
-                          p.lines.filter(l => l.materialId === m.id).forEach(l => {
-                            const currentUnit = l.purchaseUnit || m.purchaseUnit || m.unit;
-                            const isPurchaseUnit = currentUnit === m.purchaseUnit;
-                            const isMidUnit = currentUnit === m.midUnit;
-                            const rate = isPurchaseUnit ? (m.purchaseUnitRate || 1) : (isMidUnit ? (m.midUnitRate || 1) : 1);
+                          p.lines.filter(l => l.materialId === row.id).forEach(l => {
+                            const currentUnit = l.purchaseUnit || row.purchaseUnit || row.unit;
+                            const isPurchaseUnit = currentUnit === row.purchaseUnit;
+                            const isMidUnit = currentUnit === row.midUnit;
+                            const rate = isPurchaseUnit ? (row.purchaseUnitRate || 1) : (isMidUnit ? (row.midUnitRate || 1) : 1);
                             purchaseQty += (l.purchaseQty !== undefined ? l.purchaseQty : (l.qty || 0)) * rate;
                           });
                         });
 
                         return (
-                          <tr key={m.id} className="border-b border-gray-50 hover:bg-coffee-50/30 transition-colors">
+                          <tr key={row.id} className="border-b border-gray-50 hover:bg-coffee-50/30 transition-colors">
                             {idx === 0 && (
                               <>
-                                <td rowSpan={mats.length} className="p-3 font-bold text-coffee-800 bg-white border-r border-coffee-50 align-top">{name}</td>
-                                <td rowSpan={mats.length} className="p-3 text-right font-bold text-coffee-600 bg-white border-r border-coffee-50 align-top">
-                                  {fmt(beginningSum)} <span className="text-[10px] text-coffee-400">{m.unit}</span>
+                                <td rowSpan={rows.length} className="p-3 font-bold text-coffee-800 bg-white border-r border-coffee-50 align-top">{name}</td>
+                                <td rowSpan={rows.length} className="p-3 text-right font-bold text-coffee-600 bg-white border-r border-coffee-50 align-top">
+                                  {fmt(beginningSum)} <span className="text-[10px] text-coffee-400">{row.unit}</span>
                                 </td>
                               </>
                             )}
-                            <td className="p-3 text-xs font-bold text-coffee-500">{m.vendor || '無'}</td>
-                            <td className="p-3 text-right font-bold text-coffee-600">{fmt(purchaseQty)} <span className="text-[10px] text-coffee-400">{m.unit}</span></td>
+                            <td className="p-3 text-xs font-bold text-coffee-500">{row.vendor || '無'}</td>
+                            <td className="p-3 text-right font-bold text-coffee-600">{fmt(purchaseQty)} <span className="text-[10px] text-coffee-400">{row.unit}</span></td>
                             <td className="p-3 text-right font-mono text-coffee-500">${fmt(item.unitCost)}</td>
                             <td className="p-3">
                               {data.status === 'locked' ? (
                                 <div className="text-center font-bold text-coffee-700">
-                                  {item.tier1Qty ? `${fmt(item.tier1Qty)} ${m.purchaseUnit} ` : ''}
-                                  {item.tier2Qty ? `${fmt(item.tier2Qty)} ${m.midUnit} ` : ''}
-                                  {item.tier3Qty ? `${fmt(item.tier3Qty)} ${m.unit}` : ''}
-                                  {!item.tier1Qty && !item.tier2Qty && !item.tier3Qty && `${fmt(item.actualQty)} ${m.unit}`}
+                                  {item.tier1Qty ? `${fmt(item.tier1Qty)} ${row.purchaseUnit} ` : ''}
+                                  {item.tier2Qty ? `${fmt(item.tier2Qty)} ${row.midUnit} ` : ''}
+                                  {item.tier3Qty ? `${fmt(item.tier3Qty)} ${row.unit}` : ''}
+                                  {!item.tier1Qty && !item.tier2Qty && !item.tier3Qty && `${fmt(item.actualQty)} ${row.unit}`}
                                 </div>
                               ) : (
                                 <div className="flex items-center justify-center gap-2">
-                                  {m.purchaseUnit && m.purchaseUnitRate && (
+                                  {row.purchaseUnit && row.purchaseUnitRate && (
                                     <div className="flex items-center gap-1">
-                                      <input type="number" step="0.01" min="0" value={item.tier1Qty === 0 ? '' : item.tier1Qty} onChange={e => handleUpdateQty(m, 1, parseFloat(e.target.value) || 0)} className="w-14 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
-                                      <span className="text-[10px] text-coffee-600 font-bold">{m.purchaseUnit}</span>
+                                      <input type="number" step="0.01" min="0" value={item.tier1Qty === 0 ? '' : item.tier1Qty} onChange={e => handleUpdateQty(matchedMat || (row as any), 1, parseFloat(e.target.value) || 0)} className="w-14 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
+                                      <span className="text-[10px] text-coffee-600 font-bold">{row.purchaseUnit}</span>
                                       <span className="text-[10px] text-coffee-300 mx-0.5">+</span>
                                     </div>
                                   )}
-                                  {m.midUnit && m.midUnitRate && (
+                                  {row.midUnit && row.midUnitRate && (
                                     <div className="flex items-center gap-1">
-                                      <input type="number" step="0.01" min="0" value={item.tier2Qty === 0 ? '' : item.tier2Qty} onChange={e => handleUpdateQty(m, 2, parseFloat(e.target.value) || 0)} className="w-14 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
-                                      <span className="text-[10px] text-coffee-600 font-bold">{m.midUnit}</span>
+                                      <input type="number" step="0.01" min="0" value={item.tier2Qty === 0 ? '' : item.tier2Qty} onChange={e => handleUpdateQty(matchedMat || (row as any), 2, parseFloat(e.target.value) || 0)} className="w-14 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
+                                      <span className="text-[10px] text-coffee-600 font-bold">{row.midUnit}</span>
                                       <span className="text-[10px] text-coffee-300 mx-0.5">+</span>
                                     </div>
                                   )}
                                   <div className="flex items-center gap-1">
-                                    <input type="number" step="0.01" min="0" value={item.tier3Qty === 0 && item.actualQty !== 0 ? '' : item.tier3Qty} onChange={e => handleUpdateQty(m, 3, parseFloat(e.target.value) || 0)} className="w-16 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
-                                    <span className="text-[10px] text-coffee-600 font-bold">{m.unit}</span>
+                                    <input type="number" step="0.01" min="0" value={item.tier3Qty === 0 && item.actualQty !== 0 ? '' : item.tier3Qty} onChange={e => handleUpdateQty(matchedMat || (row as any), 3, parseFloat(e.target.value) || 0)} className="w-16 bg-white border border-coffee-200 rounded px-1.5 py-1 font-mono font-bold text-rose-brand outline-none text-right focus:border-rose-brand" placeholder="0" />
+                                    <span className="text-[10px] text-coffee-600 font-bold">{row.unit}</span>
                                   </div>
                                 </div>
                               )}
