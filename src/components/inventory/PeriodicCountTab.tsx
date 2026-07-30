@@ -171,14 +171,16 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
       const item = data.items[m.id];
       if (item) {
         const cat = m.category || '食材';
-        if (totals[cat] !== undefined) {
-          totals[cat] += Number(item.totalValue) || 0;
-        } else {
-          totals[cat] = Number(item.totalValue) || 0;
-        }
+        const val = Number(item.totalValue) || 0;
+        totals[cat] = (totals[cat] || 0) + val;
       }
     });
     return totals;
+  }, [data.items, materials]);
+
+  // Single source of truth for the live total – only active materials count
+  const liveTotal = React.useMemo(() => {
+    return materials.reduce<number>((s, m) => s + (Number(data.items[m.id]?.totalValue) || 0), 0);
   }, [data.items, materials]);
 
   const countRows = React.useMemo(() => {
@@ -284,25 +286,15 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
     setData(prev => ({ ...prev, items: newItems }));
   }, [materials]);
 
-  // Report deleted/zombie materials to local temp_server for analysis
-  useEffect(() => {
+  // Log zombie/deleted material IDs for debugging (console only, no side effects)
+  React.useEffect(() => {
     if (materials.length > 0 && data && data.items) {
-      const deletedIds: string[] = [];
-      Object.keys(data.items).forEach(id => {
-        const exists = materials.some(m => m.id === id);
-        if (!exists) {
-          deletedIds.push(id);
-        }
-      });
+      const deletedIds = Object.keys(data.items).filter(id => !materials.some(m => m.id === id));
       if (deletedIds.length > 0) {
-        fetch('http://localhost:3001/debug_deleted', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ deletedIds, month: data.yearMonth, totalVal: data.totalInventoryValue })
-        }).catch(err => console.warn("Temp server might not be running yet:", err));
+        console.warn('[PeriodicCountTab] Zombie material IDs in draft (excluded from totals):', deletedIds);
       }
     }
-  }, [materials, data]);
+  }, [materials.length, data.yearMonth]);
 
   const handleUpdateQty = (m: Material, tier: 1 | 2 | 3, value: number) => {
     const currentItem = data.items[m.id];
@@ -334,16 +326,29 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
   const handleSave = async (isLocked: boolean = false) => {
     if (!data.yearMonth) return alert('請填寫盤點月份');
 
-    // Only sum up and save active materials to prevent deleted/zombie items from inflating inventory value
-    let totalVal = 0;
+    // Build cleanedItems from active materials only, recalculating totalValue from latest avgCost
     const cleanedItems: Record<string, any> = {};
-    
     materials.forEach(m => {
-      if (data.items[m.id]) {
-        cleanedItems[m.id] = data.items[m.id];
-        totalVal += data.items[m.id].totalValue;
+      const item = data.items[m.id];
+      if (item) {
+        const t1 = item.tier1Qty || 0;
+        const t2 = item.tier2Qty || 0;
+        const t3 = item.tier3Qty || 0;
+        const actualQty = Math.round((t1 * (m.purchaseUnitRate || 0) + t2 * (m.midUnitRate || 0) + t3) * 100) / 100;
+        const unitCost = m.avgCost || 0;
+        const totalValue = Math.round(actualQty * unitCost * 100) / 100;
+        cleanedItems[m.id] = {
+          ...item,
+          name: m.name,
+          actualQty,
+          unitCost,
+          totalValue
+        };
       }
     });
+
+    // Authoritative total: sum of cleaned active items
+    const totalVal = Math.round(Object.values(cleanedItems).reduce((s, it: any) => s + (Number(it.totalValue) || 0), 0) * 100) / 100;
 
     const id = data.id || uid();
     const payload: PhysicalCountRecord = {
@@ -683,7 +688,7 @@ function CountModal({ shopId, record, materials, purchases, records, onClose }: 
                 <span className="bg-amber-50 text-amber-700 px-3 py-1 rounded-xl border border-amber-100/50">裝飾品: ${fmt(totalsByCategory['裝飾品'] || 0)}</span>
               )}
               <span className="bg-coffee-100 text-coffee-800 px-3 py-1 rounded-xl shadow-sm border border-coffee-200/50">
-                總計: ${fmt(materials.reduce<number>((s, m) => s + (Number(data.items[m.id]?.totalValue) || 0), 0))}
+                總計: ${fmt(liveTotal)}
               </span>
             </div>
           </div>
