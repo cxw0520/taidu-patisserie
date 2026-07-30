@@ -21,6 +21,16 @@ interface AdminConsoleProps {
   hrSchedules: any[];
 }
 
+export const getSafetyThreshold = (mat: any, dayOfWeek: number) => {
+  const mode = mat.minStockMode || 'fixed';
+  if (mode === 'fixed') {
+    return mat.fixedMinQty !== undefined ? mat.fixedMinQty : 0;
+  } else {
+    const weekly = mat.weeklyMinQty || [0, 0, 0, 0, 0, 0, 0];
+    return Array.isArray(weekly) ? (weekly[dayOfWeek] || 0) : (weekly?.[dayOfWeek] || 0);
+  }
+};
+
 export default function AdminConsole({
   employees,
   materials,
@@ -134,8 +144,8 @@ export default function AdminConsole({
       const matA = materials.find(m => m.name === a.name || m.name === (a.name + '(半成品)'));
       const matB = materials.find(m => m.name === b.name || m.name === (b.name + '(半成品)'));
       
-      const thresholdA = matA ? (matA.weeklyMinQty[currentDayOfWeek] || 0) : 0;
-      const thresholdB = matB ? (matB.weeklyMinQty[currentDayOfWeek] || 0) : 0;
+      const thresholdA = matA ? getSafetyThreshold(matA, currentDayOfWeek) : 0;
+      const thresholdB = matB ? getSafetyThreshold(matB, currentDayOfWeek) : 0;
 
       const deficitA = matA ? Math.max(0, thresholdA - matA.qty) : 0;
       const deficitB = matB ? Math.max(0, thresholdB - matB.qty) : 0;
@@ -211,7 +221,7 @@ export default function AdminConsole({
   // Semi-finished: creates production tasks instead
   const handleSmartOrder = () => {
     const lowStockMaterials = materials.filter(m => {
-      const safetyThreshold = m.weeklyMinQty[currentDayOfWeek] || 0;
+      const safetyThreshold = getSafetyThreshold(m, currentDayOfWeek);
       return m.qty < safetyThreshold;
     });
 
@@ -243,7 +253,7 @@ export default function AdminConsole({
     const newProductionTasks: ProductionTask[] = [];
 
     lowStockMaterials.forEach(mat => {
-      const todaySafety = mat.weeklyMinQty[currentDayOfWeek] || 0;
+      const todaySafety = getSafetyThreshold(mat, currentDayOfWeek);
       const reorderQty = parseFloat((todaySafety * 2 - mat.qty).toFixed(1));
       
       if (reorderQty > 0) {
@@ -376,16 +386,40 @@ export default function AdminConsole({
     }));
   };
 
-  // Update weekly safety stock template
   const handleUpdateWeeklyThreshold = (materialId: string, day: number, value: number) => {
+    onUpdateMaterials(prev => prev.map(mat => {
+      if (mat.id === materialId) {
+        const nextMin = Array.isArray(mat.weeklyMinQty)
+          ? [...mat.weeklyMinQty]
+          : [0, 0, 0, 0, 0, 0, 0];
+        nextMin[day] = value;
+        return {
+          ...mat,
+          weeklyMinQty: nextMin
+        };
+      }
+      return mat;
+    }));
+  };
+
+  const handleToggleMinStockMode = (materialId: string, isWeekly: boolean) => {
     onUpdateMaterials(prev => prev.map(mat => {
       if (mat.id === materialId) {
         return {
           ...mat,
-          weeklyMinQty: {
-            ...mat.weeklyMinQty,
-            [day]: value
-          }
+          minStockMode: isWeekly ? 'weekly' : 'fixed'
+        };
+      }
+      return mat;
+    }));
+  };
+
+  const handleUpdateFixedThreshold = (materialId: string, value: number) => {
+    onUpdateMaterials(prev => prev.map(mat => {
+      if (mat.id === materialId) {
+        return {
+          ...mat,
+          fixedMinQty: value
         };
       }
       return mat;
@@ -1084,6 +1118,7 @@ export default function AdminConsole({
                       <tr className="border-b border-stone-200 text-stone-400 font-bold">
                         <th className="pb-3 pr-2">物料名稱</th>
                         <th className="pb-3">目前庫存</th>
+                        <th className="pb-3 text-center">安全水位模式</th>
                         {daysName.map((dayName, idx) => (
                           <th key={idx} className={`pb-3 text-center ${idx === currentDayOfWeek ? 'text-blue-600 bg-blue-50/50 rounded-t-xl px-1' : ''}`}>
                             {dayName.slice(-2)}
@@ -1095,7 +1130,9 @@ export default function AdminConsole({
                     <tbody className="divide-y divide-stone-100">
                       {materials.map(mat => {
                         const isEditing = editingMatId === mat.id;
-                        const isLowToday = mat.qty < (mat.weeklyMinQty[currentDayOfWeek] || 0);
+                        const todaySafety = getSafetyThreshold(mat, currentDayOfWeek);
+                        const isLowToday = mat.qty < todaySafety;
+                        const isWeekly = mat.minStockMode === 'weekly';
 
                         return (
                           <tr key={mat.id} className="text-stone-700 hover:bg-stone-50/30">
@@ -1105,25 +1142,64 @@ export default function AdminConsole({
                                 {mat.qty} {mat.unit}
                               </span>
                             </td>
+                            <td className="py-4 text-center">
+                              <div className="inline-flex items-center justify-center">
+                                <label className="relative inline-flex items-center cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={isWeekly}
+                                    disabled={!isEditing}
+                                    onChange={(e) => handleToggleMinStockMode(mat.id, e.target.checked)}
+                                    className="sr-only peer"
+                                  />
+                                  <div className="w-9 h-5 bg-stone-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-stone-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                                  <span className="ml-2 text-[10px] font-bold text-stone-500">
+                                    {isWeekly ? '週水位' : '固定'}
+                                  </span>
+                                </label>
+                              </div>
+                            </td>
                             
-                            {/* Days rendering */}
-                            {[0, 1, 2, 3, 4, 5, 6].map(dayIdx => {
-                              const val = mat.weeklyMinQty[dayIdx] || 0;
-                              return (
-                                <td key={dayIdx} className={`py-4 text-center font-mono ${dayIdx === currentDayOfWeek ? 'bg-blue-50/20 font-bold' : ''}`}>
-                                  {isEditing ? (
+                            {isWeekly ? (
+                              /* Days rendering for weekly safety stock */
+                              [0, 1, 2, 3, 4, 5, 6].map(dayIdx => {
+                                const val = mat.weeklyMinQty ? (mat.weeklyMinQty[dayIdx] || 0) : 0;
+                                return (
+                                  <td key={dayIdx} className={`py-4 text-center font-mono ${dayIdx === currentDayOfWeek ? 'bg-blue-50/20 font-bold' : ''}`}>
+                                    {isEditing ? (
+                                      <input
+                                        type="number"
+                                        value={val}
+                                        onChange={(e) => handleUpdateWeeklyThreshold(mat.id, dayIdx, Number(e.target.value))}
+                                        className="w-12 text-center border border-stone-200 rounded py-0.5 bg-white font-mono text-xs outline-none focus:border-blue-500"
+                                      />
+                                    ) : (
+                                      <span>{val} {mat.unit}</span>
+                                    )}
+                                  </td>
+                                );
+                              })
+                            ) : (
+                              /* Fixed safety stock input/span */
+                              <td colSpan={7} className="py-4 text-center font-mono bg-stone-50/10 rounded-xl">
+                                {isEditing ? (
+                                  <div className="flex items-center justify-center gap-2">
+                                    <span className="text-[11px] font-bold text-stone-500">固定最低庫存量:</span>
                                     <input
                                       type="number"
-                                      value={val}
-                                      onChange={(e) => handleUpdateWeeklyThreshold(mat.id, dayIdx, Number(e.target.value))}
-                                      className="w-12 text-center border border-stone-200 rounded py-0.5 bg-white font-mono text-xs"
+                                      value={mat.fixedMinQty !== undefined ? mat.fixedMinQty : 0}
+                                      onChange={(e) => handleUpdateFixedThreshold(mat.id, Number(e.target.value))}
+                                      className="w-20 text-center border border-stone-200 rounded py-1 px-2 bg-white font-mono text-xs outline-none focus:border-blue-500 font-bold text-stone-700"
                                     />
-                                  ) : (
-                                    <span>{val} {mat.unit}</span>
-                                  )}
-                                </td>
-                              );
-                            })}
+                                    <span className="text-xs text-stone-400 font-medium">{mat.unit}</span>
+                                  </div>
+                                ) : (
+                                  <span className="text-stone-500 font-semibold text-xs">
+                                    固定安全水位: {mat.fixedMinQty !== undefined ? mat.fixedMinQty : 0} {mat.unit}
+                                  </span>
+                                )}
+                              </td>
+                            )}
 
                             <td className="py-4 text-right">
                               <button

@@ -28,6 +28,16 @@ interface SuggestedOrderItem {
   supplier: string;
 }
 
+const getSafetyThreshold = (mat: any, dayOfWeek: number) => {
+  const mode = mat.minStockMode || 'fixed';
+  if (mode === 'fixed') {
+    return mat.fixedMinQty !== undefined ? mat.fixedMinQty : 0;
+  } else {
+    const weekly = mat.weeklyMinQty || [0, 0, 0, 0, 0, 0, 0];
+    return Array.isArray(weekly) ? (weekly[dayOfWeek] || 0) : (weekly?.[dayOfWeek] || 0);
+  }
+};
+
 export default function StaffPortal({
   employees,
   tasks,
@@ -120,7 +130,7 @@ export default function StaffPortal({
       const suggested: SuggestedOrderItem[] = [];
       materials.forEach(mat => {
         if (mat.type === 'raw') {
-          const safetyStock = mat.weeklyMinQty[currentDayOfWeek] || 0;
+          const safetyStock = getSafetyThreshold(mat, currentDayOfWeek);
           if (mat.qty < safetyStock) {
             const gap = safetyStock * 2 - mat.qty;
             suggested.push({
@@ -1184,7 +1194,7 @@ export default function StaffPortal({
                   </thead>
                   <tbody className="divide-y divide-stone-100">
                     {materials.map(mat => {
-                      const todaySafety = mat.weeklyMinQty[currentDayOfWeek] || 0;
+                      const todaySafety = getSafetyThreshold(mat, currentDayOfWeek);
                       const isLow = mat.qty < todaySafety;
                       return (
                         <tr key={mat.id} className="text-stone-700 hover:bg-stone-50/50 transition">

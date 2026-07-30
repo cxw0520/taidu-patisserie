@@ -44,6 +44,8 @@ export interface Material {
   name: string;
   qty: number;
   unit: string;
+  minStockMode?: 'fixed' | 'weekly';
+  fixedMinQty?: number;
   weeklyMinQty: Record<number, number>; // Day of week (0-6) -> minQty
   cost: number;
   supplier: string;
@@ -136,17 +138,19 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
           name: data.name || '',
           qty: data.stock || 0,
           unit: data.unit || '',
+          minStockMode: data.minStockMode || 'fixed',
+          fixedMinQty: data.fixedMinQty !== undefined ? data.fixedMinQty : (data.minAlert || 5),
           weeklyMinQty: data.weeklyMinQty || { 0: data.minAlert || 10, 1: data.minAlert || 5, 2: data.minAlert || 5, 3: data.minAlert || 5, 4: data.minAlert || 5, 5: data.minAlert || 8, 6: data.minAlert || 10 },
           cost: data.avgCost || 100,
           supplier: data.vendor || data.vendors?.[0] || '德麥食品',
-          type: data.category === '包材' ? 'raw' : 'raw' // Default all to raw materials for simplicity
+          type: data.type || (data.category === '包材' ? 'raw' : 'raw')
         };
       });
 
       // Include semi-finished materials default mapping if they aren't created in the system yet
       const defaultSemis: Material[] = [
-        { id: 'mat-semi-1', name: '法式塔皮(半成品)', qty: 8, unit: '個', weeklyMinQty: { 0: 25, 1: 10, 2: 10, 3: 10, 4: 12, 5: 20, 6: 25 }, cost: 25, supplier: '自家生產', type: 'semi' },
-        { id: 'mat-semi-2', name: '卡士達醬(半成品)', qty: 800, unit: 'g', weeklyMinQty: { 0: 2500, 1: 1000, 2: 1000, 3: 1000, 4: 1200, 5: 2000, 6: 2500 }, cost: 0.1, supplier: '自家生產', type: 'semi' }
+        { id: 'mat-semi-1', name: '法式塔皮(半成品)', qty: 8, unit: '個', minStockMode: 'fixed', fixedMinQty: 10, weeklyMinQty: { 0: 25, 1: 10, 2: 10, 3: 10, 4: 12, 5: 20, 6: 25 }, cost: 25, supplier: '自家生產', type: 'semi' },
+        { id: 'mat-semi-2', name: '卡士達醬(半成品)', qty: 800, unit: 'g', minStockMode: 'fixed', fixedMinQty: 1000, weeklyMinQty: { 0: 2500, 1: 1000, 2: 1000, 3: 1000, 4: 1200, 5: 2000, 6: 2500 }, cost: 0.1, supplier: '自家生產', type: 'semi' }
       ];
 
       // Add default semis if missing in loaded materials
@@ -340,6 +344,39 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       });
     }
   }, [materials]);
+
+  // Auto-sync semi-finished recipes to materials collection so they can have stock & weeklyMinQty
+  useEffect(() => {
+    if (recipes.length > 0 && materials.length > 0 && shopId) {
+      const syncSemiRecipes = async () => {
+        for (const r of recipes) {
+          if (r.type === 'semi') {
+            const cleanName = r.name.includes('(半成品)') ? r.name : (r.name + '(半成品)');
+            const hasMat = materials.some(m => m.name === r.name || m.name === cleanName || m.id === `mat-semi-${r.id}`);
+            if (!hasMat) {
+              const newMatId = `mat-semi-${r.id}`;
+              try {
+                await setDoc(doc(db, 'shops', shopId, 'materials', newMatId), {
+                  name: cleanName,
+                  stock: r.qty || 0,
+                  unit: r.unit || '個',
+                  vendor: '自製半成品',
+                  minStockMode: 'fixed',
+                  fixedMinQty: 5,
+                  weeklyMinQty: r.weeklyMinQty || [0, 0, 0, 0, 0, 0, 0],
+                  type: 'semi'
+                });
+                console.log(`Auto-created semi-finished material document: ${cleanName}`);
+              } catch (err) {
+                console.error("Failed to auto-create semi-finished material document:", err);
+              }
+            }
+          }
+        }
+      };
+      syncSemiRecipes();
+    }
+  }, [recipes, materials, shopId]);
 
   // --- 2. STATE CALLBACK WRITE TO FIRESTORE ---
 
