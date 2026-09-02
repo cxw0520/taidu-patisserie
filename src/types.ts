@@ -481,6 +481,7 @@ export interface Vendor {
   notes?: string;
   defaultPaymentType?: '月結' | '現結'; // 預設付款方式
   deliveryDays?: number[];              // 每週送貨日 (0-6，0=週日, 1=週一...)
+  settlementCutoffDay?: number;         // 月結結帳日 (如 25 號，代表 26 號起計入下個月。預設 31 即月底自然月)
 }
 
 export interface MaterialCostRecord {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../lib/firebase';
 import { collection, query, where, onSnapshot, doc, orderBy, setDoc } from 'firebase/firestore';
-import { JournalEntry, COAItem } from '../types';
+import { JournalEntry, COAItem, Vendor } from '../types';
 import { ClipboardList, BarChart3, BookOpen, Layers, Gem, Download, Upload, Menu, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { cn } from '../lib/utils';
@@ -83,6 +83,7 @@ export default function JournalView({ selectedYear, shopId, forcedSubTab, settin
   const [expenses, setExpenses] = useState<any[]>([]);
   const [monthlyData, setMonthlyData] = useState<any[]>([]);
   const [materials, setMaterials] = useState<any[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
 
   useEffect(() => {
@@ -104,6 +105,13 @@ export default function JournalView({ selectedYear, shopId, forcedSubTab, settin
     return onSnapshot(q, (snap) => {
       const data = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setPurchases(data);
+    });
+  }, [shopId]);
+
+  useEffect(() => {
+    const q = query(collection(db, 'shops', shopId, 'vendors'));
+    return onSnapshot(q, (snap) => {
+      setVendors(snap.docs.map(d => d.data() as Vendor));
     });
   }, [shopId]);
 
@@ -217,7 +225,7 @@ export default function JournalView({ selectedYear, shopId, forcedSubTab, settin
         <AnimatePresence mode="wait">
           <motion.div key={activeSubTab} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.3 }} className="h-full">
             {activeSubTab === 'journal' && <JournalTable entries={entries} coa={coa} selectedYear={selectedYear} shopId={shopId} />}
-            {activeSubTab === 'reports' && <ReportsView entries={entries} coa={coa} selectedYear={selectedYear} purchases={purchases} expenses={expenses} monthlyData={monthlyData} materials={materials} settings={settings} />}
+            {activeSubTab === 'reports' && <ReportsView entries={entries} coa={coa} selectedYear={selectedYear} purchases={purchases} expenses={expenses} monthlyData={monthlyData} materials={materials} settings={settings} vendors={vendors} />}
             {activeSubTab === 'ledger' && <LedgerView entries={entries} coa={coa} />}
             {activeSubTab === 'coa' && <CoaView coa={coa} shopId={shopId} />}
             {activeSubTab === 'assets' && <AssetsView shopId={shopId} selectedYear={selectedYear} />}

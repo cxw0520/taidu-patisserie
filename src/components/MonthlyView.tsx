@@ -2,8 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import ProductAnalyticsTab from './ProductAnalyticsTab';
 import { db } from '../lib/firebase';
 import { collection, query, where, getDocs, getDoc, doc, onSnapshot, setDoc, writeBatch } from 'firebase/firestore';
-import { fmt, parseNum, monthISO, uid, normalizeFlavorName, calculateAssetDepreciation } from '../lib/utils';
-import { DailyReport, Settings, Order, Material } from '../types';
+import { fmt, parseNum, monthISO, uid, normalizeFlavorName, calculateAssetDepreciation, getPurchaseAccountingMonth } from '../lib/utils';
+import { DailyReport, Settings, Order, Material, Vendor } from '../types';
 import { Wallet, PieChart as ChartIcon, TrendingUp, ReceiptText, Users, Home, Lightbulb, Wrench, Info, Megaphone, Trash2, Plus, X, Truck, Calendar, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
@@ -39,6 +39,7 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
   const [depLog, setDepLog] = useState<Record<string, boolean>>({});
   const [logisticsVoucherLog, setLogisticsVoucherLog] = useState<Record<string, boolean>>({});
   const [coa, setCoa] = useState<any[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
   const [activeTab, setActiveTab] = useState<'finance' | 'product'>('finance');
   const [isMonthPickerOpen, setIsMonthPickerOpen] = useState(false);
 
@@ -143,13 +144,22 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
       setExpenses(snap.docs.map(d => ({ id: d.id, ...d.data() } as import('../types').ExpenseRecord)));
     });
 
+    // Widen purchases query to include previous month tail (for vendors with cutoff before month end)
+    // e.g. if cutoff is 25, a purchase on prev month 26 belongs to selectedMonth
+    const prevMonthForPurchasesDate = new Date(`${selectedMonth}-01`);
+    prevMonthForPurchasesDate.setMonth(prevMonthForPurchasesDate.getMonth() - 1);
+    const prevMonthForPurchasesStr = prevMonthForPurchasesDate.toISOString().slice(0, 7);
     const qPurchases = query(
       collection(db, 'shops', shopId, 'purchases'),
-      where('date', '>=', `${selectedMonth}-01`),
+      where('date', '>=', `${prevMonthForPurchasesStr}-25`),
       where('date', '<=', `${selectedMonth}-31`)
     );
     const unsubPurchases = onSnapshot(qPurchases, (snap) => {
       setPurchases(snap.docs.map(d => d.data() as import('../types').Purchase));
+    });
+
+    const unsubVendors = onSnapshot(collection(db, 'shops', shopId, 'vendors'), (snap) => {
+      setVendors(snap.docs.map(d => d.data() as Vendor));
     });
 
     // Need previous month count for opening balance if no specific opening balance exists
@@ -184,8 +194,8 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
     });
 
     return () => { 
-      unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); unsubExpenses(); unsubPurchases(); unsubCounts(); unsubAssets(); unsubDepLog(); 
-      unsubLogisticsVoucherLog(); unsubCoa();
+      unsubDaily(); unsubMonthly(); unsubMat(); unsubRec(); unsubExpenses(); unsubPurchases(); unsubCounts(); unsubAssets(); unsubDepLog();
+      unsubLogisticsVoucherLog(); unsubCoa(); unsubVendors();
     };
   }, [selectedMonth, shopId]);
 
@@ -834,8 +844,13 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
     let materialPurchaseTotal = 0;
     let packagingPurchaseTotal = 0;
     const vendorMaterialPurchases: Record<string, number> = {};
+    const vendorMap: Record<string, { settlementCutoffDay?: number }> = {};
+    vendors.forEach((v: Vendor) => { vendorMap[v.name] = { settlementCutoffDay: v.settlementCutoffDay }; });
 
     (purchases || []).forEach((p: any) => {
+      const vInfo = vendorMap[p.vendor];
+      const cutoff = p.paymentType === '月結' ? vInfo?.settlementCutoffDay : undefined;
+      if (getPurchaseAccountingMonth(p.date, cutoff, p.paymentType) !== selectedMonth) return;
       p.lines.forEach((l: any) => {
         const mat = materials.find(m => m.id === l.materialId);
         if (mat?.category === '食材' || !mat?.category) { // 預設食材
@@ -924,7 +939,7 @@ function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, se
       netProfit,
       selYear, selMon
     };
-  }, [monthData, settings, getRecipeCost, materials, costOverrides, monthlyLogisticsVal, expenses, purchases, physicalCounts, assets]);
+  }, [monthData, settings, getRecipeCost, materials, costOverrides, monthlyLogisticsVal, expenses, purchases, physicalCounts, assets, vendors]);
 
   const handleRecordDepreciation = async () => {
     const key = `${stats.selYear}-${stats.selMon}`;

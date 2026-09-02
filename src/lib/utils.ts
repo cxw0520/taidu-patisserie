@@ -108,3 +108,40 @@ export function calculateAssetDepreciation(asset: FixedAsset, year: number, mont
     endDate: endDate.toISOString().split('T')[0]
   };
 }
+
+/**
+ * 根據進貨日期與廠商月結結帳日（如 25 號），計算該筆進貨歸屬的會計/對帳月份 (YYYY-MM)
+ * @param dateStr 格式 'YYYY-MM-DD'
+ * @param cutoffDay 結帳日 1-31 (如 25 號代表 26 號起歸屬下個月)。若無或 >= 31 則為自然月
+ * @param paymentType 付款方式 ('月結' | '現結')，只有月結會依結帳日切換
+ */
+export function getPurchaseAccountingMonth(dateStr: string, cutoffDay?: number, paymentType?: string): string {
+  if (!dateStr) return '';
+  const cleanDate = dateStr.replace(/\//g, '-');
+  
+  if (paymentType === '現結' || !cutoffDay || cutoffDay >= 31 || cutoffDay <= 0) {
+    return cleanDate.substring(0, 7);
+  }
+
+  const parts = cleanDate.split('-');
+  if (parts.length < 3) return cleanDate.substring(0, 7);
+
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10);
+  const day = parseInt(parts[2], 10);
+
+  if (isNaN(year) || isNaN(month) || isNaN(day)) return cleanDate.substring(0, 7);
+
+  if (day > cutoffDay) {
+    let nextYear = year;
+    let nextMonth = month + 1;
+    if (nextMonth > 12) {
+      nextMonth = 1;
+      nextYear += 1;
+    }
+    return `${nextYear}-${String(nextMonth).padStart(2, '0')}`;
+  }
+
+  return `${year}-${String(month).padStart(2, '0')}`;
+}
+

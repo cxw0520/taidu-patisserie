@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
-import { JournalEntry, COAItem } from '../../types';
-import { fmt } from '../../lib/utils';
+import { JournalEntry, COAItem, Vendor } from '../../types';
+import { fmt, getPurchaseAccountingMonth } from '../../lib/utils';
 import { Calendar, Filter, Download } from 'lucide-react';
 import { cn } from '../../lib/utils';
 
@@ -74,7 +74,7 @@ const calculateBalances = (entries: JournalEntry[], coa: COAItem[], start: Date 
   return balances;
 };
 
-export default function ReportsView({ entries, coa, selectedYear, purchases = [], expenses = [], monthlyData = [], materials = [], settings }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number, purchases?: any[], expenses?: any[], monthlyData?: any[], materials?: any[], settings?: any }) {
+export default function ReportsView({ entries, coa, selectedYear, purchases = [], expenses = [], monthlyData = [], materials = [], settings, vendors = [] }: { entries: JournalEntry[], coa: COAItem[], selectedYear: number, purchases?: any[], expenses?: any[], monthlyData?: any[], materials?: any[], settings?: any, vendors?: Vendor[] }) {
   const [activeReport, setActiveReport] = useState<'is' | 'bs' | 'cf'>('is');
   const [hideZero, setHideZero] = useState(false);
   const [costMode, setCostMode] = useState<'cogs' | 'purchases'>('cogs');
@@ -111,15 +111,18 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
 
     let total = 0;
 
-    // ① 進貨管理（purchases collection）- Sum only ingredients and packaging lines like MonthlyView!
-    const filteredPurchases = purchases.filter(p => {
-      const ds = (p.date || '').replace(/\//g, '-');
-      if (startStr && ds < startStr) return false;
-      if (endStr   && ds > endStr)   return false;
-      return true;
-    });
+    // ① 進貨管理（purchases collection）- Use accounting month (respects cutoff day) like MonthlyView!
+    // Build vendor map for cutoff day lookup
+    const vendorMap: Record<string, { settlementCutoffDay?: number }> = {};
+    vendors.forEach(v => { vendorMap[v.name] = { settlementCutoffDay: v.settlementCutoffDay }; });
 
-    filteredPurchases.forEach((p: any) => {
+    purchases.forEach((p: any) => {
+      const vInfo = vendorMap[p.vendor];
+      const cutoff = p.paymentType === '月結' ? vInfo?.settlementCutoffDay : undefined;
+      const accountingMonth = getPurchaseAccountingMonth((p.date || '').replace(/\//g, '-'), cutoff, p.paymentType);
+      // Check that accounting month falls within the selected range
+      if (startMonth && accountingMonth < startMonth) return;
+      if (endMonth   && accountingMonth > endMonth)   return;
       (p.lines || []).forEach((l: any) => {
         const mat = materials.find((m: any) => m.id === l.materialId);
         if (mat?.category === '食材' || !mat?.category) { // 預設食材
@@ -163,7 +166,7 @@ export default function ReportsView({ entries, coa, selectedYear, purchases = []
     });
 
     return total;
-  }, [purchases, expenses, monthlyData, materials, settings, isFilter, isCustomDates, selectedYear]);
+  }, [purchases, expenses, monthlyData, materials, settings, isFilter, isCustomDates, selectedYear, vendors]);
 
   const revenueTotal = useMemo(() => {
     return (Object.values(isLedger) as AccountBalance[]).filter(a => a.type === '收入').reduce((s, a) => s + a.balance, 0);

@@ -2,7 +2,7 @@ import React, { useMemo, useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
 import { collection, deleteDoc, doc, getDoc, getDocs, onSnapshot, query, setDoc, where, writeBatch } from 'firebase/firestore';
 import { Material, Purchase, PurchaseLine, PurchaseSettlement, Vendor } from '../../types';
-import { fmt, uid, cn } from '../../lib/utils';
+import { fmt, uid, cn, getPurchaseAccountingMonth } from '../../lib/utils';
 import { AlertCircle, BadgeCheck, Eye, Pencil, Plus, Search, Store, Trash2, Users, Phone, Mail, X, CheckCircle2, ClipboardList } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 
@@ -322,9 +322,20 @@ export default function PurchasingTab({
     }
   };
 
+  // 廠商 map：快速查閱 settlementCutoffDay 與預設付款方式
+  const vendorMap = useMemo(() => {
+    const m: Record<string, { settlementCutoffDay?: number; defaultPaymentType?: string }> = {};
+    vendors.forEach(v => { m[v.name] = { settlementCutoffDay: v.settlementCutoffDay, defaultPaymentType: v.defaultPaymentType }; });
+    return m;
+  }, [vendors]);
+
   const vendorStats = useMemo(() => {
     const stats: Record<string, { monthly: number; cash: number; total: number }> = {};
-    purchases.filter(p => p.date.startsWith(selectedMonth)).forEach(p => {
+    purchases.forEach(p => {
+      const vInfo = vendorMap[p.vendor];
+      const cutoff = p.paymentType === '月結' ? vInfo?.settlementCutoffDay : undefined;
+      const accountingMonth = getPurchaseAccountingMonth(p.date, cutoff, p.paymentType);
+      if (accountingMonth !== selectedMonth) return;
       if (!stats[p.vendor]) stats[p.vendor] = { monthly: 0, cash: 0, total: 0 };
       const amt = p.totalAmount;
       if (p.paymentType === '月結') {
@@ -337,7 +348,7 @@ export default function PurchasingTab({
     return Object.entries(stats)
       .map(([vendor, s]) => ({ vendor, ...s }))
       .sort((a, b) => b.total - a.total);
-  }, [purchases, selectedMonth]);
+  }, [purchases, selectedMonth, vendorMap]);
 
   // 月結對帳用：各廠商當月月結總額 & 是否已付
   const settlementStats = useMemo(() => {
@@ -351,10 +362,15 @@ export default function PurchasingTab({
 
   const vendorPurchases = useMemo(() => {
     if (!vendorDetail) return [];
+    const vInfo = vendorMap[vendorDetail.vendor];
     return purchases
-      .filter(p => p.vendor === vendorDetail.vendor && p.date.startsWith(vendorDetail.month))
+      .filter(p => {
+        if (p.vendor !== vendorDetail.vendor) return false;
+        const cutoff = p.paymentType === '月結' ? vInfo?.settlementCutoffDay : undefined;
+        return getPurchaseAccountingMonth(p.date, cutoff, p.paymentType) === vendorDetail.month;
+      })
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [purchases, vendorDetail]);
+  }, [purchases, vendorDetail, vendorMap]);
 
   const selectedMonthTotal = useMemo(() => {
     return vendorStats.reduce((sum, v) => sum + v.total, 0);
@@ -371,8 +387,10 @@ export default function PurchasingTab({
     let ingredientSum = 0;
     let packageSum = 0;
     purchases
-      .filter(p => p.date.startsWith(selectedMonth))
       .forEach(p => {
+        const vInfo = vendorMap[p.vendor];
+        const cutoff = p.paymentType === '月結' ? vInfo?.settlementCutoffDay : undefined;
+        if (getPurchaseAccountingMonth(p.date, cutoff, p.paymentType) !== selectedMonth) return;
         p.lines.forEach(l => {
           const mat = materialMap[l.materialId];
           if (mat) {
@@ -388,7 +406,7 @@ export default function PurchasingTab({
       selectedMonthIngredientTotal: ingredientSum,
       selectedMonthPackageTotal: packageSum
     };
-  }, [purchases, selectedMonth, materialMap]);
+  }, [purchases, selectedMonth, materialMap, vendorMap]);
 
   // 月結結清儲存
   const handleSettlementSave = async () => {
@@ -678,6 +696,7 @@ export default function PurchasingTab({
     e.preventDefault();
     if (!editingVendor?.name) return alert('請填寫廠商名稱');
     const vId = editingVendor.id || uid();
+    const cutoffVal = editingVendor.settlementCutoffDay;
     const payloadStart: Partial<Vendor> = {
       id: vId,
       name: editingVendor.name,
@@ -686,7 +705,8 @@ export default function PurchasingTab({
       category: editingVendor.category || '',
       notes: editingVendor.notes || '',
       defaultPaymentType: editingVendor.defaultPaymentType || '現結',
-      deliveryDays: editingVendor.deliveryDays || []
+      deliveryDays: editingVendor.deliveryDays || [],
+      settlementCutoffDay: (cutoffVal && cutoffVal > 0 && cutoffVal < 31) ? cutoffVal : undefined
     };
     await setDoc(doc(db, 'shops', shopId, 'vendors', vId), payloadStart as Vendor);
     setEditingVendor(null);
@@ -1368,6 +1388,11 @@ export default function PurchasingTab({
                                    🚚 週 {v.deliveryDays.map((d: number) => ['日', '一', '二', '三', '四', '五', '六'][d]).join('')}
                                  </span>
                                )}
+                               {v.defaultPaymentType === '月結' && v.settlementCutoffDay && v.settlementCutoffDay > 0 && (
+                                 <span className="text-[10px] text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded-full border border-blue-200 inline-block">
+                                   🗓️ {v.settlementCutoffDay} 號結帳
+                                 </span>
+                               )}
                              </div>
                            </div>
                            <div className="flex gap-1 opacity-100 lg:opacity-0 lg:group-hover:opacity-100 transition-opacity">
@@ -1421,6 +1446,27 @@ export default function PurchasingTab({
                         <div>
                           <label className="text-xs font-bold text-coffee-400 block mb-1">備註 / 匯款帳號</label>
                           <textarea value={editingVendor.notes || ''} onChange={e => setEditingVendor({...editingVendor, notes: e.target.value})} rows={3} className="w-full bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-500 resize-none"></textarea>
+                        </div>
+                        <div>
+                          <label className="text-xs font-bold text-coffee-400 block mb-1">月結結帳日 <span className="font-normal text-coffee-300">(如 25 號，代表 26 號起計入下個月)</span></label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="number"
+                              min={1}
+                              max={30}
+                              value={editingVendor.settlementCutoffDay || ''}
+                              onChange={e => {
+                                const v = parseInt(e.target.value, 10);
+                                setEditingVendor({ ...editingVendor, settlementCutoffDay: isNaN(v) ? undefined : Math.min(30, Math.max(1, v)) });
+                              }}
+                              placeholder="留空則自然月"
+                              className="w-24 bg-white border border-coffee-200 rounded-xl px-4 py-2 outline-none focus:border-coffee-500"
+                            />
+                            <span className="text-xs text-coffee-400">號 (留空 = 月底自然月)</span>
+                          </div>
+                          {editingVendor.settlementCutoffDay && editingVendor.settlementCutoffDay > 0 && editingVendor.settlementCutoffDay < 31 && (
+                            <p className="text-[10px] text-blue-500 mt-1">⚡ {editingVendor.settlementCutoffDay + 1} 號起的月結進貨將自動归入下個月對帳</p>
+                          )}
                         </div>
                         <div>
                           <label className="text-xs font-bold text-coffee-400 block mb-1">預設付款方式</label>
