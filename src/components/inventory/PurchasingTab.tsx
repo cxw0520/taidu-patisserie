@@ -697,7 +697,8 @@ export default function PurchasingTab({
     if (!editingVendor?.name) return alert('請填寫廠商名稱');
     const vId = editingVendor.id || uid();
     const cutoffVal = editingVendor.settlementCutoffDay;
-    const payloadStart: Partial<Vendor> = {
+    const hasValidCutoff = cutoffVal && cutoffVal > 0 && cutoffVal < 31;
+    const payloadStart: Record<string, any> = {
       id: vId,
       name: editingVendor.name,
       phone: editingVendor.phone || '',
@@ -706,11 +707,15 @@ export default function PurchasingTab({
       notes: editingVendor.notes || '',
       defaultPaymentType: editingVendor.defaultPaymentType || '現結',
       deliveryDays: editingVendor.deliveryDays || [],
-      settlementCutoffDay: (cutoffVal && cutoffVal > 0 && cutoffVal < 31) ? cutoffVal : undefined
     };
-    await setDoc(doc(db, 'shops', shopId, 'vendors', vId), payloadStart as Vendor);
+    // 只有設定有效結帳日才寫入欄位，留空時不寫（避免 Firestore 拒絕 undefined）
+    if (hasValidCutoff) {
+      payloadStart.settlementCutoffDay = cutoffVal;
+    }
+    await setDoc(doc(db, 'shops', shopId, 'vendors', vId), payloadStart);
     setEditingVendor(null);
   };
+
 
   const handleDeleteVendor = async (vendor: Vendor) => {
     if (!confirm(`確定刪除廠商：${vendor.name}？(注意：已存在的進貨記錄仍會保留其名稱)`)) return;
