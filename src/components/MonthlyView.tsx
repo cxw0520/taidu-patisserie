@@ -445,6 +445,7 @@ export default function MonthlyView({ settings, shopId, forcedSubTab }: { settin
           setShowARModal={setShowARModal}
           selectedBuyer={selectedBuyer}
           setSelectedBuyer={setSelectedBuyer}
+          vendors={vendors}
         />
       )}
       
@@ -653,7 +654,7 @@ function ARReconciliationModal({ monthData, settings, shopId, onClose, selectedB
   );
 }
 
-function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, expenses, purchases, physicalCounts, assets, depLog, logisticsVoucherLog, coa, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer }: any) {
+function FinanceTab({ monthData, settings, shopId, selectedMonth, fixedCosts, setFixedCosts, costOverrides, setCostOverrides, monthlyLogisticsVal, setMonthlyLogisticsVal, getRecipeCost, materials, recipes, expenses, purchases, physicalCounts, assets, depLog, logisticsVoucherLog, coa, showARModal, setShowARModal, selectedBuyer, setSelectedBuyer, vendors = [] }: any) {
   const [showFoodCostModal, setShowFoodCostModal] = useState(false);
   const [showPRModal, setShowPRModal] = useState(false);
   const stats = useMemo(() => {
