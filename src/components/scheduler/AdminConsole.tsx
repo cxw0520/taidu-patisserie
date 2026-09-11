@@ -17,8 +17,9 @@ interface AdminConsoleProps {
   onUpdateTasks: React.Dispatch<React.SetStateAction<ProductionTask[]>>;
   onUpdatePurchases: React.Dispatch<React.SetStateAction<PurchaseRecord[]>>;
   onUpdateHistory: React.Dispatch<React.SetStateAction<HistoricalOrder[]>>;
-  onImportHR: () => void;
+  onImportHR: (targetYear?: number, targetMonth?: number) => void;
   hrSchedules: any[];
+  onMarkPurchasePaid?: (purchaseId: string) => void;
 }
 
 export const getSafetyThreshold = (mat: any, dayOfWeek: number) => {
@@ -47,7 +48,8 @@ export default function AdminConsole({
   onUpdatePurchases,
   onUpdateHistory,
   onImportHR,
-  hrSchedules
+  hrSchedules,
+  onMarkPurchasePaid
 }: AdminConsoleProps) {
   const [activeTab, setActiveTab] = useState<'scheduling' | 'bom' | 'inventory' | 'accounts' | 'history' | 'finance'>('scheduling');
 
@@ -75,6 +77,17 @@ export default function AdminConsole({
   const [editRecipeOperationTime, setEditRecipeOperationTime] = useState(1.0);
   const [editRecipeSop, setEditRecipeSop] = useState<string[]>([]);
   const [editRecipeBom, setEditRecipeBom] = useState<BOMItem[]>([]);
+  const [editRecipeImages, setEditRecipeImages] = useState<string[]>([]);
+
+  // New Recipe creation states
+  const [isAddingRecipe, setIsAddingRecipe] = useState(false);
+  const [newRecipeName, setNewRecipeName] = useState('');
+  const [newRecipeType, setNewRecipeType] = useState<'finished' | 'semi'>('finished');
+  const [newRecipeThreshold, setNewRecipeThreshold] = useState(50);
+  const [newRecipeOperationTime, setNewRecipeOperationTime] = useState(60);
+  const [newRecipeSop, setNewRecipeSop] = useState<string[]>(['準備材料與設備', '按照標準流程操作']);
+  const [newRecipeBom, setNewRecipeBom] = useState<BOMItem[]>([]);
+  const [newRecipeImageUrl, setNewRecipeImageUrl] = useState('');
 
   // Selected employee in back-end card to grade/mentor
   const [selectedGradingEmpId, setSelectedGradingEmpId] = useState<string>(employees[0]?.id || '');
@@ -106,59 +119,67 @@ export default function AdminConsole({
   const totalTaskHours = tasks.reduce((acc, curr) => acc + curr.requiredTimeHours, 0);
 
   // Financial calculations
-  const totalExpenses = purchases.reduce((acc, curr) => acc + curr.cost, 0);
-  const cashPayments = purchases.filter(p => p.paymentMethod === 'cash').reduce((acc, curr) => acc + curr.cost, 0);
-  const monthlyPayments = purchases.filter(p => p.paymentMethod === 'monthly').reduce((acc, curr) => acc + curr.cost, 0);
+  const nonDraftPurchases = purchases.filter(p => p.status !== 'draft');
+  const totalExpenses = nonDraftPurchases.reduce((acc, curr) => acc + curr.cost, 0);
+  const cashPayments = nonDraftPurchases.filter(p => p.paymentMethod === 'cash').reduce((acc, curr) => acc + curr.cost, 0);
+  const monthlyPayments = nonDraftPurchases.filter(p => p.paymentMethod === 'monthly').reduce((acc, curr) => acc + curr.cost, 0);
   
   const pendingExpenses = purchases.filter(p => p.status === 'pending').reduce((acc, curr) => acc + curr.cost, 0);
-  const accountsPayable = purchases.filter(p => p.status === 'received').reduce((acc, curr) => acc + curr.cost, 0);
+  const accountsPayable = purchases.filter(p => p.status === 'received' && !p.paid).reduce((acc, curr) => acc + curr.cost, 0);
+  const paidExpenses = purchases.filter(p => p.status === 'received' && p.paid).reduce((acc, curr) => acc + curr.cost, 0);
 
   const gradingEmployee = employees.find(e => e.id === selectedGradingEmpId);
 
   // Automatic Scheduling logic based on priority:
-  // Priority 1: urgent orders (simulate orders)
-  // Priority 2: materials lowest in stock relative to today's safety threshold
-  // Constraints: check employee unlock levels, enforce available work hours
+  // Dynamically schedules low-stock items and standard batches according to qualifications & available hours
   const handleAutoSchedule = () => {
-    // 1) Define tasks to produce (simulated demands)
-    // Use recipe.operationTimeMinutes if available, else fall back to hardcoded defaults (in hours)
-    const getRecipeTime = (recipeId: string, fallback: number) => {
-      const r = recipes.find(r => r.id === recipeId);
-      // Convert minutes to hours for scheduling
-      return r?.operationTimeMinutes != null ? r.operationTimeMinutes / 60 : fallback;
+    const getRecipeTime = (recipe: Recipe, fallback: number) => {
+      return recipe.operationTimeMinutes != null ? recipe.operationTimeMinutes / 60 : fallback;
     };
 
-    const productionPool = [
-      { name: '經典法式草莓塔', qty: 15, unit: '個', time: getRecipeTime('rec-1', 3.0), recipeId: 'rec-1', isUrgent: true },
-      { name: '法式塔皮(半成品)', qty: 30, unit: '個', time: getRecipeTime('rec-2', 4.5), recipeId: 'rec-2', isUrgent: false },
-      { name: '香草卡士達醬(半成品)', qty: 2000, unit: 'g', time: getRecipeTime('rec-3', 2.5), recipeId: 'rec-3', isUrgent: false },
-      { name: '經典法式草莓塔', qty: 6, unit: '個', time: getRecipeTime('rec-1', 1.5), recipeId: 'rec-1', isUrgent: false }
-    ];
+    // 1) Dynamically build production pool from inventory shortage and recipes
+    const pool: Array<{ name: string; qty: number; unit: string; time: number; recipeId: string; isUrgent: boolean }> = [];
 
-    // Sort: Urgent first, then check which materials have the lowest stock relative to today's safety stock
-    const sortedPool = [...productionPool].sort((a, b) => {
-      if (a.isUrgent && !b.isUrgent) return -1;
-      if (!a.isUrgent && b.isUrgent) return 1;
-
-      // Find stock levels relative to today's threshold
-      const matA = materials.find(m => m.name === a.name || m.name === (a.name + '(半成品)'));
-      const matB = materials.find(m => m.name === b.name || m.name === (b.name + '(半成品)'));
-      
-      const thresholdA = matA ? getSafetyThreshold(matA, currentDayOfWeek) : 0;
-      const thresholdB = matB ? getSafetyThreshold(matB, currentDayOfWeek) : 0;
-
-      const deficitA = matA ? Math.max(0, thresholdA - matA.qty) : 0;
-      const deficitB = matB ? Math.max(0, thresholdB - matB.qty) : 0;
-
-      return deficitB - deficitA; // Highest deficit first
+    // Check materials below today's threshold that match recipes
+    materials.forEach(mat => {
+      const safetyThreshold = getSafetyThreshold(mat, currentDayOfWeek);
+      if (mat.qty < safetyThreshold) {
+        const gap = parseFloat((safetyThreshold * 2 - mat.qty).toFixed(1));
+        const cleanName = mat.name.replace('(半成品)', '');
+        const matchRecipe = recipes.find(r => r.name === mat.name || r.name === cleanName || (r.name + '(半成品)') === mat.name);
+        if (matchRecipe) {
+          pool.push({
+            name: matchRecipe.name,
+            qty: Math.max(1, gap),
+            unit: mat.unit || '個',
+            time: getRecipeTime(matchRecipe, 2.0),
+            recipeId: matchRecipe.id,
+            isUrgent: true
+          });
+        }
+      }
     });
 
+    // If no urgent stock shortages, distribute standard production batches for recipes
+    if (pool.length === 0 && recipes.length > 0) {
+      recipes.forEach(rec => {
+        pool.push({
+          name: rec.name,
+          qty: rec.type === 'finished' ? 12 : 24,
+          unit: '個',
+          time: getRecipeTime(rec, 2.0),
+          recipeId: rec.id,
+          isUrgent: false
+        });
+      });
+    }
+
     const generatedTasks: ProductionTask[] = [];
-    let allocatedHours: Record<string, number> = {};
+    const allocatedHours: Record<string, number> = {};
     employees.forEach(emp => { allocatedHours[emp.id] = 0; });
 
     // 2) Allocate tasks to qualified employees
-    sortedPool.forEach((poolItem, idx) => {
+    pool.forEach((poolItem, idx) => {
       // Find employees qualified (unlocked this recipe)
       const qualifiedEmployees = employees.filter(emp => {
         const progress = emp.progress[poolItem.recipeId] || 0;
@@ -166,11 +187,15 @@ export default function AdminConsole({
         return recipe ? progress >= recipe.unlockThreshold : false;
       });
 
-      // Find one employee who has remaining hours
       let assignedEmp = qualifiedEmployees.find(emp => {
         const currentUsed = allocatedHours[emp.id] || 0;
         return (currentUsed + poolItem.time) <= emp.hours;
       });
+
+      // Fallback to any employee with capacity if no qualified worker has remaining hours
+      if (!assignedEmp && employees.length > 0) {
+        assignedEmp = employees.find(emp => ((allocatedHours[emp.id] || 0) + poolItem.time) <= emp.hours) || employees[0];
+      }
 
       if (assignedEmp) {
         allocatedHours[assignedEmp.id] += poolItem.time;
@@ -186,29 +211,27 @@ export default function AdminConsole({
           actualTimeHours: null,
           operator: null
         });
-      } else {
-        // Flag warning if no qualified workers have capacity
-        console.warn(`No qualified personnel with available hours to assign task: ${poolItem.name}`);
       }
     });
 
-    // 3) Append general cleanups/openings that don't require specific training
+    // 3) Append cleanup/prep tasks for remaining hours
     employees.forEach(emp => {
       const currentUsed = allocatedHours[emp.id] || 0;
-      if (emp.hours - currentUsed >= 1.5) {
+      if (emp.hours - currentUsed >= 1.0) {
+        const rem = parseFloat((emp.hours - currentUsed).toFixed(1));
         generatedTasks.push({
           id: `tsk-cleanup-${emp.id}-${Date.now()}`,
-          name: '庫存整理與器具清潔',
+          name: '工作台整理與器具消毒清潔',
           qty: 1,
           unit: '次',
           assignedTo: emp.name,
           status: 'pending',
-          requiredTimeHours: 1.5,
+          requiredTimeHours: rem,
           startTime: null,
           actualTimeHours: null,
           operator: null
         });
-        allocatedHours[emp.id] += 1.5;
+        allocatedHours[emp.id] += rem;
       }
     });
 
@@ -389,9 +412,13 @@ export default function AdminConsole({
   const handleUpdateWeeklyThreshold = (materialId: string, day: number, value: number) => {
     onUpdateMaterials(prev => prev.map(mat => {
       if (mat.id === materialId) {
-        const nextMin = Array.isArray(mat.weeklyMinQty)
-          ? [...mat.weeklyMinQty]
-          : [0, 0, 0, 0, 0, 0, 0];
+        const currentWeekly = mat.weeklyMinQty || {};
+        const nextMin: Record<number, number> = {};
+        for (let d = 0; d <= 6; d++) {
+          nextMin[d] = Array.isArray(currentWeekly)
+            ? (currentWeekly[d] ?? 0)
+            : ((currentWeekly as any)[d] ?? 0);
+        }
         nextMin[day] = value;
         return {
           ...mat,
@@ -426,22 +453,31 @@ export default function AdminConsole({
     }));
   };
 
-  // Assign Mentor to student
+  // Assign Mentor to student and clean up previous mentor's apprentice list
   const handleAssignMentor = (studentId: string, mentorNameStr: string) => {
-    onUpdateEmployees(prev => prev.map(emp => {
-      if (emp.id === studentId) {
-        return { ...emp, mentorName: mentorNameStr || undefined };
-      }
-      // If mentor was assigned, append student name to mentor's apprentices list
-      if (emp.name === mentorNameStr) {
-        const student = prev.find(e => e.id === studentId);
-        const currentApprentices = emp.apprentices || [];
-        if (student && !currentApprentices.includes(student.name)) {
-          return { ...emp, apprentices: [...currentApprentices, student.name] };
+    onUpdateEmployees(prev => {
+      const student = prev.find(e => e.id === studentId);
+      if (!student) return prev;
+      const studentName = student.name;
+
+      return prev.map(emp => {
+        if (emp.id === studentId) {
+          return { ...emp, mentorName: mentorNameStr || undefined };
         }
-      }
-      return emp;
-    }));
+        // If this was the old mentor and not the new mentor, remove student from apprentices
+        if (emp.name !== mentorNameStr && emp.apprentices?.includes(studentName)) {
+          return { ...emp, apprentices: emp.apprentices.filter(n => n !== studentName) };
+        }
+        // If this is the new mentor, add student to apprentices
+        if (emp.name === mentorNameStr && mentorNameStr) {
+          const currentApprentices = emp.apprentices || [];
+          if (!currentApprentices.includes(studentName)) {
+            return { ...emp, apprentices: [...currentApprentices, studentName] };
+          }
+        }
+        return emp;
+      });
+    });
   };
 
   return (
@@ -690,10 +726,10 @@ export default function AdminConsole({
                   </div>
                   <div className="flex items-center gap-2">
                     <button
-                      onClick={onImportHR}
+                      onClick={() => onImportHR(viewYear, viewMonth)}
                       className="px-4 py-2.5 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 transition flex items-center gap-1.5 shadow-sm active:scale-95"
                     >
-                      <Database className="w-4 h-4" /> 匯入 taidu-HR 班表
+                      <Database className="w-4 h-4" /> 匯入 taidu-HR 班表 ({viewMonth}月)
                     </button>
                     <button
                       onClick={handleAutoSchedule}
@@ -709,8 +745,21 @@ export default function AdminConsole({
                     <div key={emp.id} className="p-3.5 bg-stone-50/50 border border-stone-200/60 rounded-xl flex items-center justify-between gap-4">
                       <span className="font-bold text-stone-800 text-sm">{emp.name} ({emp.role})</span>
                       <div className="flex items-center gap-4">
-                        <div className="text-xs text-stone-500">
-                          排班時間: <strong>{emp.hours}</strong> 小時
+                        <div className="flex items-center gap-2 bg-stone-100/60 px-3 py-1.5 rounded-xl border border-stone-200/50">
+                          <span className="text-xs text-stone-500 font-semibold">排班工時:</span>
+                          <input
+                            type="number"
+                            min="0.5"
+                            max="16"
+                            step="0.5"
+                            value={emp.hours}
+                            onChange={(e) => {
+                              const val = Math.max(0.5, Number(e.target.value));
+                              onUpdateEmployees(prev => prev.map(x => x.id === emp.id ? { ...x, hours: val } : x));
+                            }}
+                            className="w-16 bg-white border border-stone-200 rounded-lg px-2 py-0.5 text-center font-mono font-bold text-xs text-stone-800 outline-none focus:border-blue-500"
+                          />
+                          <span className="text-xs text-stone-400 font-semibold">小時</span>
                         </div>
                         <button
                           onClick={() => handleDeleteEmployee(emp.id)}
@@ -723,16 +772,358 @@ export default function AdminConsole({
                   ))}
                 </div>
               </div>
+
+              {/* Mentorship Assessment & Skill Rating Panel */}
+              <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
+                <div className="border-b border-stone-100 pb-3">
+                  <h3 className="font-bold text-stone-800 text-lg flex items-center gap-2">
+                    <UserCheck className="w-5 h-5 text-blue-500" />
+                    師徒教學與技能考核評分
+                  </h3>
+                  <p className="text-xs text-stone-500 mt-0.5">
+                    在此考核每位員工對各甜點食譜的製作熟練度。熟練度達到配方解鎖門檻時，前台將自動解鎖食譜與 SOP。
+                  </p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-3 bg-stone-50 p-3.5 rounded-2xl border border-stone-200/50">
+                  <span className="text-xs font-bold text-stone-600 shrink-0">選擇受考核員工:</span>
+                  <div className="flex flex-wrap gap-2">
+                    {employees.map(emp => (
+                      <button
+                        key={emp.id}
+                        onClick={() => setSelectedGradingEmpId(emp.id)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition ${
+                          selectedGradingEmpId === emp.id
+                            ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                            : 'bg-white text-stone-600 border-stone-200 hover:bg-stone-100'
+                        }`}
+                      >
+                        {emp.name} ({emp.role})
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {gradingEmployee && (
+                  <div className="flex flex-col gap-4">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 bg-blue-50/40 p-4 rounded-2xl border border-blue-100 text-xs">
+                      <div className="flex items-center gap-3">
+                        <span className="font-bold text-blue-900 text-sm">受評人: {gradingEmployee.name}</span>
+                        <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded font-bold">{gradingEmployee.role}</span>
+                      </div>
+                      <div className="text-stone-500 font-medium">
+                        {gradingEmployee.mentorName ? `師父: ${gradingEmployee.mentorName} 師傅` : '無指定師父'}
+                        {gradingEmployee.apprentices && gradingEmployee.apprentices.length > 0 && ` · 帶領徒弟: ${gradingEmployee.apprentices.join(', ')}`}
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {recipes.map(recipe => {
+                        const score = gradingEmployee.progress[recipe.id] || 0;
+                        const isQualified = score >= recipe.unlockThreshold;
+
+                        return (
+                          <div key={recipe.id} className="p-4 bg-stone-50/40 border border-stone-200/70 rounded-2xl flex flex-col gap-3">
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <h4 className="font-bold text-stone-800 text-xs">{recipe.name}</h4>
+                                <span className="text-[10px] text-stone-400">門檻: {recipe.unlockThreshold}% ({recipe.type === 'finished' ? '成品' : '半成品'})</span>
+                              </div>
+                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full border ${
+                                isQualified ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-stone-100 text-stone-500 border-stone-200'
+                              }`}>
+                                {isQualified ? '✅ 已達解鎖標準' : '🔒 培訓未達標'}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-3">
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="5"
+                                value={score}
+                                onChange={(e) => handleUpdateEmpProgress(recipe.id, Number(e.target.value))}
+                                className="flex-1 accent-blue-600 cursor-pointer"
+                              />
+                              <span className="font-mono font-bold text-xs text-blue-700 w-12 text-right">{score}%</span>
+                            </div>
+
+                            <div className="flex gap-1.5 pt-1">
+                              <button
+                                onClick={() => handleUpdateEmpProgress(recipe.id, 0)}
+                                className="px-2 py-0.5 bg-stone-200/70 hover:bg-stone-200 text-stone-600 rounded text-[10px] font-bold"
+                              >
+                                0%
+                              </button>
+                              <button
+                                onClick={() => handleUpdateEmpProgress(recipe.id, recipe.unlockThreshold)}
+                                className="px-2 py-0.5 bg-amber-100 hover:bg-amber-200 text-amber-700 rounded text-[10px] font-bold"
+                              >
+                                剛好過關 ({recipe.unlockThreshold}%)
+                              </button>
+                              <button
+                                onClick={() => handleUpdateEmpProgress(recipe.id, 100)}
+                                className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-700 rounded text-[10px] font-bold"
+                              >
+                                完全掌握 (100%)
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 
           {/* TAB 2: BOM & RECIPES LIST */}
           {activeTab === 'bom' && (
             <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm flex flex-col gap-6">
-              <div className="border-b border-stone-100 pb-4">
-                <h3 className="font-bold text-stone-800 text-lg">食譜 BOM 與 SOP 配置管理</h3>
-                <p className="text-xs text-stone-500">設定甜點成品的材料清單、SOP步驟與合格技能門檻</p>
+              <div className="border-b border-stone-100 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <h3 className="font-bold text-stone-800 text-lg">食譜 BOM 與 SOP 配置管理</h3>
+                  <p className="text-xs text-stone-500">設定甜點成品的材料清單、SOP步驟與合格技能門檻</p>
+                </div>
+                <button
+                  onClick={() => {
+                    setIsAddingRecipe(true);
+                    setNewRecipeName('');
+                    setNewRecipeType('finished');
+                    setNewRecipeThreshold(50);
+                    setNewRecipeOperationTime(60);
+                    setNewRecipeSop(['準備材料與器具', '依標準SOP步驟製作']);
+                    setNewRecipeBom([]);
+                    setNewRecipeImageUrl('');
+                  }}
+                  className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-sm active:scale-95 shrink-0"
+                >
+                  <Plus className="w-4 h-4" /> ➕ 新增配方食譜
+                </button>
               </div>
+
+              {/* Add New Recipe Form/Modal Card */}
+              {isAddingRecipe && (
+                <div className="p-6 border-2 border-dashed border-blue-300 rounded-3xl bg-blue-50/20 flex flex-col gap-5 animate-fade-in shadow-sm">
+                  <div className="flex justify-between items-center border-b border-blue-200 pb-2">
+                    <strong className="text-blue-900 text-sm flex items-center gap-1.5">
+                      <Plus className="w-4 h-4 text-blue-600" />
+                      建立全新甜點或半成品食譜配方
+                    </strong>
+                    <button
+                      onClick={() => setIsAddingRecipe(false)}
+                      className="text-stone-400 hover:text-stone-600 font-bold text-xs"
+                    >
+                      取消 ✕
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[11px] font-bold text-stone-500">配方名稱</label>
+                      <input
+                        type="text"
+                        placeholder="例如: 焦糖烤布蕾"
+                        value={newRecipeName}
+                        onChange={(e) => setNewRecipeName(e.target.value)}
+                        className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-850 outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[11px] font-bold text-stone-500">成品類別</label>
+                      <select
+                        value={newRecipeType}
+                        onChange={(e) => setNewRecipeType(e.target.value as 'finished' | 'semi')}
+                        className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-850 outline-none focus:border-blue-500 font-medium"
+                      >
+                        <option value="finished">🍰 最終成品</option>
+                        <option value="semi">🥣 自製半成品</option>
+                      </select>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[11px] font-bold text-stone-500">解鎖門檻技能 (%)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={newRecipeThreshold}
+                        onChange={(e) => setNewRecipeThreshold(Number(e.target.value))}
+                        className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-850 outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-[11px] font-bold text-stone-500">每批製作工時 (分鐘)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        max="480"
+                        value={newRecipeOperationTime}
+                        onChange={(e) => setNewRecipeOperationTime(Number(e.target.value))}
+                        className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-850 outline-none focus:border-blue-500"
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5 sm:col-span-2 md:col-span-4">
+                      <label className="text-[11px] font-bold text-stone-500">對照圖片網址 (URL)</label>
+                      <input
+                        type="text"
+                        placeholder="https://..."
+                        value={newRecipeImageUrl}
+                        onChange={(e) => setNewRecipeImageUrl(e.target.value)}
+                        className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-850 outline-none focus:border-blue-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* New Recipe SOP steps */}
+                  <div className="flex flex-col gap-2">
+                    <div className="flex justify-between items-center">
+                      <label className="text-[11px] font-bold text-stone-500">製作 SOP 步驟清單</label>
+                      <button
+                        type="button"
+                        onClick={() => setNewRecipeSop(prev => [...prev, ''])}
+                        className="px-2.5 py-1 bg-blue-100 hover:bg-blue-200 text-blue-700 rounded-lg text-[10px] font-bold transition"
+                      >
+                        ➕ 新增步驟
+                      </button>
+                    </div>
+                    <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1">
+                      {newRecipeSop.map((step, sIdx) => (
+                        <div key={sIdx} className="flex items-center gap-2">
+                          <span className="font-mono text-xs text-stone-400 font-bold shrink-0">{sIdx + 1}.</span>
+                          <input
+                            type="text"
+                            value={step}
+                            onChange={(e) => {
+                              const list = [...newRecipeSop];
+                              list[sIdx] = e.target.value;
+                              setNewRecipeSop(list);
+                            }}
+                            placeholder={`步驟 ${sIdx + 1} 說明...`}
+                            className="flex-1 bg-white border border-stone-200 rounded-lg px-3 py-1.5 text-xs text-stone-850 outline-none focus:border-blue-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setNewRecipeSop(prev => prev.filter((_, idx) => idx !== sIdx))}
+                            className="p-1.5 text-stone-400 hover:text-rose-500 transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* New Recipe BOM Section */}
+                  <div className="flex flex-col gap-2">
+                    <label className="text-[11px] font-bold text-stone-500">配方所需材料 (BOM 清單)</label>
+                    <div className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-1 bg-stone-50/50 p-3 rounded-2xl border border-stone-200/40">
+                      {newRecipeBom.map((bomItem, bIdx) => (
+                        <div key={bIdx} className="flex items-center justify-between gap-2 bg-white p-2 rounded-xl border border-stone-200/50">
+                          <span className="text-xs text-stone-700 font-bold flex-1">{bomItem.name}</span>
+                          <span className="font-mono text-xs font-semibold text-stone-600 bg-stone-100 px-2 py-0.5 rounded">
+                            {bomItem.qty} {bomItem.unit}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => setNewRecipeBom(prev => prev.filter((_, idx) => idx !== bIdx))}
+                            className="p-1 text-stone-400 hover:text-rose-500 transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      ))}
+                      {newRecipeBom.length === 0 && (
+                        <span className="text-stone-400 italic text-xs text-center py-2">尚未加入材料</span>
+                      )}
+                    </div>
+
+                    <div className="flex flex-col sm:flex-row gap-2 bg-white p-2.5 rounded-xl border border-dashed border-stone-200">
+                      <select
+                        id="create-bom-select"
+                        className="flex-1 bg-stone-50 border border-stone-200 rounded-lg px-2.5 py-1.5 text-xs text-stone-700 outline-none focus:border-blue-500"
+                        defaultValue=""
+                      >
+                        <option value="">選擇材料或半成品...</option>
+                        {materials.map(m => (
+                          <option key={m.id} value={`${m.id}:${m.name}:${m.unit}`}>{m.name} ({m.unit})</option>
+                        ))}
+                      </select>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="number"
+                          step="any"
+                          placeholder="用量"
+                          id="create-bom-qty"
+                          className="w-20 bg-stone-50 border border-stone-200 rounded-lg px-2 py-1.5 text-xs text-center font-mono outline-none focus:border-blue-500"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const sel = document.getElementById('create-bom-select') as HTMLSelectElement;
+                            const qtyIn = document.getElementById('create-bom-qty') as HTMLInputElement;
+                            if (!sel || !qtyIn || !sel.value) return;
+                            const qty = Number(qtyIn.value);
+                            if (isNaN(qty) || qty <= 0) {
+                              alert('請輸入有效用量！');
+                              return;
+                            }
+                            const [id, name, unit] = sel.value.split(':');
+                            if (newRecipeBom.some(b => b.materialId === id)) {
+                              alert('該材料已在清單中！');
+                              return;
+                            }
+                            setNewRecipeBom(prev => [...prev, { materialId: id, name, qty, unit }]);
+                            sel.value = '';
+                            qtyIn.value = '';
+                          }}
+                          className="px-3.5 py-1.5 bg-stone-800 text-white rounded-lg text-xs font-bold transition hover:bg-stone-900 shrink-0"
+                        >
+                          ➕ 加入
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2 border-t border-blue-200">
+                    <button
+                      type="button"
+                      onClick={() => setIsAddingRecipe(false)}
+                      className="px-4 py-2 bg-stone-200 text-stone-700 rounded-xl text-xs font-bold hover:bg-stone-300 transition"
+                    >
+                      取消
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!newRecipeName.trim()) {
+                          alert('請輸入配方名稱！');
+                          return;
+                        }
+                        const newId = `rec-${Date.now()}`;
+                        const createdRecipe: Recipe = {
+                          id: newId,
+                          name: newRecipeName.trim(),
+                          type: newRecipeType,
+                          unlockThreshold: newRecipeThreshold,
+                          operationTimeMinutes: newRecipeOperationTime,
+                          sop: newRecipeSop.filter(s => s.trim() !== ''),
+                          bom: newRecipeBom,
+                          images: newRecipeImageUrl.trim() ? [newRecipeImageUrl.trim()] : []
+                        };
+
+                        await onUpdateRecipes(prev => [...prev, createdRecipe]);
+                        setIsAddingRecipe(false);
+                        alert(`🎉 成功建立配方「${createdRecipe.name}」！`);
+                      }}
+                      className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shadow-sm"
+                    >
+                      確認建立配方
+                    </button>
+                  </div>
+                </div>
+              )}
 
               <div className="flex flex-col gap-4">
                 {recipes.map(recipe => {
@@ -965,6 +1356,17 @@ export default function AdminConsole({
                           </div>
                         </div>
 
+                        <div className="flex flex-col gap-1.5">
+                          <label className="text-[11px] font-bold text-stone-400">🖼️ SOP 圖文對照圖片網址 (以逗號分隔)</label>
+                          <input
+                            type="text"
+                            placeholder="https://images.unsplash.com/... , https://..."
+                            value={editRecipeImages.join(', ')}
+                            onChange={(e) => setEditRecipeImages(e.target.value.split(',').map(s => s.trim()).filter(Boolean))}
+                            className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-850 outline-none focus:border-blue-500 w-full"
+                          />
+                        </div>
+
                         <div className="flex justify-end gap-2 pt-2 border-t border-stone-100">
                           <button
                             type="button"
@@ -983,12 +1385,13 @@ export default function AdminConsole({
                                   unlockThreshold: editRecipeThreshold,
                                   operationTimeMinutes: editRecipeOperationTime,
                                   sop: editRecipeSop.filter(step => step.trim() !== ''),
-                                  bom: editRecipeBom
+                                  bom: editRecipeBom,
+                                  images: editRecipeImages
                                 } : r);
                                 
                                 await onUpdateRecipes(updatedRecipes);
                                 setEditingRecipeId(null);
-                                alert("🎉 成功更新配方名稱、SOP 與 BOM 用量清單！");
+                                alert("🎉 成功更新配方名稱、SOP、BOM 與對照圖片！");
                               } catch (err: any) {
                                 alert("更新失敗: " + err.message);
                               }
@@ -1028,6 +1431,7 @@ export default function AdminConsole({
                               setEditRecipeOperationTime(recipe.operationTimeMinutes ?? 60);
                               setEditRecipeSop(recipe.sop || []);
                               setEditRecipeBom(recipe.bom || []);
+                              setEditRecipeImages(recipe.images || []);
                             }}
                             className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold transition flex items-center gap-1"
                           >
@@ -1544,8 +1948,9 @@ export default function AdminConsole({
                         <th className="pb-3">單項總價</th>
                         <th className="pb-3">付款方式</th>
                         <th className="pb-3">廠商名稱</th>
-                        <th className="pb-3">簽收狀態</th>
+                        <th className="pb-3">簽收狀態 / 款項</th>
                         <th className="pb-3">簽收核對人</th>
+                        <th className="pb-3 text-right">結算操作</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-stone-100">
@@ -1563,17 +1968,44 @@ export default function AdminConsole({
                           </td>
                           <td className="py-4 text-stone-500">{p.supplier}</td>
                           <td className="py-4">
-                            {p.status === 'received' ? (
-                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold rounded-full">
-                                已簽收進庫
-                              </span>
-                            ) : (
-                              <span className="px-2 py-0.5 bg-amber-50 text-amber-600 border border-amber-100 text-[10px] font-bold rounded-full">
-                                待簽收在途
-                              </span>
-                            )}
+                            <div className="flex flex-col gap-1 items-start">
+                              {p.status === 'received' ? (
+                                <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-100 text-[10px] font-bold rounded-full">
+                                  已簽收進庫
+                                </span>
+                              ) : p.status === 'draft' ? (
+                                <span className="px-2 py-0.5 bg-stone-100 text-stone-600 border border-stone-200 text-[10px] font-bold rounded-full">
+                                  草稿待確認
+                                </span>
+                              ) : (
+                                <span className="px-2 py-0.5 bg-amber-50 text-amber-600 border border-amber-100 text-[10px] font-bold rounded-full">
+                                  待簽收在途
+                                </span>
+                              )}
+                              {p.status === 'received' && (
+                                p.paid ? (
+                                  <span className="text-[9px] font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">
+                                    ✓ 已結清
+                                  </span>
+                                ) : (
+                                  <span className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">
+                                    未結算
+                                  </span>
+                                )
+                              )}
+                            </div>
                           </td>
                           <td className="py-4 text-stone-400 font-bold">{p.signedBy || '-'}</td>
+                          <td className="py-4 text-right">
+                            {p.status === 'received' && !p.paid && onMarkPurchasePaid && (
+                              <button
+                                onClick={() => onMarkPurchasePaid(p.id)}
+                                className="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition border border-blue-200 shadow-xs active:scale-95 cursor-pointer"
+                              >
+                                💳 標記已付款
+                              </button>
+                            )}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

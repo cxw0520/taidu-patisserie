@@ -79,6 +79,8 @@ export interface PurchaseRecord {
   signedBy?: string | null;
   confirmedBy?: string | null;       // Employee who confirmed the draft order
   confirmedAt?: string | null;       // ISO timestamp when order was confirmed
+  paid?: boolean;                    // Payment status: paid vs unpaid
+  paidAt?: string | null;            // Timestamp when marked paid
 }
 
 export interface HistoricalOrder {
@@ -401,6 +403,19 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
     }
   };
 
+  // Reset task back to pending (pause/abort)
+  const handleResetTask = async (taskId: string) => {
+    try {
+      await updateDoc(doc(db, 'shops', shopId, 'scheduler_tasks', taskId), {
+        status: 'pending',
+        startTime: null,
+        operator: null
+      });
+    } catch (err) {
+      console.error("Reset task error:", err);
+    }
+  };
+
   // Complete/Rollback task with ERP inventory synchronization
   const handleCompleteTask = async (
     taskId: string, 
@@ -427,7 +442,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
         const recipe = recipes.find(r => r.name === targetTask.name || r.name === (targetTask.name + '(半成品)'));
         if (recipe) {
           recipe.bom.forEach(bom => {
-            const mat = materials.find(m => m.id === bom.materialId);
+            const mat = materials.find(m => m.id === bom.materialId || m.name === bom.name);
             if (mat) {
               const deduction = bom.qty * targetTask.qty;
               batch.update(doc(db, 'shops', shopId, 'materials', mat.id), {
@@ -460,63 +475,54 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       });
 
       const recipe = recipes.find(r => r.name === targetTask.name || r.name === (targetTask.name + '(半成品)'));
+      const deductions = new Map<string, number>(); // materialId -> total qty to deduct
 
-      // Determine stock deconstruct options
-      let requiresShortageHandling = false;
-      let shortageMaterialId = '';
-      let shortageAmount = 0;
-
-      if (recipe && shortageOption === 'deconstruct') {
+      if (recipe) {
         recipe.bom.forEach(bom => {
-          const mat = materials.find(m => m.id === bom.materialId);
-          if (mat && mat.type === 'semi' && mat.qty < (bom.qty * targetTask.qty)) {
-            requiresShortageHandling = true;
-            shortageMaterialId = mat.id;
-            shortageAmount = (bom.qty * targetTask.qty) - mat.qty;
+          const mat = materials.find(m => m.id === bom.materialId || m.name === bom.name);
+          const requiredQty = bom.qty * targetTask.qty;
+
+          if (shortageOption === 'deconstruct' && mat && mat.type === 'semi' && mat.qty < requiredQty) {
+            // Shortage on this semi-finished product!
+            const availableQty = Math.max(0, mat.qty);
+            const shortage = requiredQty - availableQty;
+            deductions.set(mat.id, (deductions.get(mat.id) || 0) + availableQty);
+
+            // Deconstruct the shortage into sub-ingredients
+            const semiRecipe = recipes.find(r => 
+              r.name === mat.name || 
+              r.name === mat.name.replace('(半成品)', '') || 
+              (r.name + '(半成品)') === mat.name
+            );
+            if (semiRecipe && semiRecipe.bom.length > 0) {
+              semiRecipe.bom.forEach(subBom => {
+                const subMat = materials.find(m => m.id === subBom.materialId || m.name === subBom.name);
+                if (subMat) {
+                  const subDeduct = subBom.qty * shortage;
+                  deductions.set(subMat.id, (deductions.get(subMat.id) || 0) + subDeduct);
+                }
+              });
+            }
+          } else {
+            // Normal deduction (or negative stock)
+            const targetMatId = mat ? mat.id : bom.materialId;
+            deductions.set(targetMatId, (deductions.get(targetMatId) || 0) + requiredQty);
           }
         });
       }
 
       materials.forEach(mat => {
-        if (recipe) {
-          const bomMatch = recipe.bom.find(b => b.materialId === mat.id);
-          if (bomMatch) {
-            // Option A (deconstruct)
-            if (requiresShortageHandling && mat.id === shortageMaterialId) {
-              batch.update(doc(db, 'shops', shopId, 'materials', mat.id), { stock: 0 });
-              return;
-            }
-
-            if (requiresShortageHandling) {
-              const semiRecipe = recipes.find(r => r.name === bomMatch.name || r.name === (bomMatch.name + '(半成品)'));
-              if (semiRecipe) {
-                const semiBomMatch = semiRecipe.bom.find(sb => sb.materialId === mat.id);
-                if (semiBomMatch) {
-                  const normalDeduction = (recipe.bom.find(b => b.materialId === mat.id)?.qty || 0) * targetTask.qty;
-                  const deconstructedDeduction = semiBomMatch.qty * shortageAmount;
-                  batch.update(doc(db, 'shops', shopId, 'materials', mat.id), {
-                    stock: Math.max(0, parseFloat((mat.qty - (normalDeduction + deconstructedDeduction)).toFixed(2)))
-                  });
-                  return;
-                }
-              }
-            }
-
-            // Normal deduction
-            const deduction = bomMatch.qty * targetTask.qty;
-            const newQty = mat.qty - deduction;
-            const finalQty = mat.type === 'raw' ? Math.max(0, newQty) : newQty;
-            batch.update(doc(db, 'shops', shopId, 'materials', mat.id), {
-              stock: parseFloat(finalQty.toFixed(2))
-            });
-          }
-        }
-
-        // Increase stock for the produced product
+        const deductQty = deductions.get(mat.id) || 0;
         const isProducedSemi = mat.name === targetTask.name || mat.name === (targetTask.name + '(半成品)');
-        if (isProducedSemi) {
+        const addQty = isProducedSemi ? targetTask.qty : 0;
+
+        if (deductQty > 0 || addQty > 0) {
+          let newQty = mat.qty - deductQty + addQty;
+          if (mat.type === 'raw') {
+            newQty = Math.max(0, newQty);
+          }
           batch.update(doc(db, 'shops', shopId, 'materials', mat.id), {
-            stock: parseFloat((mat.qty + targetTask.qty).toFixed(2))
+            stock: parseFloat(newQty.toFixed(2))
           });
         }
       });
@@ -524,6 +530,18 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       await batch.commit();
     } catch (err) {
       console.error("Complete task error:", err);
+    }
+  };
+
+  // Mark a received purchase order as paid in finance
+  const handleMarkPurchasePaid = async (purchaseId: string) => {
+    try {
+      await updateDoc(doc(db, 'shops', shopId, 'scheduler_purchases', purchaseId), {
+        paid: true,
+        paidAt: new Date().toISOString()
+      });
+    } catch (err) {
+      console.error("Mark purchase paid error:", err);
     }
   };
 
@@ -663,12 +681,12 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
   };
 
   // Real-time integration: Import actual schedule from taidu-HR (default database)
-  const handleImportHRSchedules = async () => {
+  const handleImportHRSchedules = async (targetYear?: number, targetMonth?: number) => {
     try {
       const today = new Date();
-      const year = today.getFullYear();
-      const month = (today.getMonth() + 1).toString().padStart(2, '0');
-      const monthPrefix = `${year}-${month}`; // e.g. "2026-07"
+      const year = targetYear || today.getFullYear();
+      const monthNum = targetMonth !== undefined ? targetMonth : (today.getMonth() + 1);
+      const monthPrefix = `${year}-${monthNum.toString().padStart(2, '0')}`; // e.g. "2026-07"
       
       const q = query(
         collection(hrDb, 'schedules'),
@@ -681,15 +699,19 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       const importedRecords = snap.docs.map(docSnap => ({ id: docSnap.id, ...docSnap.data() }));
 
       if (importedRecords.length === 0) {
-        alert(`ℹ️ taidu-HR 資料庫中，${monthPrefix} 月份尚未排定已確認之班表。系統將自動導入模擬月份班表進行展示！`);
+        alert(`ℹ️ taidu-HR 資料庫中，${monthPrefix} 月份尚未排定已確認之班表。系統將自動導入該月模擬排班表！`);
         // Fallback simulated updates
         const batch = writeBatch(db);
+        const todayStr = today.toISOString().split('T')[0];
+        const dayOfMonth = today.getDate().toString().padStart(2, '0');
+        const simulatedDay = `${monthPrefix}-${dayOfMonth}`;
+
         const mockSchedules = [
-          { id: 'hr-mock-1', empName: '小王', date: `${monthPrefix}-28`, shift: '早班 (09:00 - 18:00)' },
-          { id: 'hr-mock-2', empName: '阿明', date: `${monthPrefix}-28`, shift: '早班 (09:00 - 18:00)' },
-          { id: 'hr-mock-3', empName: '小芳', date: `${monthPrefix}-28`, shift: '兼職 (12:00 - 18:00)' },
-          { id: 'hr-mock-4', empName: '小王', date: `${monthPrefix}-29`, shift: '早班 (09:00 - 18:00)' },
-          { id: 'hr-mock-5', empName: '阿明', date: `${monthPrefix}-29`, shift: '早班 (09:00 - 18:00)' }
+          { id: `hr-mock-1-${monthPrefix}`, empName: '小王', date: simulatedDay, shift: '早班 (09:00 - 18:00)' },
+          { id: `hr-mock-2-${monthPrefix}`, empName: '阿明', date: simulatedDay, shift: '早班 (09:00 - 18:00)' },
+          { id: `hr-mock-3-${monthPrefix}`, empName: '小芳', date: simulatedDay, shift: '兼職 (12:00 - 18:00)' },
+          { id: `hr-mock-4-${monthPrefix}`, empName: '小王', date: `${monthPrefix}-01`, shift: '早班 (09:00 - 18:00)' },
+          { id: `hr-mock-5-${monthPrefix}`, empName: '阿明', date: `${monthPrefix}-02`, shift: '早班 (09:00 - 18:00)' }
         ];
         mockSchedules.forEach(ms => {
           batch.set(doc(db, 'shops', shopId, 'scheduler_hr_schedules', ms.id), ms);
@@ -738,7 +760,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       });
 
       await batch.commit();
-      alert(`🎉 成功！已從 taidu-HR 資料庫讀取並儲存整個月份的排班，共匯入 ${importedRecords.length} 筆月班表資料。今日工時產能已同步完成。`);
+      alert(`🎉 成功！已從 taidu-HR 資料庫讀取並儲存 ${monthPrefix} 月份的排班，共匯入 ${importedRecords.length} 筆月班表資料。今日工時產能已同步完成。`);
     } catch (err: any) {
       console.error("HR schedules monthly import error:", err);
       alert(`⚠️ 班表載入失敗，錯誤原因: ${err.message || err}`);
@@ -972,17 +994,21 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 materials={materials}
                 vendors={vendors}
                 onStartTask={handleStartTask}
+                onResetTask={handleResetTask}
                 onCompleteTask={handleCompleteTask}
                 onReceivePurchase={handleReceivePurchase}
                 onConfirmDraftOrder={handleConfirmDraftOrder}
                 currentLoggedInEmpId={currentEmpId}
                 onAddPurchaseOrders={async (newPOs) => {
-                  newPOs.forEach(async (po) => {
+                  for (const po of newPOs) {
                     await setDoc(doc(db, 'shops', shopId, 'scheduler_purchases', po.id), po);
-                  });
+                  }
                 }}
                 onAddHistoricalOrder={async (newHist) => {
                   await setDoc(doc(db, 'shops', shopId, 'scheduler_history', newHist.id), newHist);
+                }}
+                onDeletePurchase={async (id) => {
+                  await deleteDoc(doc(db, 'shops', shopId, 'scheduler_purchases', id));
                 }}
                 onUpdateProgress={async (empId, recId, score) => {
                   await updateDoc(doc(db, 'shops', shopId, 'scheduler_employees', empId), {
@@ -1031,15 +1057,27 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                   }
                 }}
                 onUpdateMaterials={async (val) => {
-                  const list = typeof val === 'function' ? val(materials) : val;
-                  list.forEach(async (m) => {
-                    // Update main ERP material collections (vendors, minAlert, stock)
-                    await updateDoc(doc(db, 'shops', shopId, 'materials', m.id), {
-                      stock: m.qty,
-                      weeklyMinQty: m.weeklyMinQty,
-                      vendor: m.supplier
-                    });
-                  });
+                  try {
+                    const list = typeof val === 'function' ? val(materials) : val;
+                    for (const m of list) {
+                      const payload: any = {
+                        name: m.name || '',
+                        stock: m.qty ?? 0,
+                        unit: m.unit || '',
+                        cost: m.cost ?? 0,
+                        supplier: m.supplier || '',
+                        vendor: m.supplier || '',
+                        type: m.type || 'raw',
+                        minStockMode: m.minStockMode || 'fixed',
+                        fixedMinQty: m.fixedMinQty !== undefined ? m.fixedMinQty : 0,
+                        weeklyMinQty: m.weeklyMinQty || { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0 }
+                      };
+                      await setDoc(doc(db, 'shops', shopId, 'materials', m.id), payload, { merge: true });
+                    }
+                  } catch (err: any) {
+                    console.error("onUpdateMaterials failed:", err);
+                    alert("⚠️ 物料更新失敗！\n錯誤原因: " + (err.message || err));
+                  }
                 }}
                 onUpdateRecipes={async (val) => {
                   try {
@@ -1059,6 +1097,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                         name: r.name || '',
                         type: r.type === 'semi' ? 'half' : 'finished',
                         unlockThreshold: r.unlockThreshold || 50,
+                        operationTimeMinutes: r.operationTimeMinutes ?? 60,
                         sop: r.sop || [],
                         images: r.images || [],
                         items: (r.bom || []).map(b => ({
@@ -1076,25 +1115,38 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                   }
                 }}
                 onUpdateTasks={async (val) => {
-                  const list = typeof val === 'function' ? val(tasks) : val;
-                  list.forEach(async (t) => {
-                    await setDoc(doc(db, 'shops', shopId, 'scheduler_tasks', t.id), t);
-                  });
+                  try {
+                    const list = typeof val === 'function' ? val(tasks) : val;
+                    const newIds = new Set(list.map(t => t.id));
+                    // Remove tasks that are no longer in list
+                    for (const t of tasks) {
+                      if (!newIds.has(t.id)) {
+                        await deleteDoc(doc(db, 'shops', shopId, 'scheduler_tasks', t.id));
+                      }
+                    }
+                    // Save/update current tasks
+                    for (const t of list) {
+                      await setDoc(doc(db, 'shops', shopId, 'scheduler_tasks', t.id), t);
+                    }
+                  } catch (err: any) {
+                    console.error("onUpdateTasks failed:", err);
+                  }
                 }}
                 onUpdatePurchases={async (val) => {
                   const list = typeof val === 'function' ? val(purchases) : val;
-                  list.forEach(async (po) => {
+                  for (const po of list) {
                     await setDoc(doc(db, 'shops', shopId, 'scheduler_purchases', po.id), po);
-                  });
+                  }
                 }}
                 onUpdateHistory={async (val) => {
                   const list = typeof val === 'function' ? val(orderHistory) : val;
-                  list.forEach(async (h) => {
+                  for (const h of list) {
                     await setDoc(doc(db, 'shops', shopId, 'scheduler_history', h.id), h);
-                  });
+                  }
                 }}
                 onImportHR={handleImportHRSchedules}
                 hrSchedules={hrSchedules}
+                onMarkPurchasePaid={handleMarkPurchasePaid}
               />
             </motion.div>
           )}

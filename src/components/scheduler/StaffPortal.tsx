@@ -10,6 +10,7 @@ interface StaffPortalProps {
   materials: Material[];
   vendors: any[];
   onStartTask: (taskId: string, operatorName: string) => void;
+  onResetTask: (taskId: string) => void;
   onCompleteTask: (taskId: string, actualHours?: number, shortageOption?: 'deconstruct' | 'negative') => void;
   onReceivePurchase: (purchaseId: string, signedByName: string, actualQty?: number, actualCost?: number) => void;
   onConfirmDraftOrder: (draftIds: string[], confirmedByName: string, updatedDates: Record<string, string>) => void;
@@ -17,6 +18,7 @@ interface StaffPortalProps {
   onAddPurchaseOrders: (newPOs: PurchaseRecord[]) => void;
   onAddHistoricalOrder: (newHist: HistoricalOrder) => void;
   onUpdateProgress: (empId: string, recipeId: string, newProgress: number) => void;
+  onDeletePurchase?: (purchaseId: string) => void;
 }
 
 interface SuggestedOrderItem {
@@ -46,16 +48,19 @@ export default function StaffPortal({
   materials,
   vendors,
   onStartTask,
+  onResetTask,
   onCompleteTask,
   onReceivePurchase,
   onConfirmDraftOrder,
   currentLoggedInEmpId,
   onAddPurchaseOrders,
   onAddHistoricalOrder,
-  onUpdateProgress
+  onUpdateProgress,
+  onDeletePurchase
 }: StaffPortalProps) {
   const [activeTab, setActiveTab] = useState<'tasks' | 'training' | 'receiving' | 'ordering' | 'mentorship' | 'stock'>('tasks');
   const [expandedRecipeId, setExpandedRecipeId] = useState<string | null>(null);
+  const [receivingFilter, setReceivingFilter] = useState<'today' | 'all'>('today');
 
   // Suggested orders states
   const [orderItems, setOrderItems] = useState<SuggestedOrderItem[]>([]);
@@ -590,6 +595,20 @@ export default function StaffPortal({
                               </div>
                             )}
                             
+                            {onResetTask && (
+                              <button
+                                onClick={() => {
+                                  if (window.confirm(`是否確認暫停並重置任務「${task.name}」？任務將返回未領取待辦狀態。`)) {
+                                    onResetTask(task.id);
+                                  }
+                                }}
+                                className="px-3 py-2 bg-stone-100 text-stone-700 hover:bg-stone-200 rounded-xl text-xs font-bold transition border border-stone-200"
+                                title="暫停任務並還原至待領取狀態"
+                              >
+                                暫停/重置
+                              </button>
+                            )}
+
                             <button
                               onClick={() => triggerCompleteTask(task)}
                               className="px-4 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold hover:bg-emerald-700 shadow-sm transition active:scale-95"
@@ -751,109 +770,156 @@ export default function StaffPortal({
           {/* TAB 3: RECEIVING DELIVERIES */}
           {activeTab === 'receiving' && (
             <div className="flex flex-col gap-6">
-              {todayPurchases.filter(p => p.status === 'pending').length === 0 ? (
-                <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm py-16 text-center flex flex-col items-center justify-center gap-3 text-stone-400">
-                  <Truck className="w-12 h-12 text-stone-300 animate-bounce" />
-                  <p className="font-bold text-stone-600 text-sm">今日沒有待簽收的物料</p>
+              {/* Receiving Filter Switcher */}
+              <div className="flex items-center justify-between bg-white p-3 rounded-2xl border border-stone-200/60 shadow-sm">
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setReceivingFilter('today')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                      receivingFilter === 'today'
+                        ? 'bg-amber-500 text-white shadow-sm'
+                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                    }`}
+                  >
+                    📅 今日應收 ({purchases.filter(p => p.status === 'pending' && p.expectedDate === todayISOStr).length})
+                  </button>
+                  <button
+                    onClick={() => setReceivingFilter('all')}
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition ${
+                      receivingFilter === 'all'
+                        ? 'bg-amber-500 text-white shadow-sm'
+                        : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+                    }`}
+                  >
+                    📦 全部在途/待簽收 ({purchases.filter(p => p.status === 'pending').length})
+                  </button>
                 </div>
-              ) : (
-                (() => {
-                  const pendingPOs = todayPurchases.filter(p => p.status === 'pending');
-                  const suppliers = Array.from(new Set(pendingPOs.map(p => p.supplier))) as string[];
-                  
-                  return suppliers.map(supplierName => {
-                    const supplierPOs = pendingPOs.filter(p => p.supplier === supplierName);
-                    const isMonthly = supplierPOs[0]?.paymentMethod === 'monthly';
+                <span className="text-[11px] text-stone-400 font-medium hidden sm:inline">
+                  {receivingFilter === 'today' ? '只顯示預計今日抵達之物料' : '顯示包含過期未到或提前抵達之物料'}
+                </span>
+              </div>
 
-                    // Handler for receiving all items from this supplier
-                    const handleReceiveAllForSupplier = async () => {
-                      const totalEstimatedCost = supplierPOs.reduce((sum, po) => sum + po.cost, 0);
-                      const actualAmtStr = window.prompt(
-                        `是否確認一鍵簽收「${supplierName}」的所有待簽收物料？\n請輸入收到貨單的實際總金額（估計總金額為 $${totalEstimatedCost}）：`,
-                        String(totalEstimatedCost)
-                      );
-                      if (actualAmtStr === null) return; // Cancelled
-                      const actualTotalCost = Math.max(0, parseFloat(actualAmtStr) || 0);
+              {(() => {
+                const targetPOs = receivingFilter === 'today'
+                  ? purchases.filter(p => p.status === 'pending' && p.expectedDate === todayISOStr)
+                  : purchases.filter(p => p.status === 'pending');
 
-                      for (const po of supplierPOs) {
-                        const finalQty = receivedQtys[po.id] !== undefined ? receivedQtys[po.id] : po.qty;
-                        // Distribute total actual cost proportionally based on estimated cost ratio
-                        const proportion = totalEstimatedCost > 0 ? (po.cost / totalEstimatedCost) : (1 / supplierPOs.length);
-                        const finalCost = Math.round(actualTotalCost * proportion);
-                        await onReceivePurchase(po.id, currentEmployee.name, finalQty, finalCost);
-                      }
-                      alert(`🎉 已成功完成「${supplierName}」之所有物料簽收核銷！`);
-                    };
+                if (targetPOs.length === 0) {
+                  return (
+                    <div className="bg-white p-6 rounded-3xl border border-stone-200/60 shadow-sm py-16 text-center flex flex-col items-center justify-center gap-3 text-stone-400">
+                      <Truck className="w-12 h-12 text-stone-300 animate-bounce" />
+                      <p className="font-bold text-stone-600 text-sm">
+                        {receivingFilter === 'today' ? '今日沒有待簽收的物料' : '目前沒有任何在途待簽收的物料'}
+                      </p>
+                    </div>
+                  );
+                }
 
-                    return (
-                      <div key={supplierName} className="bg-white rounded-3xl border border-stone-200/60 shadow-sm overflow-hidden animate-fade-in">
-                        <div className="bg-stone-50 px-5 py-4 border-b border-stone-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                          <div className="flex items-center gap-2.5">
-                            <div className="p-2.5 bg-amber-100/60 text-amber-600 rounded-xl">
-                              <Truck className="w-4 h-4" />
-                            </div>
-                            <div>
-                              <h4 className="font-extrabold text-stone-800 text-sm">{supplierName}</h4>
-                              <p className="text-[10px] text-stone-400 mt-0.5">共有 {supplierPOs.length} 項待簽收物料</p>
-                            </div>
+                const suppliers = Array.from(new Set(targetPOs.map(p => p.supplier))) as string[];
+                
+                return suppliers.map(supplierName => {
+                  const supplierPOs = targetPOs.filter(p => p.supplier === supplierName);
+                  const isMonthly = supplierPOs[0]?.paymentMethod === 'monthly';
+
+                  // Handler for receiving all items from this supplier
+                  const handleReceiveAllForSupplier = async () => {
+                    const totalEstimatedCost = supplierPOs.reduce((sum, po) => sum + po.cost, 0);
+                    const actualAmtStr = window.prompt(
+                      `是否確認一鍵簽收「${supplierName}」的所有待簽收物料？\n請輸入收到貨單的實際總金額（估計總金額為 $${totalEstimatedCost}）：`,
+                      String(totalEstimatedCost)
+                    );
+                    if (actualAmtStr === null) return; // Cancelled
+                    const actualTotalCost = Math.max(0, parseFloat(actualAmtStr) || 0);
+
+                    for (const po of supplierPOs) {
+                      const finalQty = receivedQtys[po.id] !== undefined ? receivedQtys[po.id] : po.qty;
+                      // Distribute total actual cost proportionally based on estimated cost ratio
+                      const proportion = totalEstimatedCost > 0 ? (po.cost / totalEstimatedCost) : (1 / supplierPOs.length);
+                      const finalCost = Math.round(actualTotalCost * proportion);
+                      await onReceivePurchase(po.id, currentEmployee.name, finalQty, finalCost);
+                    }
+                    alert(`🎉 已成功完成「${supplierName}」之所有物料簽收核銷！`);
+                  };
+
+                  return (
+                    <div key={supplierName} className="bg-white rounded-3xl border border-stone-200/60 shadow-sm overflow-hidden animate-fade-in">
+                      <div className="bg-stone-50 px-5 py-4 border-b border-stone-200/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div className="flex items-center gap-2.5">
+                          <div className="p-2.5 bg-amber-100/60 text-amber-600 rounded-xl">
+                            <Truck className="w-4 h-4" />
                           </div>
-
-                          <div className="flex items-center gap-3">
-                            {/* Payment type badge */}
-                            <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-xl shadow-sm border ${
-                              isMonthly 
-                                ? 'bg-blue-50 text-blue-700 border-blue-100' 
-                                : 'bg-rose-50 text-rose-700 border-rose-100 animate-pulse'
-                            }`}>
-                              {isMonthly ? '💳 帳款模式: 月結' : '💵 警告: 現場付現 (現結)'}
-                            </span>
-                            
-                            <button
-                              onClick={handleReceiveAllForSupplier}
-                              className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition active:scale-95 flex items-center gap-1 cursor-pointer"
-                            >
-                              <BadgeCheck className="w-3.5 h-3.5" /> 一鍵簽收全部
-                            </button>
+                          <div>
+                            <h4 className="font-extrabold text-stone-800 text-sm">{supplierName}</h4>
+                            <p className="text-[10px] text-stone-400 mt-0.5">共有 {supplierPOs.length} 項待簽收物料</p>
                           </div>
                         </div>
 
-                        <div className="p-5 flex flex-col gap-4">
-                          {supplierPOs.map(purchase => {
-                            const currentInputQty = receivedQtys[purchase.id] !== undefined ? receivedQtys[purchase.id] : purchase.qty;
-                            return (
-                              <div
-                                key={purchase.id}
-                                className="p-4 bg-stone-50/40 hover:bg-stone-50 border border-stone-200/50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all"
-                              >
-                                <div className="flex items-center gap-3">
-                                  <div className="w-8 h-8 rounded-lg bg-stone-200/60 flex items-center justify-center font-bold text-xs text-stone-600">
-                                    {purchase.materialName[0]}
-                                  </div>
-                                  <div>
-                                    <h5 className="font-bold text-stone-800 text-xs">{purchase.materialName}</h5>
-                                    <p className="text-[10px] text-stone-400 mt-0.5">原叫貨數量: {purchase.qty} {purchase.materialName.includes('紙箱') || purchase.materialName.includes('盒') ? '個' : 'kg'}</p>
-                                  </div>
-                                </div>
+                        <div className="flex items-center gap-3">
+                          {/* Payment type badge */}
+                          <span className={`text-[10px] font-extrabold px-2.5 py-1 rounded-xl shadow-sm border ${
+                            isMonthly 
+                              ? 'bg-blue-50 text-blue-700 border-blue-100' 
+                              : 'bg-rose-50 text-rose-700 border-rose-100 animate-pulse'
+                          }`}>
+                            {isMonthly ? '💳 帳款模式: 月結' : '💵 警告: 現場付現 (現結)'}
+                          </span>
+                          
+                          <button
+                            onClick={handleReceiveAllForSupplier}
+                            className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-sm transition active:scale-95 flex items-center gap-1 cursor-pointer"
+                          >
+                            <BadgeCheck className="w-3.5 h-3.5" /> 一鍵簽收全部
+                          </button>
+                        </div>
+                      </div>
 
-                                <div className="flex items-center gap-4 self-end sm:self-auto">
-                                  {/* Qty edit input */}
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-[11px] text-stone-500 font-bold shrink-0">實際到貨:</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="0.01"
-                                      value={currentInputQty}
-                                      onChange={(e) => {
-                                        const val = parseFloat(e.target.value);
-                                        setReceivedQtys(prev => ({ ...prev, [purchase.id]: isNaN(val) ? 0 : val }));
-                                      }}
-                                      className="w-20 bg-white border border-stone-200 rounded-xl px-2 py-1 text-center text-xs font-mono font-bold text-stone-850 focus:border-amber-500 outline-none"
-                                    />
-                                    <span className="text-xs text-stone-400 font-bold">
-                                      {purchase.materialName.includes('紙箱') || purchase.materialName.includes('盒') ? '個' : 'kg'}
-                                    </span>
+                      <div className="p-5 flex flex-col gap-4">
+                        {supplierPOs.map(purchase => {
+                          const currentInputQty = receivedQtys[purchase.id] !== undefined ? receivedQtys[purchase.id] : purchase.qty;
+                          const matUnit = materials.find(m => m.name === purchase.materialName)?.unit || 
+                            (purchase.materialName.includes('紙箱') || purchase.materialName.includes('盒') ? '個' : 'kg');
+                          const isOverdue = purchase.expectedDate < todayISOStr;
+                          return (
+                            <div
+                              key={purchase.id}
+                              className="p-4 bg-stone-50/40 hover:bg-stone-50 border border-stone-200/50 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 transition-all"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-stone-200/60 flex items-center justify-center font-bold text-xs text-stone-600">
+                                  {purchase.materialName[0]}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2">
+                                    <h5 className="font-bold text-stone-800 text-xs">{purchase.materialName}</h5>
+                                    {isOverdue && (
+                                      <span className="text-[9px] font-bold bg-rose-50 text-rose-600 px-1.5 py-0.5 rounded border border-rose-200">
+                                        逾期 (原定 {purchase.expectedDate})
+                                      </span>
+                                    )}
                                   </div>
+                                  <p className="text-[10px] text-stone-400 mt-0.5">原叫貨數量: {purchase.qty} {matUnit} · 預計抵達: {purchase.expectedDate}</p>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-4 self-end sm:self-auto">
+                                {/* Qty edit input */}
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[11px] text-stone-500 font-bold shrink-0">實際到貨:</span>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={currentInputQty}
+                                    onChange={(e) => {
+                                      const val = parseFloat(e.target.value);
+                                      setReceivedQtys(prev => ({ ...prev, [purchase.id]: isNaN(val) ? 0 : val }));
+                                    }}
+                                    className="w-20 bg-white border border-stone-200 rounded-xl px-2 py-1 text-center text-xs font-mono font-bold text-stone-850 focus:border-amber-500 outline-none"
+                                  />
+                                  <span className="text-xs text-stone-400 font-bold">
+                                    {matUnit}
+                                  </span>
+                                </div>
 
                                   <button
                                     onClick={() => {
@@ -877,8 +943,7 @@ export default function StaffPortal({
                       </div>
                     );
                   });
-                })()
-              )}
+                })()}
             </div>
           )}
 
@@ -957,8 +1022,23 @@ export default function StaffPortal({
                             </div>
                             <div className="p-3 flex flex-col gap-2">
                               {supplierDrafts.map(draft => (
-                                <div key={draft.id} className="flex justify-between items-center text-[11px] py-0.5">
-                                  <span className="text-stone-700 font-semibold">{draft.materialName}</span>
+                                <div key={draft.id} className="flex justify-between items-center text-[11px] py-0.5 group">
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-stone-700 font-semibold">{draft.materialName}</span>
+                                    {onDeletePurchase && (
+                                      <button
+                                        onClick={async () => {
+                                          if (window.confirm(`是否取消並移除「${draft.materialName}」的叫貨草稿？`)) {
+                                            await onDeletePurchase(draft.id);
+                                          }
+                                        }}
+                                        className="text-stone-400 hover:text-rose-600 transition text-[10px] px-1 py-0.5 rounded hover:bg-rose-50 opacity-80 group-hover:opacity-100"
+                                        title="刪除此項草稿"
+                                      >
+                                        ✕ 刪除
+                                      </button>
+                                    )}
+                                  </div>
                                   <span className="text-stone-500">{draft.qty} {materials.find(m => m.name === draft.materialName)?.unit || ''} · ${draft.cost}</span>
                                 </div>
                               ))}
