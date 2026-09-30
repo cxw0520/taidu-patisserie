@@ -775,18 +775,14 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       setLoginError('找不到該人員資料！');
       return;
     }
-    const correctPassword = emp.password || '1234';
-    if (loginPasswordInput === correctPassword) {
-      setIsLoggedIn(true);
-      setLoginPasswordInput('');
-      setLoginError('');
-      if (!emp.canAccessAdmin) {
-        setCurrentView('staff');
-      } else {
-        setCurrentView('admin');
-      }
+    
+    setIsLoggedIn(true);
+    setLoginPasswordInput('');
+    setLoginError('');
+    if (!emp.canAccessAdmin) {
+      setCurrentView('staff');
     } else {
-      setLoginError('密碼輸入錯誤，請重新輸入！');
+      setCurrentView('admin');
     }
   };
 
@@ -796,21 +792,17 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
       setSwitchError('找不到該人員資料！');
       return;
     }
-    const correctPassword = emp.password || '1234';
-    if (switchPasswordInput === correctPassword) {
-      setCurrentEmpId(switchTargetEmpId);
-      setIsSwitchingAccount(false);
-      setSwitchPasswordInput('');
-      setSwitchError('');
-      if (!emp.canAccessAdmin) {
-        setCurrentView('staff');
-      } else {
-        setCurrentView('admin');
-      }
-      alert(`🎉 成功切換身份至「${emp.name}」！`);
+    
+    setCurrentEmpId(switchTargetEmpId);
+    setIsSwitchingAccount(false);
+    setSwitchPasswordInput('');
+    setSwitchError('');
+    if (!emp.canAccessAdmin) {
+      setCurrentView('staff');
     } else {
-      setSwitchError('密碼輸入錯誤，請重新輸入！');
+      setCurrentView('admin');
     }
+    alert(`🎉 成功切換身份至「${emp.name}」！`);
   };
 
   const currentEmployee = employees.find(e => e.id === currentEmpId) || employees[0];
@@ -833,7 +825,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
               <LogIn className="w-6 h-6" />
             </div>
             <h2 className="text-xl font-bold tracking-wide text-stone-800">生產與排班管理系統</h2>
-            <p className="text-xs text-stone-500">請選擇您的身分並輸入密碼以登入</p>
+            <p className="text-xs text-stone-500">請選擇您的身分以登入</p>
           </div>
 
           <div className="flex flex-col gap-4">
@@ -856,24 +848,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
               </select>
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-bold text-stone-500">登入密碼</label>
-              <input
-                type="password"
-                placeholder="請輸入密碼"
-                value={loginPasswordInput}
-                onChange={(e) => {
-                  setLoginPasswordInput(e.target.value);
-                  setLoginError('');
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleLoginSubmit();
-                  }
-                }}
-                className="w-full bg-white border border-stone-200 rounded-xl px-3 py-2.5 text-xs text-stone-800 outline-none focus:border-amber-500 font-mono"
-              />
-            </div>
+
 
             {loginError && (
               <p className="text-xs text-rose-600 font-bold bg-rose-50 border border-rose-100 p-2.5 rounded-xl flex items-center gap-1.5 animate-pulse">
@@ -1190,24 +1165,7 @@ export default function SchedulerApp({ onBack, shopId }: { onBack: () => void, s
                 </select>
               </div>
 
-              <div className="flex flex-col gap-1">
-                <label className="text-[11px] font-bold text-stone-400">輸入該帳號密碼</label>
-                <input
-                  type="password"
-                  placeholder="請輸入密碼"
-                  value={switchPasswordInput}
-                  onChange={(e) => {
-                    setSwitchPasswordInput(e.target.value);
-                    setSwitchError('');
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleSwitchSubmit();
-                    }
-                  }}
-                  className="bg-white border border-stone-200 rounded-xl px-3 py-2 text-xs text-stone-800 outline-none focus:border-amber-500 w-full font-mono"
-                />
-              </div>
+
 
               {switchError && (
                 <p className="text-xs text-rose-600 font-bold bg-rose-50 border border-rose-100 p-2 rounded-lg flex items-center gap-1 animate-pulse">
